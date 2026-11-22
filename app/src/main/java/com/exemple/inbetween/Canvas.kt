@@ -1216,21 +1216,6 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
     }
 
-    /** Selection tool, Displace on: tap a selected line to put a joint on it (or take hold of an existing joint), then drag it; the selection warps like an interpolation with guide joints. */
-    fun vecDisplaceDown(l: Layer, d: Offset) {
-        val sc = vecScope(cut, ed.refAll) ?: return
-        if (ed.vecSel.isEmpty() || !sc.sameCels(ed.vecSelCels)) { android.widget.Toast.makeText(vecCtx, "Displace: select lines or points first, then tap a selected line", android.widget.Toast.LENGTH_SHORT).show(); return }
-        val reach = 24f / vecZoom()
-        val joints = ed.vecDisplaceJoints
-        val near = joints.indices.minByOrNull { hypot(joints[it].x - d.x, joints[it].y - d.y) }
-        if (near != null && hypot(joints[near].x - d.x, joints[near].y - d.y) <= reach) { ed.vecDisplaceSelected = near; st.kind = 28; return }
-        val picked = ed.vecSel.map { vecKeyStroke(it) }.toSet().sorted().mapNotNull { sc.strokes.getOrNull(it) }
-        val hit = nearestGuideJointPoint(picked, d, reach) ?: return
-        ed.vecDisplaceJoints = joints + hit
-        ed.vecDisplaceSelected = ed.vecDisplaceJoints.lastIndex
-        st.kind = 28
-    }
-
     fun nearestGuideJointPoint(strokes: List<VectorStroke>, d: Offset, reach: Float): VectorGuideJoint? {
         var best: VectorGuideJoint? = null
         var bestD = reach
@@ -1256,6 +1241,21 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
         }
         return best
+    }
+
+    /** Selection tool, Displace on: tap a selected line to put a joint on it (or take hold of an existing joint), then drag it; the selection warps like an interpolation with guide joints. */
+    fun vecDisplaceDown(l: Layer, d: Offset) {
+        val sc = vecScope(cut, ed.refAll) ?: return
+        if (ed.vecSel.isEmpty() || !sc.sameCels(ed.vecSelCels)) { android.widget.Toast.makeText(vecCtx, "Displace: select lines or points first, then tap a selected line", android.widget.Toast.LENGTH_SHORT).show(); return }
+        val reach = 24f / vecZoom()
+        val joints = ed.vecDisplaceJoints
+        val near = joints.indices.minByOrNull { hypot(joints[it].x - d.x, joints[it].y - d.y) }
+        if (near != null && hypot(joints[near].x - d.x, joints[near].y - d.y) <= reach) { ed.vecDisplaceSelected = near; st.kind = 28; return }
+        val picked = ed.vecSel.map { vecKeyStroke(it) }.toSet().sorted().mapNotNull { sc.strokes.getOrNull(it) }
+        val hit = nearestGuideJointPoint(picked, d, reach) ?: return
+        ed.vecDisplaceJoints = joints + hit
+        ed.vecDisplaceSelected = ed.vecDisplaceJoints.lastIndex
+        st.kind = 28
     }
 
     fun guideSourceFor(layer: Layer): Pair<Cel, Cel>? {

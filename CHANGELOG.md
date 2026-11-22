@@ -1,3 +1,13 @@
+## 2026-11-22 — Compile fix: Displace helper declared before use
+- AI model: Claude
+- Category: Fixed / Build (source code)
+- Build log (GitHub Actions, `:app:compileReleaseKotlin`): the only error was `Canvas.kt:1228:19 Unresolved reference 'nearestGuideJointPoint'`.
+- Cause: `nearestGuideJointPoint` is a local function inside `DrawingCanvas`, and Kotlin local functions must be declared before their first use. It was declared after `vecDisplaceDown`, which calls it.
+- Fix: moved the function declaration, unchanged, to just above `vecDisplaceDown`. No logic change; the later use in the guide-joint gesture code was already after the declaration.
+- Files: `app/src/main/java/com/exemple/inbetween/Canvas.kt`, `CHANGELOG.md`. No WhatsNew note (nothing user-visible).
+- Protected files untouched: `.github/workflows/**`, Gradle files, `gradle.properties`, manifest, signing.
+- Validation: diff against the uploaded source shows only the block move. Not compiled here (no Kotlin compiler or Android SDK available); the next GitHub build must be checked.
+
 ## 2026-11-22 — Interpolation drag bar: Joints, Fixed, Shift; selection tool: Displace
 - AI model: Claude
 - Category: Added / Changed / Vector interpolation drag and selection tool
