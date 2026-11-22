@@ -38,10 +38,10 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
-            65, "2026-11-22", "Ghost anchors land on the matching curve features",
+            65, "2026-11-22", "No more automatic in-between anchors on open lines",
             listOf(
-                "When you trace a ghost, every intermediate anchor of the ghost (including ones that were themselves inherited from an earlier trace) now goes to the matching curve feature of your new line, in order, instead of being spread by proportion along the line. For example, ghost anchor 2 now lands on the corresponding bend of the traced line rather than beside it.",
-                "The anchors are matched together, so one anchor can no longer take a feature another one needed. Anchors with no feature close enough keep their proportional position. No .inb format change. Full Android build and tablet behavior remain unverified."
+                "Open lines now get automatic anchors only on their two end points. Anchors between the ends are no longer detected automatically; they are inherited from the ghost when you trace it, or placed by you.",
+                "Automatic in-between anchors that older drawings already contain are removed the next time that line is refreshed (for example after a merge). Closed lines are unchanged. No .inb format change. Full Android build and tablet behavior remain unverified."
             )
         ),
         ReleaseNote(

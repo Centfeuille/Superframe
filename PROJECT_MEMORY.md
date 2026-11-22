@@ -701,7 +701,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `CHANGELOG.md`, `PROJECT_MEMORY.md`.
 - Validation: compiled the actual `AutoAnchors.kt` with minimal model stubs and ran a focused Kotlin geometry harness for a partial trace with previously claimed anchors; verified remaining anchor order and projected positions; the same regression assertion fails against the pre-fix implementation (first inherited feature at 64.7 px instead of the correctly projected 55.7 px). Reviewed the complete source diff and ZIP integrity. No Android Gradle build or tablet runtime test has been performed.
 
-## 2026-11-22 — Ghost interior anchors map to the traced line's features (see CHANGELOG)
-- `AutoAnchors.inherit`: a ghost interior anchor is a curve feature when it is `auto` OR lies on a feature detected on the ghost (`isFeatureAnchor`, tolerance 4 % of ghost length). Inherited anchors are stored `auto = false`, so the geometric test is what keeps later generations of traces feature-matched. For open lines all feature anchors are assigned together by `matchFeatures` (order-preserving DP, minimum total progress shift, max shift 25 %); unmatched anchors use the projected / proportional position. Closed lines still use the greedy per-anchor match. No `.inb` change.
-- Unverified: not compiled (no Kotlin compiler available); logic checked only through a Python port on screenshot-derived coordinates.
+## 2026-11-22 — Open lines: automatic anchors only on the end points (see CHANGELOG)
+- `AutoAnchors.targets` returns only the two end points for open lines; closed lines still get detected features. This supersedes every earlier note above that describes automatic curve-tip / feature anchors on open lines: in-between anchors are now only inherited from a ghost (`AutoAnchors.inherit`, projected or proportional placement) or set by the user. Automatic in-between anchors stored in older files are dropped when the line is next refreshed. No `.inb` change.
+- Unverified: not compiled, not run on a device.
 
