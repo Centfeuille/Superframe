@@ -203,9 +203,7 @@ fun prepareReferenceImage(location: String, cutW: Int, cutH: Int): PreparedRefer
     return PreparedReferenceImage(location, iw, ih, floatArrayOf(scale, 0f, x, 0f, scale, y, 0f, 0f, 1f))
 }
 
-class Cut(name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = System.currentTimeMillis()) {
-    /** Renamable from the main menu (the new name is written to the Cut's file by a save). */
-    var name by mutableStateOf(name)
+class Cut(val name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = System.currentTimeMillis()) {
     private var storedFps by mutableIntStateOf(fps)
     var fps: Int
         get() = storedFps
@@ -754,11 +752,6 @@ class CutDraft(val cut: Cut) {
     var h by mutableIntStateOf(cut.h)
     var dpi by mutableIntStateOf(cut.dpi)
     var fps by mutableIntStateOf(cut.fps)
-    /** Where the dragged frame's left / top edge sits (document px, preview only: the page origin stays the top-left corner of the new frame). */
-    var ox by mutableIntStateOf(0)
-    var oy by mutableIntStateOf(0)
-    /** Stretch the image: confirming scales the whole drawing with the frame ([stretchCutContent]); off = the drawing keeps its place relative to the dragged edge. */
-    var stretch by mutableStateOf(false)
     val aspect get() = w / h.toFloat()
     private var lockedRatio = cut.aspect
     fun changeW(v: Int) { val n = v.coerceIn(16, 8192); if (cut.lockW) return; if (cut.lockA) { if (cut.lockH) return; w = n; h = (n / lockedRatio).roundToInt().coerceIn(16, 8192) } else w = n }
@@ -766,12 +759,9 @@ class CutDraft(val cut: Cut) {
     fun changeAspect(a: Float) { if (cut.lockA || a < 0.1f || (cut.lockW && cut.lockH)) return; if (cut.lockW) h = (w / a).roundToInt().coerceIn(16, 8192) else w = (h * a).roundToInt().coerceIn(16, 8192) }
     fun changeDpi(v: Int) { if (!cut.lockDpi) dpi = v.coerceIn(1, 1200) }
     fun changeFps(v: Int) { if (!cut.lockFps) fps = v.coerceIn(1, 120) }
-    fun reset() { if (!cut.lockW) w = cut.orig[0]; if (!cut.lockH) h = cut.orig[1]; if (!cut.lockDpi) dpi = cut.orig[2]; if (!cut.lockFps) fps = cut.orig[3]; ox = 0; oy = 0 }
+    fun reset() { if (!cut.lockW) w = cut.orig[0]; if (!cut.lockH) h = cut.orig[1]; if (!cut.lockDpi) dpi = cut.orig[2]; if (!cut.lockFps) fps = cut.orig[3] }
     /** Writes the pending values to the Cut. */
-    fun apply() {
-        if (stretch && (w != cut.w || h != cut.h)) stretchCutContent(cut, cut.w, cut.h, w, h) // needs the old size, so before it is replaced
-        cut.w = w; cut.h = h; cut.dpi = dpi; cut.fps = fps; cut.aspect = w / h.toFloat()
-    }
+    fun apply() { cut.w = w; cut.h = h; cut.dpi = dpi; cut.fps = fps; cut.aspect = w / h.toFloat() }
 }
 
 /** A named, saveable set of colors (palettes.json in the app files directory). */
@@ -782,8 +772,6 @@ class Palette(val id: Long, name: String, colors: List<Color> = emptyList()) {
 
 class Editor : ViewModel() {
     val cuts = mutableStateListOf<Cut>()
-    /** Main-menu folders, which Cut is in which folder, and the list / grid layout (library.json). */
-    val library = CutLibrary()
     var open by mutableStateOf<Cut?>(null)
 
     /** 0 brush, 1 eraser, 2 select, 3 fill, 4 line, 5 eyedropper */
@@ -853,20 +841,6 @@ class Editor : ViewModel() {
     var gridStep by mutableIntStateOf(30)   // document px
     var flipH by mutableStateOf(false)
     var flipV by mutableStateOf(false)
-    /**
-     * Sets the canvas invert (mirror) about the centre of the VISIBLE view, not about the centre of the page: the point of the
-     * drawing in the middle of the screen stays in the middle, whatever the zoom, rotation and pan. The view offset is moved to compensate
-     * (the zoom factor drops out of the maths, so no screen size is needed).
-     */
-    fun setFlip(h: Boolean, v: Boolean) {
-        val a = Math.toRadians(vRot.toDouble()); val c = kotlin.math.cos(a).toFloat(); val s = kotlin.math.sin(a).toFloat()
-        fun turn(p: Offset, sin: Float) = Offset(p.x * c - p.y * sin, p.x * sin + p.y * c)
-        val q = turn(Offset(-vOff.x, -vOff.y), -s) // the page centre relative to the screen centre, un-rotated
-        val q2 = Offset(if (h != flipH) -q.x else q.x, if (v != flipV) -q.y else q.y)
-        val r = turn(q2, s)
-        vOff = Offset(-r.x, -r.y)
-        flipH = h; flipV = v
-    }
     var viewOpt by mutableIntStateOf(0)     // 0 none, 1 grid options, 2 invert options, 3 bleed options
     var bleedScope by mutableIntStateOf(1)  // "Delete bleed ink" target: 0 current frame, 1 current layer, 2 whole Cut
     var camEdit by mutableStateOf(false)    // move / scale the camera frame on the canvas
@@ -1020,6 +994,12 @@ class Editor : ViewModel() {
     var vecMergeSharp by mutableFloatStateOf(0.7f)      // Merge corner sharpness 0..1 stamped on the lines it joins (0 = the usual rounded turns)
     var vecDocZoom = 1f                                 // screen px per document px of the vector canvas, kept up to date by the canvas (for the selection-tool Merge button)
     var vecMerge by mutableStateOf(false)               // vector draw: a new line whose end touches an existing line becomes attached to it (one stroke)
+    var vecAutoAnchor by mutableStateOf(true)           // vector draw: a new line gets anchors at its ends and curve tips; merged lines keep theirs up to date
+    var vecTipSens by mutableFloatStateOf(0.5f)         // how gentle a turn counts as a curve tip, 0..1
+    var vecAnchorOpen by mutableStateOf(false)          // the auto anchor options panel
+    var vecGhost by mutableStateOf(false)               // line order onion skin: the next line of the previous / next keyframe shimmers; a new line takes its anchors
+    var vecGhostNext by mutableStateOf(false)           // the ghost comes from the next keyframe instead of the previous one
+    var vecGhostSkip by mutableIntStateOf(0)            // skip to the next untraced line (counts round)
     var vecBrush by mutableIntStateOf(0)                // point edit brush: 0 off, 1 Shift, 2 Smoothen, 3 Distort
     var vecBrushRadius by mutableFloatStateOf(40f)      // point edit brush radius, document px
     var vecBrushStrength by mutableFloatStateOf(0.5f)   // point edit brush strength 0..1
@@ -1060,7 +1040,6 @@ class Editor : ViewModel() {
         BrushAssets.init(dir); loadBrushes(dir); loadPalettes(dir)
         val t1 = android.os.SystemClock.elapsedRealtime()
         cuts.addAll(Store.load(dir, context))
-        library.load(dir)
         val t2 = android.os.SystemClock.elapsedRealtime()
         // Thumbnails replay strokes (18.7 s for 7 cuts in the report): done in the background, the list shows them as they arrive.
         val toThumb = cuts.toList()
@@ -1075,5 +1054,26 @@ class Editor : ViewModel() {
         xform?.let { it.entry.count = Int.MAX_VALUE; it.entry.pinned = false }; xform = null; sel = null // drop any pending transform (tiles rebuild)
         open?.let { it.playing = false; Store.save(dir, it); Recovery.afterSave(dir, it); it.refreshThumb() }; open = null
     }
-    fun remove(c: Cut, dir: File) { cuts.remove(c); File(dir, "cut_${c.id}.inb").delete(); Recovery.clear(dir, c.id); library.forget(c.id, dir) }
+    fun remove(c: Cut, dir: File) { cuts.remove(c); File(dir, "cut_${c.id}.inb").delete(); Recovery.clear(dir, c.id) }
 }
+
+/**
+ * The number the timeline shows for the frame at [index]. Frames are numbered by drawing: a clone (a frame that shares its drawing with an earlier frame)
+ * has the number of the frame it copies, and the next frame with a new drawing takes the next number, so a clone does not use one up.
+ */
+fun drawingNumber(layer: Layer, index: Int): Int {
+    val cels = layer.cels
+    if (index !in cels.indices) return index + 1
+    val seen = java.util.Collections.newSetFromMap(IdentityHashMap<Any, Boolean>())
+    val target = cels[index].strokes
+    var n = 0
+    for (i in 0..index) {
+        val s = cels[i].strokes
+        if (seen.add(s)) n++
+        if (s === target) return n
+    }
+    return n
+}
+
+/** The timeline label of the frame at [index]: its own name (an inbetween such as 3a) or its [drawingNumber]. */
+fun frameLabel(layer: Layer, index: Int): String = layer.cels.getOrNull(index)?.inbetweenName?.ifBlank { null } ?: drawingNumber(layer, index).toString()

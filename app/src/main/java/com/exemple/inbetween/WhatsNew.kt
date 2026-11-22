@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,46 +38,24 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
-            56, "2026-11-20", "Main menu: folders, rename, grid layout; Invert around the view centre",
+            53, "2026-11-20", "Auto anchors and the line ghost",
             listOf(
-                "Folders in the main menu: + New folder creates one (and asks for its name). Tap a folder to fold or unfold it; its menu renames it or deletes it (the cuts inside go back to the top level, nothing is deleted).",
-                "Cuts can be renamed (Rename button, or the menu on a grid tile). Long-press a cut and drag it onto a folder to put it in, or onto the free area to take it out.",
-                "Layout: switch between the vertical list and a compact grid with five cuts per line. The choice, the folders and which cut is in which folder are remembered.",
-                "Invert canvas now mirrors around the centre of what you are looking at, so the part of the drawing in the middle of the screen stays there at any zoom or pan (it used to mirror around the centre of the page).",
-                "Not compiled or tested on a device."
+                "Auto anchors (new anchor icon in the vector draw bar, on by default): a new line gets numbered anchors at its two ends and at the tips of its curves. The Tune button next to it sets how gentle a turn counts as a tip.",
+                "Merging keeps them up to date: when a line is merged into another (drawing, or Merge points) or points are deleted, its automatic anchors are redone. A join that is no longer an end or tip loses its anchor, new ends get one, and the points that stay keep their numbers. Anchors you set by hand are never touched.",
+                "Ghost (sparkle icon): the next line of the previous keyframe shimmers on the canvas with its numbered anchors. Draw over it and your line takes its anchor numbers, placed along your line in the same order (drawn the other way round is fine), so it matches that line when you interpolate. The line you trace disappears from the ghost and the next one shows. A line you draw closer to another ghost line is matched with that one, and the skip button shows a different one.",
+                "The arrow icon next to the ghost switches it between the previous and the next keyframe. If the ghost line has no anchors yet, it gets automatic ones first (its own undo step).",
+                "A line drawn without the ghost gets numbers that the neighbouring keyframes do not use, so it never pairs with a line it was not meant to.",
+                "Saved files stay compatible: automatic anchors are stored as extra entries that older versions ignore. Not compiled or tested on a device."
             )
         ),
         ReleaseNote(
-            55, "2026-11-20", "Cut settings: handles on every side and corner, Stretch the image",
+            52, "2026-11-20", "Keypad for every number, clone numbering, system bars stay hidden",
             listOf(
-                "The Cut frame in Cut settings now has working handles on all four corners and all four sides, not only the bottom-right ones. Dragging a left or top handle keeps the opposite edge where it is; the drawing keeps its place relative to the edge you drag.",
-                "New Stretch the image switch: when on, Confirm scales the whole drawing with the frame (drawings are resampled once; vector lines, reference images, camera keys and frame, folder and media offsets are scaled too). It cannot be undone. Perspective guides are not scaled.",
-                "Not compiled or tested on a device."
-            )
-        ),
-        ReleaseNote(
-            54, "2026-11-20", "Perspective: vanishing-point mode uses only the vanishing-point rays",
-            listOf(
-                "With vanishing-point magnetism on, strokes snap only to the vanishing-point rays (straight or curvilinear). The lines parallel to the horizon and to the perpendicular guide are no longer offered; they belong to guide-line magnetism.",
-                "If the direction you draw has no vanishing point of its own (for example vertical strokes with only horizon vanishing points), the rays of the family that has one are used.",
-                "Not compiled or tested on a device."
-            )
-        ),
-        ReleaseNote(
-            53, "2026-11-20", "Perspective: vanishing-point magnet, longer guides, ray count; pinch reset opt-out",
-            listOf(
-                "Vanishing-point magnetism: the vanishing-point rays (straight and curvilinear) are chosen first again. A line parallel to the horizon or to the perpendicular guide is only used when your stroke is clearly closer to that direction than to a ray, or when there is no ray for it (for example verticals in two-point perspective).",
-                "The horizon / perpendicular guide lines, the straight rays and the camera-view cone now reach ten times further, so they no longer end when you zoom out.",
-                "The ray-count button now also works with straight rays: pick how many rays go through each vanishing point (8 to 48). Existing projects show 24 evenly spaced straight rays instead of the old fixed 30.",
-                "Canvas reset: if you bring two fingers close together (the canvas turns purple) you can now cancel the reset by spreading the fingers apart again before lifting them.",
-                "Not compiled or tested on a device."
-            )
-        ),
-        ReleaseNote(
-            52, "2026-11-20", "Perspective: lines parallel to the horizon and the perpendicular guide",
-            listOf(
-                "Strokes drawn parallel to the horizon or to the perpendicular guide no longer get pulled onto a vanishing-point ray (or onto the horizon itself). They now snap to a straight line parallel to that guide through where the stroke starts.",
-                "These parallels compete with the vanishing-point rays in Vanishing-point mode, chosen by the direction you draw. Guide-line mode snaps to the same parallels instead of the guide line through the centre.",
+                "Cloned frames show the number of the frame they copy on the timeline. Frames are numbered by drawing, so a clone does not use up a number: the next new drawing takes the next one. Named inbetweens (3a...) keep their names, and Set inbetweens counts from the same numbers.",
+                "Every number you type now uses the keypad of the frame-length chronometer instead of the Android keyboard: cut width, height, aspect, DPI and frame rate, the new cut form, folder transformation values, the perspective lens (FOV and focal length) and the number next to the sliders. Names are still typed with the normal keyboard.",
+                "The keypad adds + , − , × and ÷ (and ± and a decimal point where the number can have one): tap a value, tap × then 2, then OK. The line shows the sum and a live \"= result\"; = collapses it.",
+                "The number opens selected as a whole: tapping a digit replaces it at once, tapping an operator continues from it. Tap the number to select it again.",
+                "Dialogs no longer bring the Android status and navigation bars back, and they stay hidden after the keyboard closes.",
                 "Not compiled or tested on a device."
             )
         ),

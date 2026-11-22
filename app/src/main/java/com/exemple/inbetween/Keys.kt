@@ -339,7 +339,7 @@ fun handleKey(ed: Editor, cut: Cut, e: KeyEvent, act: KeyActions): Boolean {
         KeyAction.RESET_VIEW -> ed.resetView()
         KeyAction.FULLSCREEN -> ed.fullscreen = !ed.fullscreen
         KeyAction.ONION -> ed.onion = !ed.onion
-        KeyAction.MIRROR -> { if (ed.flipH || ed.flipV) ed.setFlip(false, false) else ed.setFlip(true, false) }
+        KeyAction.MIRROR -> { if (ed.flipH || ed.flipV) { ed.flipH = false; ed.flipV = false } else ed.flipH = true }
         KeyAction.GRID_DEPTH -> ed.gridFront = !ed.gridFront
         KeyAction.REFERENCE_VISIBILITY -> {
             val refs = cut.layers.filter { it.kind == 5 }

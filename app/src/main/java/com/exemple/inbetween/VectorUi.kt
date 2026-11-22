@@ -24,6 +24,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.NavigateNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Anchor
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -55,7 +60,6 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -157,6 +161,15 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             Text(if (ed.vecMergeSharp < 0.01f) "Round" else "${(ed.vecMergeSharp * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
         }
     }
+    if ((drawBar || lineBar) && ed.vecAnchorOpen) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 280.dp, max = 360.dp)) {
+        Text("Auto anchors", fontSize = 11.sp, color = Color(0xFFB8B8C4))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Curve tips", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
+            Slider(value = ed.vecTipSens, onValueChange = { ed.vecTipSens = (it * 20f).roundToInt() / 20f }, valueRange = 0f..1f, modifier = Modifier.weight(1f).height(32.dp))
+            Text(if (ed.vecTipSens < 0.01f) "Sharp only" else "${(ed.vecTipSens * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
+        }
+        Text("Ends and sharp turns get anchors. With the ghost on, a line you draw over it takes the ghost line's numbers instead, so it matches that line when interpolating.", fontSize = 11.sp, color = Color(0xFFB8B8C4))
+    }
     Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
         if (pointBar) Row(verticalAlignment = Alignment.CenterVertically) {
             // the regular selection widgets (as in SelectionBar), working on the vector selection
@@ -174,6 +187,13 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (drawBar || lineBar) {
                 VIconBtn(Icons.Filled.MergeType, on = ed.vecMerge, tip = if (ed.vecMerge) "Merge: on. Lines you draw join other lines within the Merge radius (tap to turn off)" else "Merge: off. Tap to join lines you draw to other lines within the Merge radius") { ed.vecMerge = !ed.vecMerge }
+                VIconBtn(Icons.Filled.Anchor, on = ed.vecAutoAnchor, tip = if (ed.vecAutoAnchor) "Auto anchors: on. A new line gets numbered anchors at its ends and curve tips, and keeps them up to date when lines merge (tap to turn off)" else "Auto anchors: off. Tap to give new lines anchors at their ends and curve tips") { ed.vecAutoAnchor = !ed.vecAutoAnchor }
+                VIconBtn(Icons.Filled.AutoAwesome, on = ed.vecGhost, tip = if (ed.vecGhost) "Ghost: on. The next line of the ${if (ed.vecGhostNext) "next" else "previous"} keyframe shimmers; draw over it and your line takes its anchors, so the two match (tap to turn off)" else "Ghost: off. Tap to show the next line to trace from the previous or next keyframe") { ed.vecGhost = !ed.vecGhost; ed.vecGhostSkip = 0 }
+                if (ed.vecGhost) {
+                    VIconBtn(if (ed.vecGhostNext) Icons.Filled.SkipNext else Icons.Filled.SkipPrevious, tip = if (ed.vecGhostNext) "Ghost from the NEXT keyframe (tap for the previous one)" else "Ghost from the PREVIOUS keyframe (tap for the next one)") { ed.vecGhostNext = !ed.vecGhostNext; ed.vecGhostSkip = 0 }
+                    VIconBtn(Icons.Filled.NavigateNext, tip = "Skip: show the next line to trace instead (a line you draw over another ghost line is matched with that one anyway)") { ed.vecGhostSkip++ }
+                }
+                VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
             } else if (pointBar) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
@@ -191,7 +211,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.Deselect, enabled = has, tip = "Deselect") { ed.vecSel = emptySet() }
                 VIconBtn(Icons.Filled.Delete, enabled = has, tip = "Delete the selected points") {
                     if (sc != null) {
-                        val parts = sc.perCel.indices.map { c -> val lk = sc.localKeys(sel, c); if (lk.isEmpty()) sc.perCel[c] else VectorEdit.delete(sc.perCel[c], lk) }
+                        val parts = sc.perCel.indices.map { c -> val lk = sc.localKeys(sel, c); if (lk.isEmpty()) sc.perCel[c] else VectorEdit.delete(sc.perCel[c], lk).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens) else it } }
                         ed.vecSel = emptySet()
                         applyScope(cut, sc, parts)
                         ed.vecSelCels = vecScope(cut, ed.refAll)?.cels ?: emptyList()
@@ -203,7 +223,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         val tol = ed.vecMergeRadius / ed.vecDocZoom.coerceAtLeast(0.0001f)
                         val parts = sc.perCel.indices.map { c ->
                             val lk = sc.localKeys(sel, c)
-                            if (lk.isEmpty()) sc.perCel[c] else VectorMerge.mergePoints(sc.perCel[c], lk, tol, ed.vecMergeSharp) ?: sc.perCel[c]
+                            if (lk.isEmpty()) sc.perCel[c] else (VectorMerge.mergePoints(sc.perCel[c], lk, tol, ed.vecMergeSharp) ?: sc.perCel[c]).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens) else it }
                         }
                         if (parts.indices.any { parts[it] !== sc.perCel[it] }) {
                             ed.vecSel = emptySet()

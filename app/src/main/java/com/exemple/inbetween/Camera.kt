@@ -286,31 +286,6 @@ class Persp(horizon: Float, center: Float) {
         return arcs
     }
 
-    private class ArcCacheEntry(val key: FloatArray, val arcs: List<PerspArc>)
-    private val arcCache = arrayOfNulls<ArcCacheEntry>(2)
-
-    /**
-     * Draw-path version of [curvilinearArcs]. The overlay redraws on every pan / zoom / hover frame, and building
-     * the fan (up to 48 rays x 49 steps of trig per VP pair, plus the lists) each time is wasteful, so the result is
-     * kept until something it depends on changes. The key reads the same state [curvilinearArcs] reads (so the draw
-     * scope still observes it). UI thread only (the stroke path keeps its own per-stroke copy in
-     * [PerspectiveMagnetState.cachedArcs]). The returned list is shared: never modify it.
-     */
-    fun curvilinearArcsCached(kind: Int, steps: Int = 48, span: Float = 4096f): List<PerspArc> {
-        val g = guide(kind)
-        if (!g.curvilinear) return emptyList()
-        val key = FloatArray(9 + vps.size * 2)
-        key[0] = kind.toFloat(); key[1] = steps.toFloat(); key[2] = span; key[3] = center; key[4] = horizon
-        key[5] = horizonGuide.rotation; key[6] = perpendicularGuide.rotation
-        key[7] = g.curvatureStrength; key[8] = g.curvilinearRayCount.toFloat()
-        for (i in vps.indices) { key[9 + i * 2] = vps[i].kind.toFloat(); key[10 + i * 2] = vps[i].t }
-        val hit = arcCache[kind]
-        if (hit != null && hit.key.contentEquals(key)) return hit.arcs
-        val arcs = curvilinearArcs(kind, steps, span)
-        arcCache[kind] = ArcCacheEntry(key, arcs)
-        return arcs
-    }
-
     private fun projectToPolyline(points: List<Offset>, point: Offset): Offset {
         if (points.size < 2) return point
         var best = points.first(); var bestD = Float.MAX_VALUE
@@ -447,10 +422,7 @@ class Persp(horizon: Float, center: Float) {
             }
 
             val anyVp = vps.isNotEmpty()
-            // Vanishing-point mode uses ONLY the vanishing-point rays (the horizon / perpendicular parallels belong to
-            // guide-line mode). The intended family is used when it has a VP; otherwise the family that has one.
-            val kindsWithVp = (0..1).filter { k -> vps.any { it.kind == k } }
-            val candidateKinds = if (vanishingPointMagnet && anyVp) (if (preferredKind in kindsWithVp) listOf(preferredKind) else kindsWithVp) else listOf(0, 1)
+            val candidateKinds = if (vanishingPointMagnet && anyVp) listOf(preferredKind) else listOf(0, 1)
             for (kind in candidateKinds) {
                 if (vanishingPointMagnet && anyVp) {
                     if (guide(kind).curvilinear) {
@@ -485,19 +457,18 @@ class Persp(horizon: Float, center: Float) {
                         }
                     }
                 } else if (!vanishingPointMagnet || !anyVp) {
-                    // Guide mode: a straight line PARALLEL to the guide axis through the stroke's start
-                    // (the axis itself when the stroke starts on it), not the axis through the optical centre.
                     val direction = axisDir(kind)
-                    val projected = projectToLine(point, anchor, direction)
-                    consider(kind, -1, -1, projected, direction, linePoint = anchor, lineDirection = direction)
+                    val projected = projectToLine(point, origin, direction)
+                    consider(kind, -1, -1, projected, direction, linePoint = origin, lineDirection = direction)
                 }
             }
+
             // A visible perspective layer must never leave a brush stroke as freehand. If VP
             // mode is selected but no VP has been placed, use the guide axes until one exists.
             if (bestScore == Float.MAX_VALUE) {
                 val direction = axisDir(0)
-                bestProjection = projectToLine(point, anchor, direction)
-                bestKind = 0; bestLinePoint = anchor; bestLineDirection = direction
+                bestProjection = projectToLine(point, origin, direction)
+                bestKind = 0; bestLinePoint = origin; bestLineDirection = direction
             }
             state.kind = bestKind; state.vpIndex = bestVp; state.curveIndex = bestCurve
             state.latchedPoints = bestArc; state.linePoint = bestLinePoint; state.lineDirection = bestLineDirection

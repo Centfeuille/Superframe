@@ -249,12 +249,7 @@ fun NumSlider(label: String, v: Int, min: Int, max: Int, onV: (Int) -> Unit) {
         Text(label, fontSize = 13.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Slider(v.toFloat(), { onV(it.roundToInt()) }, Modifier.weight(1f), valueRange = min.toFloat()..max.toFloat())
-            var t by remember(v) { mutableStateOf(v.toString()) }
-            OutlinedTextField(
-                t, { s -> t = s.filter { it.isDigit() }.take(3); t.toIntOrNull()?.let { onV(it.coerceIn(min, max)) } },
-                Modifier.width(84.dp), singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
+            NumberField(v.toString(), { s -> s.toIntOrNull()?.let { onV(it.coerceIn(min, max)) } }, Modifier.width(84.dp), decimals = false, min = min.toDouble(), max = max.toDouble())
         }
     }
 }
@@ -916,27 +911,10 @@ fun ColorDialog(ed: Editor, onDone: () -> Unit) {
     )
 }
 
+/** Whole-number keypad (frame lengths, anchor numbers, bake step): see [NumberPadDialog]; the current value opens selected, + - x / work. */
 @Composable
 fun NumpadDialog(title: String, initial: Int, onOk: (Int) -> Unit, onDismiss: () -> Unit) {
-    var txt by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss, title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (txt.isEmpty()) "$initial" else txt, fontSize = 32.sp, color = if (txt.isEmpty()) Color.Gray else Color.White)
-                for (row in listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("C", "0", "⌫"))) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (k in row) OutlinedButton(
-                            { txt = when (k) { "C" -> ""; "⌫" -> txt.dropLast(1); else -> (txt + k).take(4) } },
-                            Modifier.size(64.dp, 48.dp), contentPadding = PaddingValues(0.dp)
-                        ) { Text(k, fontSize = 18.sp) }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton({ txt.toIntOrNull()?.takeIf { it >= 1 }?.let { onOk(it) }; onDismiss() }) { Text("OK") } },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
-    )
+    NumberPadDialog(title, initial.toString(), decimals = false, min = 1.0, max = null, onResult = { onOk(it.roundToInt()) }, onDismiss = onDismiss)
 }
 
 /**
@@ -956,9 +934,7 @@ fun CutSettingsPanel(ed: Editor, cut: Cut, draft: CutDraft, modifier: Modifier =
             ResRow("Aspect (w / h)", "%.3f".format(draft.aspect), cut.lockA, { cut.lockA = !cut.lockA; if (cut.lockA) cut.aspect = draft.aspect }) { v -> v.toFloatOrNull()?.let { draft.changeAspect(it) } }
             ResRow("DPI", draft.dpi.toString(), cut.lockDpi, { cut.lockDpi = !cut.lockDpi }) { v -> v.toFloatOrNull()?.let { draft.changeDpi(it.roundToInt()) } }
             ResRow("Images per second", draft.fps.toString(), cut.lockFps, { cut.lockFps = !cut.lockFps }) { v -> v.toFloatOrNull()?.let { draft.changeFps(it.roundToInt()) } }
-            Text("Type a value and tap ✓, or drag the cyan handles on the canvas (any side or corner). A locked value is not changed by edits or by Reset. Nothing is applied until you confirm.", fontSize = 11.sp)
-            FilterChip(draft.stretch, { draft.stretch = !draft.stretch }, { Text("Stretch the image") }, Modifier.fillMaxWidth())
-            Text(if (draft.stretch) "On: when you confirm, the whole drawing (drawings, vector lines, reference images, camera / folder / media positions) is scaled with the frame. Drawings are resampled once. This cannot be undone." else "Off: the drawing keeps its place relative to the edge you drag; the frame only grows or crops.", fontSize = 11.sp)
+            Text("Tap a value to type it on the keypad (it also adds, subtracts, multiplies and divides), or drag the cyan handles on the canvas (right, bottom, corner). A locked value is not changed by edits or by Reset. Nothing is applied until you confirm.", fontSize = 11.sp)
             FilterChip(GpuLayers.enabled, { GpuLayers.enabled = !GpuLayers.enabled }, { Text("GPU layer compositor") }, Modifier.fillMaxWidth())
             Text(if (GpuLayers.failed) "Unavailable on this device: using the standard renderer." else "Draws the layers below the active layer (and all layers during playback) with OpenGL. Turn off to use the standard renderer.", fontSize = 12.sp, color = Color.LightGray)
         }
@@ -1033,10 +1009,8 @@ private fun CurveIconRaw(type: Int, on: Boolean, box: Dp, onClick: () -> Unit) {
 
 @Composable
 private fun ResRow(label: String, value: String, locked: Boolean, toggle: () -> Unit, onApply: (String) -> Unit) {
-    var t by remember(value) { mutableStateOf(value) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(t, { t = it }, Modifier.weight(1f), label = { Text(label) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        Icon(Icons.Filled.Check, null, Modifier.clickable { onApply(t) }.padding(6.dp).size(30.dp))
+        NumberField(value, { onApply(it) }, Modifier.weight(1f), label = label)
         Icon(if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen, null, Modifier.clickable(onClick = toggle).padding(6.dp).size(30.dp))
     }
 }
@@ -1071,8 +1045,8 @@ fun BoxScope.ViewPopups(ed: Editor, cut: Cut) {
             Text("A stroke that starts inside the Cut keeps its part inside; only the part outside goes (a brush-width rim at the edge stays so the inside looks the same). Selection moves and imported images are not trimmed. Locked layers are skipped. Undo restores everything.", fontSize = 12.sp, color = Color.LightGray)
         } else {
             Text("Invert canvas", fontSize = 14.sp)
-            FilterChip(ed.flipH, { ed.setFlip(!ed.flipH, ed.flipV) }, { Text("Horizontal") }, Modifier.fillMaxWidth())
-            FilterChip(ed.flipV, { ed.setFlip(ed.flipH, !ed.flipV) }, { Text("Vertical") }, Modifier.fillMaxWidth())
+            FilterChip(ed.flipH, { ed.flipH = !ed.flipH }, { Text("Horizontal") }, Modifier.fillMaxWidth())
+            FilterChip(ed.flipV, { ed.flipV = !ed.flipV }, { Text("Vertical") }, Modifier.fillMaxWidth())
         }
     }
 }
@@ -1555,7 +1529,7 @@ private fun TimelineToolbarContent(
                 for (idx in indices) {
                     var base = idx - 1
                     while (base >= 0 && layer.cels[base] in selected) base--
-                    val baseNumber = (base + 1).coerceAtLeast(1)
+                    val baseNumber = if (base < 0) 1 else drawingNumber(layer, base)
                     val prior = layer.cels.take(idx).count { it.inbetweenName.startsWith("$baseNumber") }
                     val n = prior + 1
                     var q = n; var suffix = ""
@@ -1725,10 +1699,10 @@ private fun TimelineDialogs(
             title = { Text("Transformation at frame ${cut.time + 1}") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Drawing layers inside this folder follow these animated values.", fontSize = 12.sp, color = Color.Gray)
-                OutlinedTextField(x, { x = it }, label = { Text("X offset (px)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(y, { y = it }, label = { Text("Y offset (px)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(scale, { scale = it }, label = { Text("Scale") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                OutlinedTextField(rotation, { rotation = it }, label = { Text("Rotation (°)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                NumberField(x, { x = it }, Modifier.fillMaxWidth(), label = "X offset (px)")
+                NumberField(y, { y = it }, Modifier.fillMaxWidth(), label = "Y offset (px)")
+                NumberField(scale, { scale = it }, Modifier.fillMaxWidth(), label = "Scale", min = 0.01)
+                NumberField(rotation, { rotation = it }, Modifier.fillMaxWidth(), label = "Rotation (°)")
             } },
             confirmButton = { TextButton({
                 val nx = x.toFloatOrNull(); val ny = y.toFloatOrNull(); val ns = scale.toFloatOrNull(); val nr = rotation.toFloatOrNull()
@@ -2688,7 +2662,7 @@ private fun TimelineCelCell(
     ) {
         val labelW = cell * cel.dur
         if (labelW >= 22.dp) Text(
-            cel.inbetweenName.ifBlank { "${index + 1}" } + if (cel.dur > 1 && labelW >= 52.dp) " ×${cel.dur}" else "",
+            frameLabel(layer, index) + if (cel.dur > 1 && labelW >= 52.dp) " ×${cel.dur}" else "",
             fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
             color = if (isClone) Color(0xFF14301A) else Color.Unspecified
         )

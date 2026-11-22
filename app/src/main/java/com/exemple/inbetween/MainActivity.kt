@@ -67,7 +67,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LinearScale
 import android.widget.Toast
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -136,6 +138,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPostCreate(savedInstanceState: Bundle?) { super.onPostCreate(savedInstanceState); guardBars(); hideBars() }
+
     private fun hideBars() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -145,6 +149,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) hideBars() }
+
+    /** The keyboard (text fields) and menus can bring the system bars back without the window changing focus: hide them again when the keyboard finishes moving. */
+    private fun guardBars() {
+        ViewCompat.setWindowInsetsAnimationCallback(window.decorView, object : WindowInsetsAnimationCompat.Callback(WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+            override fun onProgress(insets: WindowInsetsCompat, runningAnimations: List<WindowInsetsAnimationCompat>): WindowInsetsCompat = insets
+            override fun onEnd(animation: WindowInsetsAnimationCompat) { if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) window.decorView.post { hideBars() } }
+        })
+    }
 
     override fun onStop() {
         super.onStop()
@@ -212,7 +224,28 @@ fun MenuScreen(ed: Editor, previousStartup: String? = null) {
         note?.let { Text(it, fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(top = 6.dp)) }
         Spacer(Modifier.height(12.dp))
         if (ed.cuts.isEmpty()) Text("No cuts yet. Tap “+ New cut” to start.", color = Color.Gray)
-        CutBrowser(ed, { c -> pending = c; exportPick.launch("${c.name}.inbetween") }, Modifier.weight(1f))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(ed.cuts) { c ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF2E2E36))
+                        .clickable { ed.open = c }.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.width(112.dp).aspectRatio(c.w.toFloat() / c.h).clip(RoundedCornerShape(6.dp)).background(Color.White)) {
+                        c.thumb?.let { Image(it, null, Modifier.fillMaxSize()) }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, style = MaterialTheme.typography.titleMedium)
+                        Text("${c.w}×${c.h} · ${c.fps} fps · ${c.dpi} dpi · ${c.layers.count { !it.isGroup }} layers · ${c.total()} frames", fontSize = 13.sp, color = Color.Gray)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        TextButton({ pending = c; exportPick.launch("${c.name}.inbetween") }) { Text("Export") }
+                        TextButton({ ed.remove(c, ctx.filesDir) }) { Text("Delete") }
+                    }
+                }
+            }
+        }
     }
     if (creating) NewCutDialog(ed) { creating = false }
     if (diagnosticsOpen) DiagnosticsDialog(
@@ -275,11 +308,8 @@ private fun StartupRecoveryScreen(message: String, onContinue: (() -> Unit)? = n
 
 @Composable
 private fun Field(label: String, v: String, modifier: Modifier = Modifier, num: Boolean = false, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        v, { onChange(if (num) it.filter { c -> c.isDigit() }.take(5) else it) }, modifier,
-        label = { Text(label) }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = if (num) KeyboardType.Number else KeyboardType.Text)
-    )
+    if (num) NumberField(v, onChange, modifier, label = label, decimals = false, min = 0.0)
+    else OutlinedTextField(v, onChange, modifier, label = { Text(label) }, singleLine = true)
 }
 
 @Composable
@@ -477,7 +507,7 @@ fun EditorScreen(ed: Editor, cut: Cut) {
                     // Grid is always visible; tap changes its depth, hold opens density options.
                     IconBtn(Icons.Filled.Grid4x4, on = ed.gridFront, tip = if (ed.gridFront) "Grid in front · tap for behind" else "Grid behind · tap for in front", onLong = { ed.viewOpt = if (ed.viewOpt == 1) 0 else 1 }) { ed.gridFront = !ed.gridFront }
                     IconBtn(Icons.Filled.Flip, on = ed.flipH || ed.flipV, onLong = { ed.viewOpt = if (ed.viewOpt == 2) 0 else 2 }) {
-                        if (ed.flipH || ed.flipV) ed.setFlip(false, false) else ed.setFlip(true, false)
+                        if (ed.flipH || ed.flipV) { ed.flipH = false; ed.flipV = false } else ed.flipH = true
                     }
                     BleedBtn(ed.drawOutsideFrame, onLong = { ed.viewOpt = if (ed.viewOpt == 3) 0 else 3 }) { ed.drawOutsideFrame = !ed.drawOutsideFrame }
                     IconBtn(Icons.Filled.Speed, on = Perf.hudVisible || Perf.recording, tip = "Performance HUD and recorder") { Perf.toggleHud() }

@@ -25,7 +25,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Slider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
@@ -43,6 +42,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -396,7 +400,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             ?: selRect?.let { rectBox(it) }
         1 -> cut.layer?.cam?.let { camBox(it, cut, cut.time) }
         2 -> if (folderSel != null) folderBox(cut, folderSel, cut.time, folderRectNow(folderSel)) else null
-        3 -> ed.cutDraft?.let { rectBox(RectF(it.ox.toFloat(), it.oy.toFloat(), (it.ox + it.w).toFloat(), (it.oy + it.h).toFloat())) }
+        3 -> ed.cutDraft?.let { rectBox(RectF(0f, 0f, it.w.toFloat(), it.h.toFloat())) }
         6 -> run {
             val layer = cut.layer ?: return@run null
             val tr = cut.transformFor(layer, cut.time)
@@ -473,13 +477,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val h = hitHandle(box.map { toScr(it) }, sp, handleSlop, handleSlop + 60f)
         if (h == H_NONE) return false
         if (h == H_MOVE && !(ctx == 0 || ctx == 5 || (ctx == 4 && allowMove) || (ctx == 2 && allowMove) || (ctx == 6 && allowMove))) return false // selection and Out of Peg move directly; Camera has its own nudge path
-        if (ctx == 3 && h > 7) return false // Cut settings: the eight corner / edge handles only (no rotate, no move)
+        if (ctx == 3 && h != 2 && h != 5 && h != 6) return false // Cut is anchored at its top-left; resize from bottom-right, right edge or bottom edge only
         if (ctx == 0 && ed.xform == null) { beginTransform(ed, cut); if (ed.xform == null) return false }
         val b0 = gBox(ctx) ?: return false
         gz.ctx = ctx; gz.h = h; gz.d0 = toDoc(sp.x, sp.y, applyLayerGroup = ctx != 3); gz.box0 = b0; gz.snap = null
         val t = cut.time
         when (ctx) {
-            3 -> ed.cutDraft?.let { gz.w0 = it.w; gz.h0 = it.h; gz.ox0 = it.ox; gz.oy0 = it.oy }
+            3 -> ed.cutDraft?.let { gz.w0 = it.w; gz.h0 = it.h }
             0 -> gz.m0 = Matrix(ed.xform!!.mat)
             1 -> cut.layer?.cam?.let { c -> gz.x0 = c.x(t, cut.w); gz.y0 = c.y(t, cut.h); gz.s0 = c.sc(t); gz.r0 = c.rot(t); gz.w0 = c.w; gz.h0 = c.h; gz.snap = cut.snap() }
             2 -> folderSel?.let { f -> val tr = f.transformAt(t); gz.x0 = tr.x; gz.y0 = tr.y; gz.s0 = tr.scale; gz.r0 = tr.rotation; gz.folder = f; gz.snap = cut.snap() }
@@ -506,28 +510,21 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         when (gz.ctx) {
             3 -> ed.cutDraft?.let { dr ->
                 val dx = d.x - gz.d0.x; val dy = d.y - gz.d0.y
-                // Handles: 0 top-left, 1 top-right, 2 bottom-right, 3 bottom-left, 4 top, 5 right, 6 bottom, 7 left.
-                val left = gz.h == 0 || gz.h == 3 || gz.h == 7
-                val right = gz.h == 1 || gz.h == 2 || gz.h == 5
-                val top = gz.h == 0 || gz.h == 1 || gz.h == 4
-                val bottom = gz.h == 2 || gz.h == 3 || gz.h == 6
-                val resizeX = left || right; val resizeY = top || bottom
-                val gx = (if (left) -dx else dx).roundToInt() // growth along each axis (a left / top handle grows the frame when dragged outward)
-                val gy = (if (top) -dy else dy).roundToInt()
+                val resizeX = gz.h == 2 || gz.h == 5
+                val resizeY = gz.h == 2 || gz.h == 6
+                // The page origin is fixed at (0,0). Bottom-right scales both dimensions;
+                // the right/bottom midpoint handles change only their corresponding dimension.
                 if (cut.lockA && resizeX && resizeY) {
                     when {
-                        cut.lockW && !cut.lockH -> dr.changeH(gz.h0 + gy)
-                        cut.lockH && !cut.lockW -> dr.changeW(gz.w0 + gx)
-                        abs(gx) >= abs(gy) -> dr.changeW(gz.w0 + gx)
-                        else -> dr.changeH(gz.h0 + gy)
+                        cut.lockW && !cut.lockH -> dr.changeH(gz.h0 + dy.roundToInt())
+                        cut.lockH && !cut.lockW -> dr.changeW(gz.w0 + dx.roundToInt())
+                        abs(dx) >= abs(dy) -> dr.changeW(gz.w0 + dx.roundToInt())
+                        else -> dr.changeH(gz.h0 + dy.roundToInt())
                     }
                 } else {
-                    if (resizeX) dr.changeW(gz.w0 + gx)
-                    if (resizeY) dr.changeH(gz.h0 + gy)
+                    if (resizeX) dr.changeW(gz.w0 + dx.roundToInt())
+                    if (resizeY) dr.changeH(gz.h0 + dy.roundToInt())
                 }
-                // The edge opposite to the dragged one stays where it was; the page origin follows the new top-left on Confirm.
-                if (left) dr.ox = gz.ox0 + gz.w0 - dr.w
-                if (top) dr.oy = gz.oy0 + gz.h0 - dr.h
             }
             6 -> {
                 val layer = gz.folder ?: return
@@ -641,6 +638,41 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     /** Screen px per document px of the vector canvas (declared before its first use: local functions must precede their callers). */
     fun vecZoom(): Float { val z = (fit * ed.vScale).coerceAtLeast(0.0001f); ed.vecDocZoom = z; return z }
 
+    /**
+     * Anchors for a line just drawn on [l]. With the ghost on and the line lying on an untraced ghost line it takes that line's anchor numbers (the ghost gets automatic anchors
+     * first, as a separate undo step, when it has none); otherwise it gets automatic anchors at its ends and tips, with numbers that none of the neighbouring keyframes uses.
+     */
+    fun vecAnchorNew(l: Layer, stroke: VectorStroke): VectorStroke {
+        if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
+        val idx = l.indexAt(cut.time)
+        val cel = l.cels.getOrNull(idx)
+        val current = cel?.vectorStrokes() ?: emptyList()
+        val blocked = AutoAnchors.usedNumbers(current)
+        if (ed.vecGhost && cel != null) {
+            val refCel = LineGhost.reference(l, idx, ed.vecGhostNext)
+            if (refCel != null) {
+                val px = 1f / vecZoom()
+                val open = LineGhost.unclaimed(LineGhost.lines(refCel), current, px)
+                var ghost = LineGhost.choose(stroke, open, LineGhost.current(open, ed.vecGhostSkip), px)
+                if (ghost != null) {
+                    if (ghost.points.none { it.anchor > 0 }) {
+                        val refStrokes = refCel.vectorStrokes()
+                        val anchored = AutoAnchors.assignFresh(ghost, AutoAnchors.usedNumbers(refStrokes), ed.vecTipSens)
+                        val ri = l.cels.indexOfFirst { it === refCel }
+                        if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
+                    }
+                    val traced = AutoAnchors.inherit(stroke, ghost, blocked)
+                    if (traced != null) { ed.vecGhostSkip = 0; return traced }
+                }
+            }
+        }
+        return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()), ed.vecTipSens)
+    }
+
+    /** After a line was merged into others: its automatic anchors follow the new shape. */
+    fun vecRefreshAnchors(l: Layer, idx: Int, strokes: List<VectorStroke>): List<VectorStroke> =
+        if (!ed.vecAutoAnchor) strokes else AutoAnchors.refresh(strokes, AutoAnchors.neighbourNumbers(l, idx), ed.vecTipSens)
+
     /** Line / circle / ellipse: pressure goes through the selected brush's size and opacity curves. */
     fun commitShape(pts: List<Offset>, pAvg: Float) {
         val l = cut.drawLayer?.takeIf { !it.locked && it.visible } ?: return
@@ -654,13 +686,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val src = if (closed) vp + vp.first() else vp
             var simple = VectorSimplify.fit(src, 0.35f)
             if (closed) simple = simple.dropLast(1)
-            val shape = VectorStroke(newStrokeId(), simple, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), closed, a.coerceIn(0.05f, 1f), br.aa).withBrush(br)
+            val shape = vecAnchorNew(l, VectorStroke(newStrokeId(), simple, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), closed, a.coerceIn(0.05f, 1f), br.aa).withBrush(br))
             if (ed.vecMerge && !closed) { // Line / shapes tool with Merge on: an end that touches another line joins it (same rules and sharp joins as the Brush tool)
                 val idx = l.indexAt(cut.time)
                 val cel = l.cels.getOrNull(idx)
                 if (cel != null) {
                     val merged = VectorMerge.attach(cel.vectorStrokes(), shape, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                    if (merged != null) { replaceVectorCel(cut, l, idx, merged); return }
+                    if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, merged)); return }
                 }
             }
             commitOp(l, shape.toInk())
@@ -856,13 +888,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val dense = vp?.taperEnd(vecPts.toList()) ?: vecPts.toList()
         val eps = (0.8f / vecZoom()).coerceIn(0.25f, 3f)
         val pts = VectorSimplify.fit(dense, eps, br.size)
-        val stroke = VectorStroke(newStrokeId(), pts, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), false, br.opacity.coerceIn(0.05f, 1f), br.aa).withBrush(br)
+        val stroke = vecAnchorNew(l, VectorStroke(newStrokeId(), pts, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), false, br.opacity.coerceIn(0.05f, 1f), br.aa).withBrush(br))
         if (ed.vecMerge) {
             val idx = l.indexAt(cut.time)
             val cel = l.cels.getOrNull(idx)
             if (cel != null) {
                 val merged = VectorMerge.attach(cel.vectorStrokes(), stroke, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                if (merged != null) { replaceVectorCel(cut, l, idx, merged); return }
+                if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, merged)); return }
             }
         }
         commitOp(l, stroke.toInk())
@@ -1435,6 +1467,22 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (ed.tool != 2 || vecLayerNow == null || vecLives != null) FloatArray(0) else VectorGaps.find(vecShowStrokes, (ed.vecMergeRadius / vecZoom()).coerceAtLeast(2f))
     }
 
+    // line order onion skin: the next untraced line of the previous / next keyframe shimmers, with its anchors; a new line drawn over it takes those anchors
+    val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 4) }
+    val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
+    val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
+    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostSkip, tick, ed.vecAutoAnchor) {
+        val gl = ghostLayer
+        val idx = gl?.indexAt(cut.time) ?: -1
+        val cur = gl?.cels?.getOrNull(idx)
+        val ref = if (gl != null && cur != null) LineGhost.reference(gl, idx, ed.vecGhostNext) else null
+        if (cur == null || ref == null) null else {
+            val open = LineGhost.unclaimed(LineGhost.lines(ref), cur.vectorStrokes(), 1f / vecZoom())
+            val shown = LineGhost.current(open, ed.vecGhostSkip)
+            if (shown == null) null else Pair(shown, open.filter { it !== shown })
+        }
+    }
+
     Box(modifier.clipToBounds()) {
         if (planes) {
             if (!ed.gridFront) Media3VideoGridBackground(cut, ed, box.width, box.height, fit)
@@ -1554,17 +1602,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         fingerTouches = ev.changes.filter { it.pressed }.map { it.position }
                         if (n == 2) {
                             val pair = ev.changes.filter { it.pressed }.take(2)
-                            if (pair.size == 2 && ed.xform == null && cut.layer?.kind != 2 && !(cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false)) {
-                                val gap = (pair[0].position - pair[1].position).getDistance()
-                                val limit = RESET_PINCH_DP.dp.toPx()
-                                if (gap <= limit) {
-                                    resetArmed = true
-                                    resetCue = true
-                                } else if (resetArmed && gap > limit * 1.15f) {
-                                    // Opt out: separating the fingers again cancels the armed reset (small margin so jitter does not flicker it).
-                                    resetArmed = false
-                                    resetCue = false
-                                }
+                            if (pair.size == 2 && ed.xform == null && cut.layer?.kind != 2 && !(cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false) && (pair[0].position - pair[1].position).getDistance() <= RESET_PINCH_DP.dp.toPx()) {
+                                resetArmed = true
+                                resetCue = true
                             }
                         }
                         if (n > 0) {
@@ -1896,6 +1936,21 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
             if (vecPreview.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreview) VectorTessellator.draw(cv.nativeCanvas, vs, pt) }
             // The stroke being drawn with the vector brush, rendered like the committed line (ribbon with pressure width, curve and opacity), so lifting the pen does not change how it looks.
+            ghostData?.let { (shown, others) ->
+                val pulse = 0.5f + 0.5f * kotlin.math.sin(ghostStep / 8f * 2f * Math.PI.toFloat())
+                drawIntoCanvas { cv ->
+                    val gp = android.graphics.Paint()
+                    for (o in others) VectorTessellator.draw(cv.nativeCanvas, o.copy(color = 0xFF22D3EE.toInt(), opacity = 0.14f), gp)
+                    VectorTessellator.draw(cv.nativeCanvas, shown.copy(color = 0xFF22D3EE.toInt(), opacity = 0.28f + 0.42f * pulse), gp)
+                }
+                val gc = shown.points.maxOfOrNull { it.anchor } ?: 0
+                val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * px1; typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
+                for (vp in shown.points) if (vp.anchor > 0) {
+                    drawCircle(Color.White.copy(alpha = 0.9f), 6f * px1, Offset(vp.x, vp.y))
+                    drawCircle(Color(anchorColor(vp.anchor, gc)).copy(alpha = 0.55f + 0.45f * pulse), 4.5f * px1, Offset(vp.x, vp.y))
+                    drawIntoCanvas { cv -> cv.nativeCanvas.drawText(vp.anchor.toString(), vp.x + 7f * px1, vp.y - 7f * px1, np) }
+                }
+            }
             if (vecLive >= 0 && st.kind == 15 && vecPts.isNotEmpty()) {
                 val lb = ed.brushes[ed.brushIdx]
                 val liveStroke = VectorStroke("live", vecPts.toList(), ed.color.toArgb() or (0xFF shl 24), lb.size, "", false, lb.opacity.coerceIn(0.05f, 1f), lb.aa).withBrush(lb)
@@ -1969,16 +2024,16 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             for (pl in cut.layers) {
                 if (pl.kind != 3 || !pl.visible) continue
                 val p = pl.persp ?: continue
-                val big = max(dw, dh) * 40; val arcSpan = max(dw, dh) * 4; val pink = Color(0xFFE91E63) // big: straight guides / rays / FOV cone reach far; arcSpan: curvilinear fan (its curvature scales with its length)
+                val big = max(dw, dh) * 4; val pink = Color(0xFFE91E63)
                 for (kind in 0..1) {
                     // The guide itself is always a straight axis. Curvilinear mode adds a fan
                     // of curved rays from each VP; rays closest to the horizon have least bend.
                     drawPoly(p.guidePoints(kind, big), false, pink, 2f * px1)
                     if (p.guide(kind).curvilinear) {
-                        val arcs = p.curvilinearArcsCached(kind, steps = 48, span = arcSpan)
-                        val middleRay = (p.guide(kind).curvilinearRayCount - 1) / 2
-                        val oneVp = p.vps.count { it.kind == kind } == 1
+                        val arcs = p.curvilinearArcs(kind, steps = 48, span = big)
                         arcs.forEach { arc ->
+                            val middleRay = (p.guide(kind).curvilinearRayCount - 1) / 2
+                            val oneVp = p.vps.count { it.kind == kind } == 1
                             val isHorizonRay = if (oneVp) arc.curveIndex == 0 || arc.curveIndex == p.guide(kind).curvilinearRayCount / 2 else arc.curveIndex == middleRay || arc.curveIndex == middleRay + 1
                             drawPoly(arc.points, false, if (isHorizonRay) Color(0x99E91E63) else Color(0x55E91E63), if (isHorizonRay) 1.7f * px1 else 1.1f * px1)
                         }
@@ -1987,8 +2042,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 p.vps.forEachIndexed { i, vp ->
                     val v = p.pos(vp)
                     if (!p.guide(vp.kind).curvilinear) {
-                        val rayN = p.guide(vp.kind).curvilinearRayCount.coerceIn(8, 48)
-                        for (k in 0 until rayN) { val a = (k * (180f / rayN) + p.axisAngle(vp.kind)) * (PI.toFloat() / 180f); val ray = Offset(cos(a), sin(a)); drawLine(Color(0x33E91E63), v - ray * big, v + ray * big, strokeWidth = px1) }
+                        for (k in 0 until 30) { val a = (k * 6f + p.axisAngle(vp.kind)) * (PI.toFloat() / 180f); val ray = Offset(cos(a), sin(a)); drawLine(Color(0x33E91E63), v - ray * big, v + ray * big, strokeWidth = px1) }
                     }
                     drawCircle(if (i == ed.vpSel) Color.White else pink, 8f * px1, v); drawCircle(Color.Black, 8f * px1, v, style = Stroke(1.5f * px1))
                 }
@@ -2131,7 +2185,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     PerspectiveIconButton(if (selectedPerspective.vanishingPointMagnet) Icons.Filled.Visibility else Icons.Filled.VisibilityOff, if (selectedPerspective.vanishingPointMagnet) "Vanishing-point magnetism on; VP rays override the horizon and perpendicular guides" else "Guide-line magnetism on; horizon and perpendicular lines override vanishing points", selectedPerspective.vanishingPointMagnet, { perspectiveHover = it }, { cut.record { selectedPerspective.vanishingPointMagnet = !selectedPerspective.vanishingPointMagnet } })
                     PerspectiveIconButton(Icons.Filled.Waves, "Curvilinear fisheye perspective", g.curvilinear, { perspectiveHover = it }, { cut.record { g.curvilinear = !g.curvilinear } })
                     PerspectiveIconButton(Icons.Filled.Tune, "Set curvilinear curvature strength", false, { perspectiveHover = it }, { curvatureStrengthValue = g.curvatureStrength; curvatureDialog = kind }, enabled = g.curvilinear)
-                    PerspectiveIconButton(Icons.Filled.Add, if (g.curvilinear) "Set the number of curvilinear rays" else "Set the number of rays", false, { perspectiveHover = it }, { rayCountValue = g.curvilinearRayCount.toFloat(); raysDialog = kind })
+                    PerspectiveIconButton(Icons.Filled.Add, "Set the number of curvilinear rays", false, { perspectiveHover = it }, { rayCountValue = g.curvilinearRayCount.toFloat(); raysDialog = kind }, enabled = g.curvilinear)
                     PerspectiveIconButton(Icons.Filled.Refresh, "Reset this guide", false, { perspectiveHover = it }, {
                         cut.record {
                             selectedPerspective.rotateGuide(kind, -g.rotation, ed.vpSel)
@@ -2150,9 +2204,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 onDismissRequest = { fovDialog = -1 },
                 title = { Text("Camera lens") },
                 text = { Column {
-                    OutlinedTextField(value = fovText, onValueChange = { value -> if (value.isEmpty() || value.matches(Regex("\\d{0,3}([.]\\d{0,1})?"))) { fovText = value; value.toFloatOrNull()?.let { f -> fovValue = f.coerceIn(4.1f, 170f); focalValue = focalLengthForFov(fovValue); focalText = "%.1f".format(java.util.Locale.US, focalValue) } } }, label = { Text("Horizontal FOV (degrees)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    NumberField(fovText, { value -> value.toFloatOrNull()?.let { f -> fovValue = f.coerceIn(4.1f, 170f); fovText = "%.1f".format(java.util.Locale.US, fovValue); focalValue = focalLengthForFov(fovValue); focalText = "%.1f".format(java.util.Locale.US, focalValue) } }, Modifier.fillMaxWidth(), label = "Horizontal FOV (degrees)", min = 4.1, max = 170.0)
                     Slider(value = fovValue, onValueChange = { fovValue = it; fovText = "%.1f".format(java.util.Locale.US, it); focalValue = focalLengthForFov(it); focalText = "%.1f".format(java.util.Locale.US, focalValue) }, valueRange = 4.1f..170f)
-                    OutlinedTextField(value = focalText, onValueChange = { value -> if (value.isEmpty() || value.matches(Regex("\\d{0,3}([.]\\d{0,1})?"))) { focalText = value; value.toFloatOrNull()?.let { mm -> focalValue = mm.coerceIn(1.57f, 500f); fovValue = fovFromFocalLength(focalValue); fovText = "%.1f".format(java.util.Locale.US, fovValue) } } }, label = { Text("Focal length (mm)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    NumberField(focalText, { value -> value.toFloatOrNull()?.let { mm -> focalValue = mm.coerceIn(1.57f, 500f); fovValue = fovFromFocalLength(focalValue); fovText = "%.1f".format(java.util.Locale.US, fovValue); focalText = "%.1f".format(java.util.Locale.US, focalValue) } }, Modifier.fillMaxWidth(), label = "Focal length (mm)", min = 1.57, max = 500.0)
                     Text("Linked camera values for a 36 mm full-frame sensor. Changing focal length also scales vanishing-point offsets around the optical centre: longer focal lengths push them outward; shorter focal lengths pull them inward. The blue rays show the horizontal camera view cone.", fontSize = 12.sp)
                 } },
                 confirmButton = { TextButton(onClick = { val mm = focalText.toFloatOrNull()?.coerceIn(1.57f, 500f) ?: focalValue; cut.record { selectedPerspective.setFocalLength(mm) }; fovDialog = -1 }) { Text("Apply") } },
@@ -2177,11 +2231,11 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val kind = raysDialog
             AlertDialog(
                 onDismissRequest = { raysDialog = -1 },
-                title = { Text(if (selectedPerspective.guide(kind).curvilinear) "Curvilinear ray count" else "Ray count") },
+                title = { Text("Curvilinear ray count") },
                 text = { Column {
-                    Text(if (selectedPerspective.guide(kind).curvilinear) "${rayCountValue.roundToInt().coerceIn(8, 48)} rays per neighbouring VP pair" else "${rayCountValue.roundToInt().coerceIn(8, 48)} rays through each vanishing point", fontSize = 16.sp)
+                    Text("${rayCountValue.roundToInt().coerceIn(8, 48)} rays per neighbouring VP pair", fontSize = 16.sp)
                     Slider(value = rayCountValue, onValueChange = { rayCountValue = it }, valueRange = 8f..48f, steps = 19)
-                    Text(if (selectedPerspective.guide(kind).curvilinear) "Each curved ray joins neighbouring vanishing points. The central horizon paths stay perfectly flat; rays bow progressively more as they move farther from the horizon." else "Evenly spaced straight rays through every vanishing point of this guide. This only changes the drawn rays; brush magnetism follows any direction.", fontSize = 12.sp)
+                    Text("Each curved ray joins neighbouring vanishing points. The central horizon paths stay perfectly flat; rays bow progressively more as they move farther from the horizon.", fontSize = 12.sp)
                 } },
                 confirmButton = { TextButton(onClick = { val count = (rayCountValue.roundToInt().coerceIn(8, 48) / 2) * 2; cut.record { selectedPerspective.guide(kind).curvilinearRayCount = count }; raysDialog = -1 }) { Text("Apply") } },
                 dismissButton = { TextButton(onClick = { raysDialog = -1 }) { Text("Cancel") } }
