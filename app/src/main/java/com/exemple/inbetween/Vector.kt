@@ -41,8 +41,12 @@ data class VectorPoint(
     val anchor: Int = 0,
     /** Invisible point: the line has no width here (it tapers out toward it, and a stretch between two hidden points is not drawn). The point stays editable and keeps interpolating. */
     val hidden: Boolean = false,
-    /** The anchor was put here automatically (an end or a tip of the line): it is redone when the line changes shape (see [AutoAnchors.refresh]). Anchors set by hand or inherited from a traced line are not automatic. */
-    val auto: Boolean = false
+    /** The anchor was put here automatically (an end or a tip of the line): it is redone when the line changes shape (see [AutoAnchors.refresh]). Structural endpoints are additionally marked by [endpoint]; anchors set by hand or inherited from a traced line are not automatic. */
+    val auto: Boolean = false,
+    /** Structural endpoint identity. Unlike automatic curve-tip anchors, this identity may only be reassigned to an outer endpoint after a merge. */
+    val endpoint: Boolean = false,
+    /** Additional structural endpoint identities temporarily carried through a merged join until AutoAnchors.refresh relocates them. */
+    val endpointAliases: List<Int> = emptyList()
 )
 
 /**
@@ -70,6 +74,10 @@ val ANCHOR_NAMES: List<String> = listOf("Blue", "Red", "Yellow", "Green", "Orang
 const val ANCHOR_MAX = 99
 /** In a stroke's sparse anchor list, an entry whose index is this much higher than a point's means "the anchor of that point is automatic" (older builds ignore such entries, they are out of range for them). */
 const val AUTO_FLAG_OFFSET = 1_000_000
+/** Sparse Ink metadata for a structural endpoint identity (kept separate from ordinary automatic curve-tip anchors). */
+const val ENDPOINT_FLAG_OFFSET = 2_000_000
+/** Sparse Ink metadata for extra endpoint identities carried at a merged join until refresh relocates them. */
+const val ENDPOINT_ALIAS_OFFSET = 3_000_000
 
 data class VectorStroke(
     /** Persistent id: the same line is matched across keyframes by it (and a cut gives the new half a new id). */
@@ -159,6 +167,7 @@ fun VectorStroke.toInk(): Ink {
     m.add(baseWidth); m.add(if (isClosed) 1f else 0f); m.add(opacity)
     points.forEachIndexed { i, pt -> if (pt.anchor > 0 || pt.hidden) { m.add(i.toFloat()); m.add((pt.anchor + if (pt.hidden) 128 else 0).toFloat()) } } // sparse anchors: point index, rank (+128 = hidden point)
     points.forEachIndexed { i, pt -> if (pt.auto && pt.anchor > 0) { m.add((AUTO_FLAG_OFFSET + i).toFloat()); m.add(1f) } } // automatic anchors: AUTO_FLAG_OFFSET + point index
+    points.forEachIndexed { i, pt -> if (pt.endpoint && pt.anchor > 0) { m.add((ENDPOINT_FLAG_OFFSET + i).toFloat()); m.add(1f) }; pt.endpointAliases.forEach { r -> if (r in 1..ANCHOR_MAX) { m.add((ENDPOINT_ALIAS_OFFSET + i).toFloat()); m.add(r.toFloat()) } } } // structural endpoint identities, including aliases carried through a join
     return Ink(p, color, VECTOR_BRUSH, 5, null, m.toFloatArray(), (if (hasStyle()) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed|$hardness|$texId|$texAmt|$texScale|${if (texInvert) 1 else 0}|$texImg|$tipShape|$roundness|$tipAngle|${if (tipFollow) 1 else 0}|$fill|$fillGap|$fillGrow|${if (fillAcross) 1 else 0}|$fillSeedX|$fillSeedY|$inkCurve|$inkLight|$inkAngle|$taperIn|$taperOut|$inkIrr|$inkIrrScale|$aaSoft|$joinSharp"
         else if (wobble > 0.01f) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed" else if (aa < 0.999f) "$id|$brushId|$aa" else "$id|$brushId").toByteArray(Charsets.UTF_8))
 }
@@ -182,7 +191,16 @@ fun Ink.toVectorStroke(): VectorStroke? {
     fun pi(i: Int) = parts.getOrNull(i)?.toIntOrNull() ?: 0
     val mm = m ?: floatArrayOf(4f, 0f, 1f)
     var k = 3
-    while (k + 1 < mm.size) { val i = mm[k].toInt(); val r = mm[k + 1].toInt(); if (i in pts.indices) pts[i] = pts[i].copy(anchor = (r and 127).coerceIn(0, ANCHOR_MAX), hidden = r >= 128) else if (i >= AUTO_FLAG_OFFSET && i - AUTO_FLAG_OFFSET in pts.indices) pts[i - AUTO_FLAG_OFFSET] = pts[i - AUTO_FLAG_OFFSET].copy(auto = true); k += 2 }
+    while (k + 1 < mm.size) {
+        val i = mm[k].toInt(); val r = mm[k + 1].toInt()
+        when {
+            i >= ENDPOINT_ALIAS_OFFSET && i - ENDPOINT_ALIAS_OFFSET in pts.indices -> { val pi = i - ENDPOINT_ALIAS_OFFSET; pts[pi] = pts[pi].copy(endpointAliases = pts[pi].endpointAliases + r.coerceIn(1, ANCHOR_MAX)) }
+            i >= ENDPOINT_FLAG_OFFSET && i - ENDPOINT_FLAG_OFFSET in pts.indices -> { val pi = i - ENDPOINT_FLAG_OFFSET; pts[pi] = pts[pi].copy(endpoint = true) }
+            i >= AUTO_FLAG_OFFSET && i - AUTO_FLAG_OFFSET in pts.indices -> { val pi = i - AUTO_FLAG_OFFSET; pts[pi] = pts[pi].copy(auto = true) }
+            i in pts.indices -> pts[i] = pts[i].copy(anchor = (r and 127).coerceIn(0, ANCHOR_MAX), hidden = r >= 128)
+        }
+        k += 2
+    }
     return VectorStroke(sid, pts, color, mm.getOrElse(0) { 4f }, bid, mm.getOrElse(1) { 0f } > 0.5f, mm.getOrElse(2) { 1f }, saa, swb, swsc, swseed,
         hardness = pf(5, 1f).coerceIn(0f, 1f), texId = pi(6).coerceIn(0, TEXTURE_NAMES.size - 1), texAmt = pf(7, 0.7f).coerceIn(0f, 1f), texScale = pf(8, 1f).coerceIn(0.25f, 4f),
         texInvert = pi(9) == 1, texImg = pi(10), tipShape = pi(11).coerceIn(0, TIP_NAMES.size - 1), roundness = pf(12, 1f).coerceIn(0.1f, 1f), tipAngle = pf(13, 0f), tipFollow = pi(14) == 1,
@@ -1822,7 +1840,26 @@ class VecPen(val brush: Brush) {
  */
 object VectorMerge {
     private fun d(a: VectorPoint, b: VectorPoint) = hypot(a.x - b.x, a.y - b.y)
-    private fun mid(a: VectorPoint, b: VectorPoint) = VectorPoint((a.x + b.x) / 2f, (a.y + b.y) / 2f, (a.pressure + b.pressure) / 2f, (a.elevationOffset + b.elevationOffset) / 2f, max(a.anchor, b.anchor), a.hidden && b.hidden, if (a.anchor >= b.anchor) a.auto else b.auto)
+    private fun mid(a: VectorPoint, b: VectorPoint): VectorPoint {
+        // This helper only combines stroke endpoints (or closes a stroke). Keep every
+        // anchored identity from both sides until refresh() moves the correct endpoint
+        // pair back to the new outer ends; never let a larger number erase one side.
+        val endpointIds = buildList {
+            if (a.anchor in 1..ANCHOR_MAX) add(a.anchor)
+            addAll(a.endpointAliases.filter { it in 1..ANCHOR_MAX })
+            if (b.anchor in 1..ANCHOR_MAX) add(b.anchor)
+            addAll(b.endpointAliases.filter { it in 1..ANCHOR_MAX })
+        }.distinct()
+        val chosen = endpointIds.firstOrNull() ?: max(a.anchor, b.anchor)
+        return VectorPoint(
+            (a.x + b.x) / 2f, (a.y + b.y) / 2f,
+            (a.pressure + b.pressure) / 2f, (a.elevationOffset + b.elevationOffset) / 2f,
+            chosen, a.hidden && b.hidden,
+            if (endpointIds.isNotEmpty()) true else if (a.anchor >= b.anchor) a.auto else b.auto,
+            endpoint = endpointIds.isNotEmpty(),
+            endpointAliases = endpointIds.drop(1)
+        )
+    }
     private fun length(p: List<VectorPoint>): Float { var l = 0f; for (i in 1 until p.size) l += d(p[i - 1], p[i]); return l }
     private fun join(a: List<VectorPoint>, b: List<VectorPoint>): List<VectorPoint> = a.dropLast(1) + mid(a.last(), b.first()) + b.drop(1)
 
@@ -2201,7 +2238,8 @@ object VectorEraser {
         var i = kotlin.math.floor(pos).toInt(); var t = pos - i
         if (closed) i = ((i % segs) + segs) % segs else if (i >= segs) { i = segs - 1; t = 1f } else if (i < 0) { i = 0; t = 0f }
         val a = src[i]; val b = src[i + 1]
-        return VectorPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.pressure + (b.pressure - a.pressure) * t, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, if (t < 0.5f) a.anchor else b.anchor, if (t < 0.5f) a.hidden else b.hidden, if (t < 0.5f) a.auto else b.auto)
+        val q = if (t < 0.5f) a else b
+        return VectorPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.pressure + (b.pressure - a.pressure) * t, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, q.anchor, q.hidden, q.auto, q.endpoint, q.endpointAliases)
     }
 
     private fun slice(src: List<VectorPoint>, segs: Int, closed: Boolean, a: Float, b: Float): List<VectorPoint> {

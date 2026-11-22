@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            58, "2026-11-22", "Endpoint anchors are protected from curve-tip renumbering",
+            listOf(
+                "Structural endpoint anchors and automatic curve-tip anchors now use separate identity pools. Curve tips can only be reassigned to intermediate curve targets; they can no longer take an endpoint's number.",
+                "When two anchored stroke ends are collapsed into a merge join, both endpoint identities are carried through the join until refresh places them on the outer ends. Ghost-correspondence endpoints are preferred over unrelated new endpoint numbers. No .inb version bump; endpoint metadata uses additional sparse anchor entries. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             57, "2026-11-22", "Automatic curve anchors restored alongside ghost correspondence",
             listOf(
                 "Open vector lines once again receive automatic anchors at sharp curve tips as well as at their two outer endpoints. The tip-sensitivity setting continues to control how gentle a turn can be before it receives an anchor.",

@@ -1,3 +1,15 @@
+## 2026-11-22 — Keep structural endpoint identities separate from automatic curve tips
+
+- AI model: GPT-6
+- Category: Fixed / Vector anchors and ghost interpolation
+- Root cause: `AutoAnchors.refresh` used one pool for structural endpoints and automatic curve-tip anchors. During refresh after merges, an intermediate curve-tip identity could therefore be reassigned to an outer endpoint, changing the endpoint's correspondence number. `VectorMerge.mid` could also discard one of two endpoint identities when their points collapsed into a shared join.
+- Fix: `VectorPoint` now carries an explicit structural-endpoint marker, separate from the general automatic-anchor flag. `refresh` assigns endpoint identities only to the two outer endpoints and curve-tip identities only to interior targets. Neighbour-keyframe correspondence numbers are preferred when selecting endpoint identities. `VectorMerge.mid` carries both collapsed endpoint identities as temporary aliases until refresh relocates them. Legacy endpoint anchors are recognized by their first/last point positions.
+- Persistence: endpoint markers and temporary endpoint aliases are encoded as additional sparse Ink anchor metadata (`ENDPOINT_FLAG_OFFSET` / `ENDPOINT_ALIAS_OFFSET`). Existing `.inb` version is unchanged; older readers ignore the out-of-range metadata entries.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK / Java and signing configuration.
+- Validation: source-level review, serialization marker read/write path inspection, targeted Kotlin harness for endpoint-vs-tip identity refresh and collapsed-join endpoint aliases, complete diff and ZIP integrity checks. No Android Gradle build or tablet runtime test was available.
+- Follow-up: verify endpoint numbers through one- and multi-piece merges in both drawing directions, then confirm automatic curve-tip anchors remain intermediate and ghost-traced endpoint numbers remain stable across keyframes.
+
 ## 2026-11-22 — Ghost-traced strokes keep reference anchor numbers
 
 - AI model: GPT-6

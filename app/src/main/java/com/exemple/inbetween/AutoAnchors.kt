@@ -9,8 +9,8 @@ import kotlin.math.roundToInt
 
 /*
  * Automatic anchors for vector lines.
- *  - [AutoAnchors.targets]: an open line gets its two outer endpoints plus detected curve tips; a closed line gets detected curve tips (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.auto],
- *    so [AutoAnchors.refresh] moves them to the outer ends after constituent strokes are merged. Curve-tip anchors are refreshed with the curve; inherited/manual correspondence anchors remain in their original order. Anchors set by hand,
+ *  - [AutoAnchors.targets]: an open line gets its two outer endpoints plus detected curve tips; a closed line gets detected curve tips (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.endpoint],
+ *    separately from the general [VectorPoint.auto] flag, so curve-tip identities cannot be reassigned to endpoints during [AutoAnchors.refresh]. Curve-tip anchors are refreshed with the curve; inherited/manual correspondence anchors remain in their original order. Anchors set by hand,
  *    or inherited from a traced line, are never touched.
  *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers, placed at the nearest points of the new line in the same order.
  *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
@@ -32,7 +32,10 @@ object AutoAnchors {
 
     fun usedNumbers(strokes: List<VectorStroke>): Set<Int> {
         val out = HashSet<Int>()
-        for (s in strokes) for (p in s.points) if (p.anchor > 0) out.add(p.anchor)
+        for (s in strokes) for (p in s.points) {
+            if (p.anchor > 0) out.add(p.anchor)
+            out.addAll(p.endpointAliases.filter { it > 0 })
+        }
         return out
     }
 
@@ -119,74 +122,135 @@ object AutoAnchors {
             if (pts[i].anchor > 0) continue
             while (next in used && next <= ANCHOR_MAX) next++
             if (next > ANCHOR_MAX) break
-            used.add(next); pts[i] = pts[i].copy(anchor = next, auto = true); next++
+            used.add(next)
+            val endpoint = !s.isClosed && (i == 0 || i == pts.lastIndex)
+            pts[i] = pts[i].copy(anchor = next, auto = true, endpoint = endpoint, endpointAliases = emptyList())
+            next++
         }
         return s.copy(points = pts)
     }
 
     /**
      * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. Open-line endpoints and detected curve tips are targets. The numbers of points that are still ends or tips are
-     * kept (matched by position), anchors that are no longer one are dropped, new ones get free numbers (not used in this keyframe, not in [avoid]). Returns [strokes] itself when nothing changed.
+     * kept within their own class: endpoint identities only go to outer endpoints, and curve-tip identities only go to interior targets. New numbers avoid both this keyframe and [avoid]. Returns [strokes] itself when nothing changed.
      */
     fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null): List<VectorStroke> {
-        if (strokes.none { s -> s.points.any { it.auto && it.anchor > 0 } }) return strokes
+        if (strokes.none { s -> s.points.any { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() } }) return strokes
         val count = IntArray(ANCHOR_MAX + 2)
-        for (s in strokes) for (p in s.points) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
+        for (s in strokes) for (p in s.points) {
+            if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
+            for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]++
+        }
+        data class OldAnchor(val x: Float, val y: Float, val rank: Int, val endpoint: Boolean)
         val out = ArrayList<VectorStroke>(strokes.size)
         var changed = false
         for (s in strokes) {
-            if (s.points.none { it.auto && it.anchor > 0 } || (only != null && s.id !in only)) { out.add(s); continue } // a line that was not merged keeps its numbers, whatever happened around it
-            val old = s.points.filter { it.auto && it.anchor > 0 }
-            for (p in s.points) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]--
-            val cleared = s.points.map { if (it.auto) it.copy(anchor = 0, auto = false) else it }
-            // Existing automatic anchors are correspondence identities, not fresh
-            // allocations. A number may also exist in a neighbouring keyframe (that
-            // is precisely why this line is paired with it), so [avoid] must not block
-            // reuse. Shared numbers are prioritized below over unrelated fresh auto
-            // anchors that may have arrived with another stroke during a merge.
-            // Only anchors still used elsewhere in this cel, plus non-auto anchors on
-            // this stroke, block reuse of an existing identity.
+            if (s.points.none { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() } || (only != null && s.id !in only)) {
+                out.add(s); continue
+            }
+            val old = ArrayList<OldAnchor>()
+            for ((pi, p) in s.points.withIndex()) {
+                if (p.auto && p.anchor in 1..ANCHOR_MAX) {
+                    // Legacy auto anchors at the actual first/last point are structural
+                    // endpoints even if they predate the explicit endpoint marker.
+                    val isEndpoint = p.endpoint || (!s.isClosed && (pi == 0 || pi == s.points.lastIndex))
+                    old.add(OldAnchor(p.x, p.y, p.anchor, isEndpoint))
+                }
+                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) old.add(OldAnchor(p.x, p.y, r, true))
+            }
+            for (p in s.points) {
+                if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]--
+                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]--
+            }
+            val cleared = s.points.map { p ->
+                if (p.auto) p.copy(anchor = 0, auto = false, endpoint = false, endpointAliases = emptyList())
+                else if (p.endpointAliases.isNotEmpty()) p.copy(endpointAliases = emptyList())
+                else p
+            }
+            // Existing identities used elsewhere in this cel and non-auto anchors on
+            // this line are unavailable. Neighbour-frame numbers are deliberately not
+            // blockers when reusing an existing correspondence identity.
             val claimed = HashSet<Int>()
             for (q in 1..ANCHOR_MAX) if (count[q] > 0) claimed.add(q)
             for (p in cleared) if (p.anchor > 0) claimed.add(p.anchor)
-            val tol = max(3f, pathLength(cleared, s.isClosed) * 0.03f)
-            val pool = old.toMutableList()
             val pts = cleared.toMutableList()
-            var next = 1
-            val tg = targets(cleared, s.isClosed, sens)
+            val targets = targets(cleared, s.isClosed, sens)
+            val endpointTargets = if (!s.isClosed && cleared.size >= 2) listOf(0, cleared.lastIndex).filter { pts[it].anchor == 0 } else emptyList()
+            val endpointPool = old.filter { it.endpoint && it.rank !in claimed }.distinctBy { it.rank }
+            val tipPool = old.filter { !it.endpoint && it.rank !in claimed }.distinctBy { it.rank }.toMutableList()
+
+            // Structural endpoint identities can only be assigned to the two outer
+            // endpoints. Prefer identities shared with the neighbouring keyframes;
+            // freshly generated endpoints from an unrelated merged stroke must not
+            // replace the ghost's endpoint pair. Choose the pair jointly so direction
+            // reversals and asymmetric extensions do not swap the two identities.
+            if (endpointTargets.size == 2 && endpointPool.size >= 2) {
+                val a = endpointTargets[0]; val b = endpointTargets[1]
+                var bestA: OldAnchor? = null; var bestB: OldAnchor? = null; var bestCost = Double.POSITIVE_INFINITY
+                for (x in endpointPool) for (y in endpointPool) {
+                    if (x.rank == y.rank) continue
+                    val priority = (if (x.rank in avoid) 0.0 else 1_000_000.0) + (if (y.rank in avoid) 0.0 else 1_000_000.0)
+                    val cost = priority + hypot(x.x - pts[a].x, x.y - pts[a].y).toDouble() + hypot(y.x - pts[b].x, y.y - pts[b].y).toDouble()
+                    if (cost < bestCost) { bestCost = cost; bestA = x; bestB = y }
+                }
+                if (bestA != null && bestB != null) {
+                    pts[a] = pts[a].copy(anchor = bestA.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(bestA.rank)
+                    pts[b] = pts[b].copy(anchor = bestB.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(bestB.rank)
+                }
+            } else if (endpointTargets.isNotEmpty() && endpointPool.isNotEmpty()) {
+                val target = endpointTargets.minByOrNull { ti -> endpointPool.minOf { (if (it.rank in avoid) 0f else 1_000_000f) + hypot(it.x - pts[ti].x, it.y - pts[ti].y) } }!!
+                val pick = endpointPool.minByOrNull { (if (it.rank in avoid) 0f else 1_000_000f) + hypot(it.x - pts[target].x, it.y - pts[target].y) }
+                if (pick != null) { pts[target] = pts[target].copy(anchor = pick.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(pick.rank) }
+            }
+
+            // Curve-tip identities are a separate pool: they can only populate
+            // intermediate targets and can never take either endpoint's number.
+            val interiorTargets = if (s.isClosed) targets else targets.filter { it != 0 && it != pts.lastIndex }
+            val tol = max(3f, pathLength(cleared, s.isClosed) * 0.03f)
             val unmatched = ArrayList<Int>()
-            for (i in tg) { // 1. a target that lies where an automatic anchor was keeps its number
+            for (i in interiorTargets) {
                 if (pts[i].anchor > 0) continue
-                // Prefer anchors shared with neighbouring keyframes: they are the
-                // correspondence contract. A separately-created stroke may bring
-                // its own fresh auto anchors to the merge; those must not displace
-                // the ghost's endpoint identities merely because they sit closer.
-                val candidates = pool.filter { it.anchor in avoid && it.anchor !in claimed }.ifEmpty { pool.filter { it.anchor !in claimed } }
-                val near = candidates.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol }
-                if (near != null) { pool.remove(near); claimed.add(near.anchor); pts[i] = pts[i].copy(anchor = near.anchor, auto = true) } else unmatched.add(i)
+                val candidates = tipPool.filter { it.rank !in claimed }
+                val preferred = candidates.filter { it.rank in avoid }.ifEmpty { candidates }
+                val near = preferred.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }
+                    ?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol }
+                if (near != null) {
+                    tipPool.remove(near); claimed.add(near.rank)
+                    pts[i] = pts[i].copy(anchor = near.rank, auto = true, endpoint = false)
+                } else unmatched.add(i)
             }
-            for (i in unmatched) { // 2. a new end or tip takes over an old identity; correspondence anchors outrank unrelated fresh anchors
-                val available = pool.filter { it.anchor !in claimed }
-                val heirs = available.filter { it.anchor in avoid }.ifEmpty { available }
+            for (i in unmatched) {
+                val available = tipPool.filter { it.rank !in claimed }
+                val heirs = available.filter { it.rank in avoid }.ifEmpty { available }
                 val heir = heirs.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) } ?: continue
-                pool.remove(heir); claimed.add(heir.anchor); pts[i] = pts[i].copy(anchor = heir.anchor, auto = true)
+                tipPool.remove(heir); claimed.add(heir.rank)
+                pts[i] = pts[i].copy(anchor = heir.rank, auto = true, endpoint = false)
             }
-            for (i in unmatched) { // 3. what is left gets a free number
+            for (i in unmatched) {
                 if (pts[i].anchor > 0) continue
-                while ((next in claimed || next in avoid) && next <= ANCHOR_MAX) next++
+                val next = nextFree(claimed, avoid)
                 if (next > ANCHOR_MAX) continue
-                claimed.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
+                claimed.add(next); pts[i] = pts[i].copy(anchor = next, auto = true, endpoint = false)
             }
-            for (p in pts) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
+            for (p in pts) {
+                if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
+                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]++
+            }
             if (pts == s.points) out.add(s) else { out.add(s.copy(points = pts)); changed = true }
         }
         return if (changed) out else strokes
     }
 
+    private fun nextFree(claimed: Set<Int>, avoid: Set<Int>): Int {
+        var n = 1
+        while (n <= ANCHOR_MAX && (n in claimed || n in avoid)) n++
+        return n
+    }
+
     /** True when both ends of an open line carry an anchor (closed lines and points have no ends). */
     fun endsAnchored(s: VectorStroke): Boolean = s.isClosed || s.points.size < 2 || (s.points.first().anchor > 0 && s.points.last().anchor > 0)
 
-    /** The two end points of an open line always carry an anchor: a missing one is added on the exact end point, with a number not in [taken] (marked automatic). */
+    /** The two end points of an open line always carry a structural endpoint anchor: a missing one is added on the exact end point, with a number not in [taken]. */
     fun withEnds(s: VectorStroke, taken: Set<Int>): VectorStroke {
         if (s.fill != 0 || s.isClosed || s.points.size < 2 || endsAnchored(s)) return s
         val used = HashSet<Int>(taken)
@@ -197,7 +261,7 @@ object AutoAnchors {
             if (pts[i].anchor > 0) continue
             while (next in used && next <= ANCHOR_MAX) next++
             if (next > ANCHOR_MAX) break
-            used.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
+            used.add(next); pts[i] = pts[i].copy(anchor = next, auto = true, endpoint = true, endpointAliases = emptyList())
         }
         return s.copy(points = pts)
     }
@@ -335,12 +399,12 @@ object AutoAnchors {
         val out = ArrayList<VectorPoint>(n + inserts.size)
         for (j in 0 until n) {
             val base = s.points[j]
-            out.add(vertexRank[j]?.let { base.copy(anchor = it, auto = it in structuralRanks) } ?: base)
+            out.add(vertexRank[j]?.let { base.copy(anchor = it, auto = it in structuralRanks, endpoint = it in structuralRanks, endpointAliases = emptyList()) } ?: base)
             inserts[j]?.sortedBy { it.first }?.forEach { (p, r) ->
                 val l = cum[j + 1] - cum[j]
                 val t = if (l < 1e-6f) 0f else ((p - cum[j]) / l).coerceIn(0f, 1f)
                 val a = s.points[j]; val b = s.points[(j + 1) % n]
-                out.add(VectorPoint(x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, pressure = a.pressure + (b.pressure - a.pressure) * t, elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, anchor = r, auto = r in structuralRanks))
+                out.add(VectorPoint(x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, pressure = a.pressure + (b.pressure - a.pressure) * t, elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, anchor = r, auto = r in structuralRanks, endpoint = r in structuralRanks))
             }
         }
         return s.copy(points = out)
