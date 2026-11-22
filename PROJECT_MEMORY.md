@@ -677,9 +677,10 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - Validation: source review and focused geometry harness checks; no Android Gradle build or tablet test was performed.
 
 
-## 2026-11-22 — Curve-aware fitting between ghost correspondence anchors
-- Ghost-traced vector strokes now run through the same `VectorSimplify.fit` curve-aware fitter used by ordinary vector brush strokes, after ghost anchor inheritance.
-- `VectorSimplify.fitAnchored` divides the path at every correspondence anchor, structural endpoint and merge endpoint alias, then fits each span independently. This removes redundant pen samples without allowing simplification to move, remove, reorder or renumber protected anchor points.
-- The screen-zoom-aware tolerance and brush-width pressure weighting follow the existing vector brush capture path. No `.inb` format change.
-- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `Canvas.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
-- Validation: actual `VectorSimplify` implementation compiled in an isolated Kotlin harness with model / tessellator stubs; tested reduction of redundant samples and exact preservation / ordering of multiple inherited anchors and structural endpoints. Full Android Gradle build and tablet behavior remain unverified.
+## 2026-11-22 — Curve-aware fitting preserves ghost curve apexes
+- Ghost-traced vector strokes use the same curve-aware `VectorSimplify.fit` algorithm as ordinary vector brush strokes, after ghost anchor inheritance.
+- `VectorSimplify.fitAnchored` now performs one continuous fit over the complete open stroke while marking correspondence anchors, structural endpoints and merge endpoint aliases as non-removable samples. It no longer splits the stroke into independent fitting spans.
+- Reason: splitting at every anchor made `smoothThrough` treat each anchor as an artificial open-span endpoint. That changed its Catmull–Rom tangent context and could make a detected curve apex render like a corner or shift the visible extreme away from the detected anchor. A global fit preserves neighbouring control-point context while retaining the exact anchor samples and order.
+- The screen-zoom-aware tolerance and brush-width pressure weighting still follow the existing vector brush capture path. No `.inb` format change.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`. `Canvas.kt` call site unchanged.
+- Validation: source inspection and focused Kotlin harness for protected-sample retention and redundant-point reduction; ZIP integrity and full diff review. Full Android Gradle build and tablet behavior remain unverified.

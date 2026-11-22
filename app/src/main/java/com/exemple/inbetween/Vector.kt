@@ -787,15 +787,24 @@ object VectorSimplify {
      * rather than to straight chords. It starts from a coarse Ramer-Douglas-Peucker pass and adds a point only in a span where the drawn curve
      * is farther than [epsilon] from the pen samples, so gentle curves keep few points and still look hand drawn, with no flat facets.
      */
-    fun fit(pts: List<VectorPoint>, epsilon: Float, widthScale: Float = 0f): List<VectorPoint> {
+    fun fit(pts: List<VectorPoint>, epsilon: Float, widthScale: Float = 0f): List<VectorPoint> =
+        fitKeeping(pts, epsilon, widthScale, emptySet())
+
+    /** Same curve-aware fitter, with selected source samples made non-removable. */
+    private fun fitKeeping(pts: List<VectorPoint>, epsilon: Float, widthScale: Float, protected: Set<Int>): List<VectorPoint> {
         val n = pts.size
         if (n < 4) return rdp(pts, epsilon, widthScale)
         val keep = rdpKeep(pts, epsilon * 1.8f, widthScale)
+        for (i in protected) if (i in 0 until n) keep[i] = true
         var round = 0
         while (round++ < 6) {
             val idx = ArrayList<Int>()
             for (i in 0 until n) if (keep[i]) idx.add(i)
             if (idx.size >= n) break
+            // Fit the entire stroke as one curve. Splitting at correspondence anchors
+            // changes endpoint tangent handling in smoothThrough() and can turn every
+            // apex into an artificial corner, shifting the visible extreme away from
+            // its detected anchor.
             val line = VectorTessellator.centerline(idx.map { pts[it] }, false)
             if (line.size < 4) break
             var added = false
@@ -824,23 +833,18 @@ object VectorSimplify {
     fun fitAnchored(stroke: VectorStroke, epsilon: Float, widthScale: Float = 0f): VectorStroke {
         val pts = stroke.points
         if (stroke.isClosed || pts.size < 4) return stroke
-        val boundaries = (listOf(0) + pts.indices.filter { i ->
+        // Keep every correspondence / structural sample, but do not split the stroke
+        // into independent fitting spans. The renderer computes Catmull-Rom tangents
+        // from neighbouring control points; treating each anchor as a span endpoint
+        // forces endpoint tangents there and makes a detected apex behave like a corner.
+        // A single global fit preserves the natural tangent context on both sides while
+        // making anchor samples non-removable and keeping their order / identities.
+        val protected = pts.indices.filterTo(HashSet()) { i ->
             val p = pts[i]
             p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty()
-        } + listOf(pts.lastIndex)).distinct().sorted()
-        if (boundaries.size <= 2) {
-            val fitted = fit(pts, epsilon, widthScale)
-            return if (fitted.size == pts.size) stroke else stroke.copy(points = fitted)
         }
-        val out = ArrayList<VectorPoint>(pts.size)
-        for (k in 0 until boundaries.lastIndex) {
-            val a = boundaries[k]
-            val b = boundaries[k + 1]
-            if (b <= a) continue
-            val fitted = fit(pts.subList(a, b + 1), epsilon, widthScale)
-            if (out.isEmpty()) out.addAll(fitted) else out.addAll(fitted.drop(1))
-        }
-        return if (out.size == pts.size) stroke else stroke.copy(points = out)
+        val fitted = fitKeeping(pts, epsilon, widthScale, protected)
+        return if (fitted.size == pts.size) stroke else stroke.copy(points = fitted)
     }
 
     private fun distToLine(line: FloatArray, px: Float, py: Float): Float {

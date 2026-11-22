@@ -1,3 +1,13 @@
+## 2026-11-22 — Keep curve apex tangent context during ghost-trace smoothing
+- AI model: GPT-6
+- Category: Fixed / Vector ghost tracing and curve anchors
+- Root cause: `fitAnchored` split the traced path into independent spans at every correspondence anchor. The renderer's `smoothThrough` treats open-span endpoints specially when calculating Catmull–Rom tangents, so an interior curve apex became an artificial endpoint. Although the anchor sample itself survived, the rendered curve could lose or shift its visible extreme around that point.
+- Fix: `fitAnchored` now runs one continuous curve-aware fit over the entire open stroke and supplies correspondence anchors, structural endpoints and merge endpoint aliases as protected sample indices. This keeps the natural neighbouring tangent context while ensuring protected anchor points cannot be removed or reordered.
+- No `.inb` format change. `Canvas.kt` call site and brush fitting settings remain unchanged.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: focused Kotlin harness for protected anchor retention and redundant-point reduction, source diff review and ZIP integrity check. No full Android Gradle build or tablet runtime test was performed.
+
 ## 2026-11-22 — Reuse smart vector-brush fitting between ghost anchors
 - AI model: GPT-6
 - Category: Improved / Vector ghost tracing

@@ -38,9 +38,16 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            62, "2026-11-22", "Ghost smoothing preserves curve apexes",
+            listOf(
+                "Ghost-traced strokes now use one continuous curve fit instead of fitting separately between anchors. Correspondence anchors remain non-removable, but the fitter keeps the neighbouring tangent context around each anchor so an apex is not treated as an artificial endpoint or corner.",
+                "Structural endpoints and merge endpoint aliases remain protected. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             61, "2026-11-22", "Ghost-traced vector lines keep anchors with fewer points",
             listOf(
-                "When drawing over a ghost onion-skin line, the new vector stroke now reuses the same curve-aware point fitting as ordinary vector brush strokes. The fitter works separately between correspondence anchors, so redundant pen samples can be removed without moving, deleting or reordering the ghost's anchor points.",
+                "When drawing over a ghost onion-skin line, the new vector stroke reuses the same curve-aware point fitting as ordinary vector brush strokes. Correspondence anchors are retained as protected samples during fitting.",
                 "Structural endpoints and merge endpoint aliases are also protected. No .inb format change. Full Android build and tablet behavior remain unverified."
             )
         ),
