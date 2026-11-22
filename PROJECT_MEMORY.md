@@ -709,3 +709,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `AutoAnchors.inherit`, ghost-elsewhere case: a short piece (< 75 % of the free ghost) consumes free ghost anchors in order at absolute arc-length spacing from `startF` = max(arc of the last claimed anchor, `consumed`), where `consumed` = `AutoAnchors.tracedLength(current strokes carrying ghost numbers)` supplied by `Canvas.kt` `vecAnchorNew`; anchors beyond the piece stay free. Direction of a piece = ghost tangent test; direction of a full-length line = forward / reversed shape comparison (clear win only). Pieces are expected in ghost order. No `.inb` change.
 - Unverified: not compiled, not run on a device.
 
+## 2026-11-22 — Ghost mode inherits end anchors only (see CHANGELOG)
+- `AutoAnchors.inherit` and `Canvas.kt` `vecAnchorNew` use only the first and last anchor of an open ghost line (`ghostEnds`); in-between ghost anchors are ignored (closed ghost lines keep theirs). This narrows the piece logic of the previous section: a piece consumes only the ghost's end anchors. No `.inb` change.
+- Unverified: not compiled, not run on a device.
+

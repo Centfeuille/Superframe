@@ -436,7 +436,10 @@ object AutoAnchors {
         val n = s.points.size
         val gm = g.points.size
         if (s.fill != 0 || n < 2 || gm < 2) return null
-        val ga = g.points.withIndex().filter { it.value.anchor > 0 && it.value.anchor !in blocked }
+        // Ghost mode transfers ONLY the two end anchors of an open ghost line (a closed line has no ends and keeps its anchors).
+        // Anchors between the ends are neither inherited nor used for placement.
+        val ghostEnds = g.points.withIndex().filter { it.value.anchor > 0 && (g.isClosed || it.index == 0 || it.index == gm - 1) }
+        val ga = ghostEnds.filter { it.value.anchor !in blocked }
         if (ga.isEmpty()) return null
         val sRing = s.isClosed && n >= 3
         val gRing = g.isClosed && gm >= 3
@@ -476,7 +479,7 @@ object AutoAnchors {
         // outside this stroke, testing only [ga] can falsely classify a partial trace
         // as a complete, near-aligned trace and stretch the remaining anchors over
         // the whole new stroke by normalized path progress.
-        val allGhostAnchors = g.points.withIndex().filter { it.value.anchor > 0 }
+        val allGhostAnchors = ghostEnds
         val allNear = allGhostAnchors.isNotEmpty() && allGhostAnchors.all {
             distToLine(it.value.x, it.value.y) <= nearTol
         }
@@ -514,7 +517,7 @@ object AutoAnchors {
                 val t = if (l < 1e-6f) 0f else ((arc - gcum[j]) / l).coerceIn(0f, 1f)
                 return Pair(g.points[j].x + (g.points[j + 1].x - g.points[j].x) * t, g.points[j].y + (g.points[j + 1].y - g.points[j].y) * t)
             }
-            val blockedArcs = g.points.withIndex().filter { it.value.anchor > 0 && it.value.anchor in blocked }.map { gcum[it.index] }
+            val blockedArcs = ghostEnds.filter { it.value.anchor in blocked }.map { gcum[it.index] }
             val firstFree = gcum[ga.first().index]
             val lastFree = gcum[ga.last().index]
             // where the previous pieces stopped on the ghost: at least the arc of the last claimed anchor, or the length already traced
@@ -531,6 +534,9 @@ object AutoAnchors {
                     val endR = blockedArcs.filter { it > lastFree }.minOrNull() ?: gtotal
                     if (total < 0.75f * endR) { reversed = true; order = ga.reversed(); arc0 = endR }
                 }
+            } else if (startF > 0f) {
+                // a later, long piece continues the ghost in the same direction
+                reversed = false; order = ga
             } else if (total > 1e-3f && gtotal > 1e-3f) {
                 val k = 24
                 fun sampleAt(px: (Int) -> Float, py: (Int) -> Float, cu: FloatArray, count: Int, arc: Float): Pair<Float, Float> {

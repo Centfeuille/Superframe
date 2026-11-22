@@ -687,7 +687,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         val ri = l.cels.indexOfFirst { it === refCel }
                         if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     }
-                    val ghostNums = ghost.points.filter { it.anchor > 0 }.map { it.anchor }
+                    val gPts = ghost.points; val gClosed = ghost.isClosed
+                    val ghostNums = gPts.withIndex().filter { it.value.anchor > 0 && (gClosed || it.index == 0 || it.index == gPts.lastIndex) }.map { it.value.anchor } // ghost mode uses the end anchors only
                     if (ghostNums.isNotEmpty() && ghostNums.all { it in blocked }) {
                         anchorGhostTrace[0] = true
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey

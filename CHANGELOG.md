@@ -1,3 +1,14 @@
+## 2026-11-22 — Ghost mode: only the end anchors are inherited
+- AI model: Claude
+- Category: Changed / Vector ghost tracing
+- Request: remove the in-between points between the end points in ghost line mode (the in-between anchors kept coming out crowded or misplaced).
+- Change: `AutoAnchors.inherit` now builds its anchor list from the two end anchors of an open ghost line only (`ghostEnds`); anchors between the ends on the ghost are not inherited and are not used for overlap classification or for the arc positions of the piece logic. `Canvas.kt` `vecAnchorNew` applies the same rule when it checks whether the ghost's anchors are already claimed and when it measures the length already traced. Closed ghost lines have no ends and keep their anchors. The piece-by-piece logic of the previous entry is kept (the first piece gets the start anchor, the last piece the end anchor, middle pieces get only fresh end anchors that disappear when merged). Two small guards were added: the shape-based direction test now runs only for a fresh whole-line trace, and a later long piece is always read in the ghost's forward direction.
+- Existing ghost lines that still carry in-between anchors keep them in the file; they are simply ignored when tracing. No `.inb` format change.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `Canvas.kt`, `WhatsNew.kt` (note 67), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: source review of every use of the ghost anchor list in `inherit` and of the Canvas call site; complete diff review. Not compiled (no Kotlin compiler available) and not run on a device.
+- Known follow-up: compile; trace a moved ghost as one stroke and in several pieces and confirm 1 sits on the start and 3 on the end; a stroke drawn in the opposite direction to the ghost is read by shape only for a whole-line trace.
+
 ## 2026-11-22 — Ghost tracing in pieces: no piled-up in-between anchors, correct direction (1 / 3 no longer swapped)
 - AI model: Claude
 - Category: Fixed / Vector ghost tracing

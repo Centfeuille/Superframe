@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            67, "2026-11-22", "Ghost tracing keeps only the end anchors",
+            listOf(
+                "When you trace a ghost line, the new line now takes only the ghost's two end anchors. Anchors between the ends on the ghost are ignored, so nothing is placed or piled up between the ends of the line you draw.",
+                "Drawn in several pieces, the first piece gets the ghost's start anchor and the last piece its end anchor. Closed lines are unchanged. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             66, "2026-11-22", "Tracing a ghost piece by piece no longer piles anchors up",
             listOf(
                 "When the drawing has moved away from the ghost and you trace the ghost in several pieces, each piece now takes the next ghost anchors at the ghost's own spacing, starting where the previous piece stopped. Before, the first short piece received every in-between anchor squeezed into a few pixels, and anchors 1 and 3 could end up swapped.",
