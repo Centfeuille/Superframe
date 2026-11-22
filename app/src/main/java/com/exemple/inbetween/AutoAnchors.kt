@@ -461,7 +461,15 @@ object AutoAnchors {
         // (2) the new line covers only part of the ghost: take only anchors near this part; the others stay for later strokes.
         // (3) the new line is elsewhere (the drawing moved): map every still-free ghost anchor by its relative path position.
         val nearTol = 0.15f * diag + 4f
-        val allNear = ga.all { distToLine(it.value.x, it.value.y) <= nearTol }
+        // Classify geometric overlap using every reference anchor, not only the
+        // currently-unblocked subset. If earlier traced pieces have claimed anchors
+        // outside this stroke, testing only [ga] can falsely classify a partial trace
+        // as a complete, near-aligned trace and stretch the remaining anchors over
+        // the whole new stroke by normalized path progress.
+        val allGhostAnchors = g.points.withIndex().filter { it.value.anchor > 0 }
+        val allNear = allGhostAnchors.isNotEmpty() && allGhostAnchors.all {
+            distToLine(it.value.x, it.value.y) <= nearTol
+        }
         // The ghost's automatically detected interior anchors represent curve-lobe
         // extrema. When tracing, map those identities to the corresponding extrema
         // detected on the new stroke by ordered path progress, rather than to whichever
@@ -506,8 +514,14 @@ object AutoAnchors {
             else {
                 val isCurveFeature = a.value.auto && !a.value.endpoint && !atStart && !atEnd
                 val ghostU = (gcum[gi] / gtotal).let { if (reversed) 1f - it else it }
-                val projected = if (mode == 2) nearestProgress(a.value.x, a.value.y, last + gap) else -1f
-                val featureU = if (mode == 2 && projected >= 0f) projected / total else ghostU
+                // In both spatially-aligned modes, project onto the new path. Mode 1
+                // means the complete reference contour is near this trace; mode 2
+                // means this is a partial trace of the reference. Using raw ghostU in
+                // mode 1 assumes identical path lengths and point progress, which
+                // shifts apex anchors whenever the artist's trace stretches/compresses
+                // a curve even though it lies directly over the ghost.
+                val projected = if (mode != 3) nearestProgress(a.value.x, a.value.y, last + gap) else -1f
+                val featureU = if (projected >= 0f) projected / total else ghostU
                 val featureMatch = if (isCurveFeature && tracedFeatureDistances.isNotEmpty()) {
                     tracedFeatureDistances.asSequence()
                         .filter { it !in claimedFeatureDistances && it >= last + gap }

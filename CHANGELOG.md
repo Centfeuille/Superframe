@@ -1,3 +1,12 @@
+## 2026-11-22 — Map ghost curve anchors onto the actual traced contour
+- AI model: GPT-6
+- Category: Fixed / Vector ghost tracing and interpolation correspondence
+- Root cause: ghost-trace classification checked only the currently available (unblocked) reference anchors. If previous traced pieces had already claimed anchors outside the current trace, the remaining subset could all be near the new stroke and incorrectly classify a partial trace as a complete near-aligned trace. In that mode, automatic curve features were matched by raw normalized ghost progress rather than by their projected progress on the actual new path, so stretched or compressed curves could receive misplaced intermediate anchors.
+- Fix: overlap classification now checks all anchored points on the reference ghost, including blocked anchors. In both spatially aligned modes, ordered nearest-path projection supplies the progress used to match automatic curve features to the new stroke's detected extrema. The monotonic order constraint and original anchor numbers remain intact; moved-away traces retain the relative-progress fallback.
+- No `.inb` format change. Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, dependency catalogs, SDK/Java and signing configuration.
+- Validation: compiled the actual `AutoAnchors.kt` with minimal model stubs and ran a focused Kotlin geometry harness for a partial trace with previously claimed anchors; verified remaining anchor order and projected positions; the same regression assertion fails against the pre-fix implementation (first inherited feature at 64.7 px instead of the correctly projected 55.7 px). Reviewed the complete source diff and ZIP integrity. No full Android Gradle build or tablet runtime test has been performed.
+
 ## 2026-11-22 — Non-destructive guide joints for vector interpolation
 - AI model: GPT-6
 - Category: Improved / Vector interpolation

@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            64, "2026-11-22", "Ghost curve anchors follow the traced contour",
+            listOf(
+                "When tracing a ghost, automatic intermediate anchors now use ordered projection onto the actual drawn path, so curve apexes follow the corresponding contour feature even when the trace is stretched or compressed.",
+                "Overlap detection now considers all reference anchors, including ones already claimed by earlier traced pieces, so a partial trace is not mistaken for a complete trace. Existing anchor numbers and order are preserved. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             63, "2026-11-22", "Guide joints shape interpolated in-betweens",
             listOf(
                 "Turn on Guide joints and tap the interpolated ghost curve to add a joint. Drag a joint to reshape the in-between locally; select it and use Delete to remove it. The joints are separate from correspondence anchors and do not modify either original keyframe.",
