@@ -642,7 +642,25 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
      * Anchors for a line just drawn on [l]. With the ghost on and the line lying on an untraced ghost line it takes that line's anchor numbers (the ghost gets automatic anchors
      * first, as a separate undo step, when it has none); otherwise it gets automatic anchors at its ends and tips, with numbers that none of the neighbouring keyframes uses.
      */
-    fun vecAnchorNew(l: Layer, stroke: VectorStroke): VectorStroke {
+    val anchorDeferred = remember { BooleanArray(1) }
+    /** Fresh automatic anchors for a stroke that is not traced over a ghost line. */
+    fun vecFreshAnchors(l: Layer, stroke: VectorStroke): VectorStroke {
+        if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
+        val idx = l.indexAt(cut.time)
+        val cel = l.cels.getOrNull(idx)
+        val blocked = AutoAnchors.usedNumbers(cel?.vectorStrokes() ?: emptyList())
+        return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()), ed.vecTipSens)
+    }
+    /** After [VectorMerge.attach]: the part of the new stroke that stayed a line of its own (crossing / T junction) gets its anchors now; a stroke that joined a line gets none, so the line keeps its own numbers. */
+    fun vecFreshAfterMerge(l: Layer, merged: List<VectorStroke>, newId: String): List<VectorStroke> {
+        if (!ed.vecAutoAnchor) return merged
+        val idx = l.indexAt(cut.time)
+        val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx)
+        return merged.map { s -> if (s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(s, used, ed.vecTipSens) else s }
+    }
+    /** [deferFresh]: the caller will try to merge the stroke into other lines; it then gets no anchors of its own here (see [anchorDeferred]) so a line drawn in several strokes keeps its first numbers. */
+    fun vecAnchorNew(l: Layer, stroke: VectorStroke, deferFresh: Boolean = false): VectorStroke {
+        anchorDeferred[0] = false
         if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
         val idx = l.indexAt(cut.time)
         val cel = l.cels.getOrNull(idx)
@@ -670,7 +688,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 }
             }
         }
-        return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()), ed.vecTipSens)
+        if (deferFresh) { anchorDeferred[0] = true; return stroke }
+        return vecFreshAnchors(l, stroke)
     }
 
     /** After a line was merged into others: its automatic anchors follow the new shape. */
@@ -690,15 +709,17 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val src = if (closed) vp + vp.first() else vp
             var simple = VectorSimplify.fit(src, 0.35f)
             if (closed) simple = simple.dropLast(1)
-            val shape = vecAnchorNew(l, VectorStroke(newStrokeId(), simple, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), closed, a.coerceIn(0.05f, 1f), br.aa).withBrush(br))
+            var shape = vecAnchorNew(l, VectorStroke(newStrokeId(), simple, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), closed, a.coerceIn(0.05f, 1f), br.aa).withBrush(br), deferFresh = ed.vecMerge && !closed)
+            val shapeDeferred = anchorDeferred[0]
             if (ed.vecMerge && !closed) { // Line / shapes tool with Merge on: an end that touches another line joins it (same rules and sharp joins as the Brush tool)
                 val idx = l.indexAt(cut.time)
                 val cel = l.cels.getOrNull(idx)
                 if (cel != null) {
                     val merged = VectorMerge.attach(cel.vectorStrokes(), shape, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                    if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, merged)); return }
+                    if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, shape.id))); return }
                 }
             }
+            if (shapeDeferred) shape = vecFreshAnchors(l, shape) // it did not merge into anything: it is a line of its own
             commitOp(l, shape.toInk())
             return
         }
@@ -892,15 +913,17 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val dense = vp?.taperEnd(vecPts.toList()) ?: vecPts.toList()
         val eps = (0.8f / vecZoom()).coerceIn(0.25f, 3f)
         val pts = VectorSimplify.fit(dense, eps, br.size)
-        val stroke = vecAnchorNew(l, VectorStroke(newStrokeId(), pts, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), false, br.opacity.coerceIn(0.05f, 1f), br.aa).withBrush(br))
+        var stroke = vecAnchorNew(l, VectorStroke(newStrokeId(), pts, ed.color.toArgb() or (0xFF shl 24), br.size, br.id.toString(), false, br.opacity.coerceIn(0.05f, 1f), br.aa).withBrush(br), deferFresh = ed.vecMerge)
+        val strokeDeferred = anchorDeferred[0]
         if (ed.vecMerge) {
             val idx = l.indexAt(cut.time)
             val cel = l.cels.getOrNull(idx)
             if (cel != null) {
                 val merged = VectorMerge.attach(cel.vectorStrokes(), stroke, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, merged)); return }
+                if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, stroke.id))); return }
             }
         }
+        if (strokeDeferred) stroke = vecFreshAnchors(l, stroke) // it did not merge into anything: it is a line of its own
         commitOp(l, stroke.toInk())
     }
 

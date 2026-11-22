@@ -144,13 +144,22 @@ object AutoAnchors {
             val pool = old.toMutableList()
             val pts = cleared.toMutableList()
             var next = 1
-            for (i in targets(cleared, s.isClosed, sens)) {
+            val tg = targets(cleared, s.isClosed, sens)
+            val unmatched = ArrayList<Int>()
+            for (i in tg) { // 1. a target that lies where an automatic anchor was keeps its number
                 if (pts[i].anchor > 0) continue
                 val near = pool.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol && it.anchor !in taken }
-                val r: Int
-                if (near != null) { pool.remove(near); r = near.anchor }
-                else { while (next in taken && next <= ANCHOR_MAX) next++; if (next > ANCHOR_MAX) continue; r = next }
-                taken.add(r); pts[i] = pts[i].copy(anchor = r, auto = true)
+                if (near != null) { pool.remove(near); taken.add(near.anchor); pts[i] = pts[i].copy(anchor = near.anchor, auto = true) } else unmatched.add(i)
+            }
+            for (i in unmatched) { // 2. a new end or tip (the line was extended, e.g. drawn in several strokes) takes over the number of the anchor that stopped being one, the nearest first: the line keeps its numbers instead of counting up
+                val heir = pool.filter { it.anchor !in taken }.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) } ?: continue
+                pool.remove(heir); taken.add(heir.anchor); pts[i] = pts[i].copy(anchor = heir.anchor, auto = true)
+            }
+            for (i in unmatched) { // 3. what is left gets a free number
+                if (pts[i].anchor > 0) continue
+                while (next in taken && next <= ANCHOR_MAX) next++
+                if (next > ANCHOR_MAX) continue
+                taken.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
             }
             for (p in pts) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
             if (pts == s.points) out.add(s) else { out.add(s.copy(points = pts)); changed = true }
