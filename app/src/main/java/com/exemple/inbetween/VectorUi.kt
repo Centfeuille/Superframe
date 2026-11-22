@@ -135,8 +135,10 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val has = sc != null && sc.sameCels(selCels) && sel.isNotEmpty()
     val brushRow = pointsMode
     val brushMode = ed.vecBrush
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    if (brushRow && brushMode != 0) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 280.dp, max = 360.dp)) {
+    // Brush / Merge sliders flush with the left edge of the canvas, Auto anchors flush with the right edge, the button bar in the middle
+    Box(modifier.fillMaxWidth()) {
+    Column(Modifier.align(Alignment.BottomStart), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (brushRow && brushMode != 0) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("${listOf("", "Shift", "Smoothen", "Distort")[brushMode.coerceIn(1, 3)]} brush", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Radius", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
@@ -149,7 +151,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             Text("${(ed.vecBrushStrength * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
         }
     }
-    if (((drawBar || lineBar) && ed.vecMerge) || (pointBar && pointsMode)) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 280.dp, max = 360.dp)) {
+    if (((drawBar || lineBar) && ed.vecMerge) || (pointBar && pointsMode)) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("Merge", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Radius", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
@@ -162,16 +164,18 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             Text(if (ed.vecMergeSharp < 0.01f) "Round" else "${(ed.vecMergeSharp * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
         }
     }
-    if ((drawBar || lineBar) && ed.vecAnchorOpen) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 280.dp, max = 360.dp)) {
+    }
+    Column(Modifier.align(Alignment.BottomEnd)) {
+    if ((drawBar || lineBar) && ed.vecAnchorOpen) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("Auto anchors", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Curve tips", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
             Slider(value = ed.vecTipSens, onValueChange = { ed.vecTipSens = (it * 20f).roundToInt() / 20f }, valueRange = 0f..1f, modifier = Modifier.weight(1f).height(32.dp))
             Text(if (ed.vecTipSens < 0.01f) "Sharp only" else "${(ed.vecTipSens * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
         }
-        Text("Ends and sharp turns get anchors. With the ghost on, a line you draw over it takes the ghost line's numbers instead, so it matches that line when interpolating.", fontSize = 11.sp, color = Color(0xFFB8B8C4))
     }
-    Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
+    }
+    Column(Modifier.align(Alignment.BottomCenter).clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
         if (pointBar) Row(verticalAlignment = Alignment.CenterVertically) {
             // the regular selection widgets (as in SelectionBar), working on the vector selection
             IconBtn(Icons.Filled.Add, ed.selOp == 1, tip = "Add to the selection (or hold Shift)") { ed.selOp = if (ed.selOp == 1) 0 else 1 }
@@ -279,8 +283,6 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 }
             }
         }
-        if (dragBar) Text("Drag left or right on the canvas to place the in-between.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.padding(start = 8.dp, bottom = 2.dp))
-        if ((drawBar || lineBar) && ed.vecMerge) Text("Start or end a line on another line, or bring its end back to its own start, within the Merge radius to join it; where it crosses another line the two share a point. A ring shows where it will join.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.padding(start = 8.dp, bottom = 2.dp).widthIn(max = 300.dp))
     }
     }
     if (falloffOpen) AlertDialog(

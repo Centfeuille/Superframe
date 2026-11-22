@@ -2271,7 +2271,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
         if (vecGaps.isNotEmpty() && !cut.playing) VecGapShimmer(vecGaps, base, 1f / (fit * ed.vScale), Modifier.fillMaxSize().zIndex(3f))
         // Vector widget bar: bottom centre, tied to the active vector tool (point edit / selection, interpolation drag)
-        if (!cut.playing) VectorWidgetBar(cut, ed, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).zIndex(5f))
+        if (!cut.playing) VectorWidgetBar(cut, ed, Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 14.dp).zIndex(5f))
         if (!cut.playing) VectorInterpolationHost(cut, ed)
         if (!cut.playing) VectorFillBar(cut, ed, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).zIndex(5f))
         if (!cut.playing) VectorInkBar(cut, ed, Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 14.dp).zIndex(6f))
