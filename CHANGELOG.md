@@ -1451,3 +1451,14 @@ Inbetween — Changelog
 - Protected files untouched: `.github/workflows/**`, Gradle wrapper / build scripts, `gradle.properties`, manifest, SDK / Java and signing configuration. `.inb` format unchanged.
 - Validation: focused source review, Kotlin change inspection, complete diff review and ZIP integrity check. No Android SDK / Gradle executable is available here, so no compile or device test was performed.
 - Follow-up: Test a ghost-traced line extended by one and multiple merged strokes; confirm its endpoint anchor numbers remain the reference numbers and intermediate anchors remain ordered.
+
+
+## 2026-11-22 — Restore automatic curve-tip anchors with ghost correspondence
+- AI model: GPT-6
+- Category: Fixed / Vector anchors and ghost interpolation
+- Summary: Restored automatic sharp-turn / curve-tip anchor detection on open vector strokes while retaining the two structural endpoint anchors. `AutoAnchors.targets` again detects up to six interior curve tips using the existing resampling, turning-angle, sensitivity and spacing logic. `AutoAnchors.refresh` recalculates these tips after merge while preserving structural endpoint identities and manual/inherited correspondence anchors. `AutoAnchors.inherit` continues to transfer all available ghost anchor numbers; interior ghost curve-tip anchors are fixed correspondence anchors and retain their original numbers/order through later merges.
+- No `.inb` format change.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: compared the restored target-detection logic with the original project version; inspected `refresh`, `inherit`, `vecRefreshAnchors` and merge/ghost-trace callers; reviewed the complete four-file diff and ZIP integrity. No Android SDK / Gradle build or device test was available, so compilation and runtime behavior are not claimed.
+- Follow-up: On device, verify automatic tips on open curves and sharp turns, inherited tip numbering across ghost-traced strokes, and preservation of those anchors after one- and multi-piece merges.

@@ -9,9 +9,8 @@ import kotlin.math.roundToInt
 
 /*
  * Automatic anchors for vector lines.
- *  - [AutoAnchors.targets]: an open line gets only its two outer endpoints; a closed line gets curve tips. Open-line endpoint anchors are structural and marked [VectorPoint.auto],
- *    so [AutoAnchors.refresh] moves them to the outer ends after constituent strokes are merged. Internal join anchors are removed; intermediate correspondence anchors are manual
- *    and remain in their original order. Anchors set by hand,
+ *  - [AutoAnchors.targets]: an open line gets its two outer endpoints plus detected curve tips; a closed line gets detected curve tips (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.auto],
+ *    so [AutoAnchors.refresh] moves them to the outer ends after constituent strokes are merged. Curve-tip anchors are refreshed with the curve; inherited/manual correspondence anchors remain in their original order. Anchors set by hand,
  *    or inherited from a traced line, are never touched.
  *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers, placed at the nearest points of the new line in the same order.
  *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
@@ -46,17 +45,16 @@ object AutoAnchors {
     }
 
     /**
-     * Indices of the points that get an automatic anchor. An open line has only its two outer endpoints; intermediate anchors are correspondence guides and are added explicitly,
-     * never regenerated or reordered. A closed line has no endpoints: it gets up to [maxTips] sharp tips, or two opposite points when it has none. [sens] 0..1 controls tip sensitivity.
+     * Indices of the points that get an automatic anchor. An open line gets its two outer endpoints plus up to [maxTips] sharp curve tips between them. A closed line gets up to [maxTips] sharp tips, or two opposite points when it has none. [sens] 0..1 controls tip sensitivity.
      */
     fun targets(pts: List<VectorPoint>, closed: Boolean, sens: Float, maxTips: Int = 6): List<Int> {
         val n = pts.size
         if (n < 2) return emptyList()
-        // An open stroke has exactly two structural anchors: the outer endpoints of the
-        // complete (possibly multi-part merged) stroke. Curve tips are not automatic
-        // anchors; intermediate correspondence anchors are deliberately user-controlled.
-        if (!closed) return listOf(0, n - 1)
-        val ring = n >= 3
+        // Both open and closed strokes detect curve tips. Only the two endpoints of
+        // an open stroke are structural: after a merge they move to the outer ends of
+        // the complete stroke. Interior curve-tip anchors remain automatic, while
+        // inherited/manual correspondence anchors are preserved by refresh().
+        val ring = closed && n >= 3
         val m = if (ring) n + 1 else n
         val xs = FloatArray(m) { pts[it % n].x }; val ys = FloatArray(m) { pts[it % n].y }
         val cum = FloatArray(m)
@@ -127,7 +125,7 @@ object AutoAnchors {
     }
 
     /**
-     * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. The numbers of points that are still ends or tips are
+     * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. Open-line endpoints and detected curve tips are targets. The numbers of points that are still ends or tips are
      * kept (matched by position), anchors that are no longer one are dropped, new ones get free numbers (not used in this keyframe, not in [avoid]). Returns [strokes] itself when nothing changed.
      */
     fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null): List<VectorStroke> {
@@ -266,8 +264,9 @@ object AutoAnchors {
         val order = if (reversed) ga.reversed() else ga
         // Only the actual ends of the reference stroke are structural endpoints. If a
         // traced piece is later merged with another piece, refresh() can then move these
-        // anchors to the outside ends of the resulting whole stroke. Intermediate anchors
-        // remain manual correspondence anchors and are never regenerated or reordered.
+        // anchors to the outside ends of the resulting whole stroke. Every interior ghost
+        // anchor (including automatic curve tips) is inherited as a fixed correspondence
+        // anchor: its number and order survive later refreshes and merges.
         val structuralRanks = if (mono) ga.filter { it.index == 0 || it.index == gm - 1 }.map { it.value.anchor }.toSet() else emptySet()
         val diag = max(bboxDiag(s.points), bboxDiag(g.points))
         fun distToLine(ax: Float, ay: Float): Float = distToPoly(ax, ay, s.points)

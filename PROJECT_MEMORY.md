@@ -638,10 +638,10 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 
 ## 2026-11-22 — Ordered vector interpolation anchors across merged strokes
-- Open vector strokes now receive automatic anchors only at their two outer endpoints (`AutoAnchors.targets`). Curve-tip auto anchors remain available for closed strokes; open-stroke intermediate correspondence anchors are user-controlled.
-- `AutoAnchors.refresh` rebuilds only structural auto anchors on changed open strokes. After `VectorMerge.attach` joins constituent strokes, anchors at internal joins are removed and the remaining structural endpoint anchors are placed at the first and last points of the complete merged stroke. Intermediate anchors (`auto=false`), including manually placed and inherited interior anchors, are retained at their existing points and are not regenerated or reordered.
-- `AutoAnchors.inherit` marks only the actual first/last anchors inherited from an open ghost as structural (`auto=true`); interior ghost anchors remain non-automatic. This lets a traced endpoint move to the outer edge when separately traced pieces are merged.
-- No `.inb` format change. Existing automatic anchors on open strokes that represented curve tips may be dropped the next time those strokes are refreshed; existing non-automatic anchors are preserved.
+- Open vector strokes receive automatic anchors at their two outer endpoints and at up to six detected sharp curve tips (`AutoAnchors.targets`). Only the two endpoint anchors are structural; curve-tip anchors are automatic interior anchors. The tip-sensitivity setting controls the turning-angle threshold.
+- `AutoAnchors.refresh` recalculates automatic endpoints and curve-tip anchors on changed strokes. After `VectorMerge.attach` joins constituent strokes, internal-join endpoint anchors are removed and structural endpoint identities are placed at the first and last points of the complete merged stroke. Curve-tip anchors are recalculated on the merged curve; manual and inherited correspondence anchors (`auto=false`) retain their positions, numbers and order.
+- `AutoAnchors.inherit` marks only the actual first/last anchors inherited from an open ghost as structural (`auto=true`); all interior ghost anchors, including its automatic curve-tip anchors, are inherited as fixed correspondence anchors with their original numbers/order. This lets traced endpoints move to the outer edge when separately traced pieces are merged without losing intermediate ghost correspondence.
+- No `.inb` format change. Older automatic curve-tip anchors remain compatible; a subsequent refresh can restore detected tips on open strokes.
 - Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: source-level review, targeted behavior inspection of `VectorMerge.attach`, `AutoAnchors.refresh`, and `AutoAnchors.inherit`; diff and ZIP integrity checks. Not compiled or run on a device; endpoint identity behavior under complex multi-piece merge chains and cross-keyframe interpolation remains to be tested in the app.
 
@@ -658,3 +658,11 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - Numbers shared with neighbouring keyframes remain reserved for genuinely new anchors. This fixes the merge regression where ghost-traced endpoints 1/2 were rejected or displaced and replaced by fresh 3/4 after another stroke was merged. No `.inb` format or persistence change.
 - Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: focused source inspection and diff review; no Android SDK / Gradle build or tablet runtime test available.
+
+
+## 2026-11-22 — Restore automatic curve-tip anchors with ghost correspondence
+- Open vector strokes again receive automatic anchors at both outer endpoints and detected sharp curve tips (up to six), using the existing tip-sensitivity calculation.
+- Structural endpoint anchors remain distinct from interior automatic curve-tip anchors. After merges, `AutoAnchors.refresh` relocates the structural endpoints to the outer edges of the complete merged stroke and recalculates curve-tip targets. Manual and inherited anchors are not regenerated or reordered.
+- `AutoAnchors.inherit` continues to copy every available ghost anchor number. Interior ghost anchors, including curve-tip anchors, become fixed correspondence anchors (`auto=false`) so they survive later merge refreshes with their original numbers and order.
+- No `.inb` format change. Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: compared the target-detection logic with the original implementation, inspected merge refresh and ghost inheritance paths, and reviewed the source/documentation diff. No Android SDK / Gradle build or device runtime test was available.

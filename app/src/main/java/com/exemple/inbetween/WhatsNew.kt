@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            57, "2026-11-22", "Automatic curve anchors restored alongside ghost correspondence",
+            listOf(
+                "Open vector lines once again receive automatic anchors at sharp curve tips as well as at their two outer endpoints. The tip-sensitivity setting continues to control how gentle a turn can be before it receives an anchor.",
+                "When lines are merged, automatic curve-tip anchors are recalculated while structural endpoints keep their correspondence identities and move to the outer ends of the complete merged line. When tracing a ghost, its interior curve anchors are inherited with their original numbers and order, alongside the endpoints. No .inb format change. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             56, "2026-11-22", "Ghost anchor numbers survive merging traced strokes",
             listOf(
                 "When a ghost-traced line is extended by merging another stroke, its structural endpoint anchor numbers from the ghost now take priority over unrelated automatic numbers brought in by the other stroke. The ghost numbers move to the new outer ends.",
