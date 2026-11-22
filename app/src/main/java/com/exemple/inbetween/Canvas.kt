@@ -693,7 +693,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
                         return stroke // this ghost line's correspondence anchors already belong to an earlier traced piece; do not invent 3/4-style replacements
                     }
-                    val traced = AutoAnchors.inherit(stroke, ghost, blocked, ed.vecTipSens)
+                    val traced = AutoAnchors.inherit(stroke, ghost, blocked, ed.vecTipSens, AutoAnchors.tracedLength(current, ghostNums.toSet()))
                     if (traced != null) {
                         anchorGhostTrace[0] = true
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey

@@ -705,3 +705,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `AutoAnchors.targets` returns only the two end points for open lines; closed lines still get detected features. This supersedes every earlier note above that describes automatic curve-tip / feature anchors on open lines: in-between anchors are now only inherited from a ghost (`AutoAnchors.inherit`, projected or proportional placement) or set by the user. Automatic in-between anchors stored in older files are dropped when the line is next refreshed. No `.inb` change.
 - Unverified: not compiled, not run on a device.
 
+## 2026-11-22 — Ghost tracing in pieces (see CHANGELOG)
+- `AutoAnchors.inherit`, ghost-elsewhere case: a short piece (< 75 % of the free ghost) consumes free ghost anchors in order at absolute arc-length spacing from `startF` = max(arc of the last claimed anchor, `consumed`), where `consumed` = `AutoAnchors.tracedLength(current strokes carrying ghost numbers)` supplied by `Canvas.kt` `vecAnchorNew`; anchors beyond the piece stay free. Direction of a piece = ghost tangent test; direction of a full-length line = forward / reversed shape comparison (clear win only). Pieces are expected in ghost order. No `.inb` change.
+- Unverified: not compiled, not run on a device.
+

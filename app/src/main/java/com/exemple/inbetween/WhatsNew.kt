@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            66, "2026-11-22", "Tracing a ghost piece by piece no longer piles anchors up",
+            listOf(
+                "When the drawing has moved away from the ghost and you trace the ghost in several pieces, each piece now takes the next ghost anchors at the ghost's own spacing, starting where the previous piece stopped. Before, the first short piece received every in-between anchor squeezed into a few pixels, and anchors 1 and 3 could end up swapped.",
+                "The direction of the ghost is now read from the ghost's own shape near the piece (short pieces) or from comparing the two shapes (a full line), instead of from the straight line between the line's two ends. Anchors that do not fit in a piece stay free for the next piece. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             65, "2026-11-22", "No more automatic in-between anchors on open lines",
             listOf(
                 "Open lines now get automatic anchors only on their two end points. Anchors between the ends are no longer detected automatically; they are inherited from the ghost when you trace it, or placed by you.",

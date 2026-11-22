@@ -420,12 +420,19 @@ object AutoAnchors {
         return best
     }
 
+    /** Total path length of the lines of this keyframe that already carry one of the ghost's anchor numbers (the pieces traced so far). */
+    fun tracedLength(strokes: List<VectorStroke>, ghostNumbers: Set<Int>): Float {
+        var len = 0f
+        for (s in strokes) if (s.fill == 0 && s.points.any { it.anchor in ghostNumbers }) len += pathLength(s.points, s.isClosed)
+        return len
+    }
+
     /**
      * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Automatically detected ghost extrema map to the corresponding detected extrema on [s] by ordered path progress; manual anchors use nearest-path projection. The same order is retained along the line (a line drawn the other way round is read backwards; the ends of the ghost
      * land on the ends of [s]); when the line has no point there, one is inserted. These anchors are not automatic: they say which point matches which, so they are never redone.
      * Null when the ghost carries no usable anchor.
      */
-    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>, sens: Float = 0.5f): VectorStroke? {
+    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>, sens: Float = 0.5f, consumed: Float = 0f): VectorStroke? {
         val n = s.points.size
         val gm = g.points.size
         if (s.fill != 0 || n < 2 || gm < 2) return null
@@ -450,7 +457,7 @@ object AutoAnchors {
             val dot = (a1.x - a0.x) * (b1.x - b0.x) + (a1.y - a0.y) * (b1.y - b0.y)
             reversed = dot < 0f
         }
-        val order = if (reversed) ga.reversed() else ga
+        var order = if (reversed) ga.reversed() else ga
         // Only the actual ends of the reference stroke are structural endpoints. If a
         // traced piece is later merged with another piece, refresh() can then move these
         // anchors to the outside ends of the resulting whole stroke. Every interior ghost
@@ -490,6 +497,69 @@ object AutoAnchors {
         // to be free before mapping those that remain by their relative position.
         val mode = when { !mono || allNear -> 1; onGhost -> 2; ga.isNotEmpty() -> 3; else -> return null }
         val useNearest = mode != 3
+        // Ghost drawn somewhere else (the drawing moved).
+        //  (a) A SHORT PIECE of a longer line: squeezing every free ghost anchor onto it by relative progress piled all
+        //      the in-between anchors at one end of the piece, and the start-to-end vector of a short piece says nothing
+        //      about the ghost's direction (it flipped 1 and 3). Instead a piece consumes the free ghost anchors in order,
+        //      at the ghost's own spacing (absolute arc length), from where the previous piece stopped; anchors beyond the
+        //      piece stay free for the next piece. Direction comes from the ghost's local tangent there.
+        //  (b) A FULL-LENGTH line: the direction is chosen by comparing the two shapes (forward / reversed), not by the
+        //      start-to-end vector, which is unstable for outlines whose ends lie close together.
+        var arc0 = -1f
+        if (mono && mode == 3) {
+            fun ghostPoint(arc: Float): Pair<Float, Float> {
+                var j = 0
+                while (j < gm - 2 && gcum[j + 1] < arc) j++
+                val l = gcum[j + 1] - gcum[j]
+                val t = if (l < 1e-6f) 0f else ((arc - gcum[j]) / l).coerceIn(0f, 1f)
+                return Pair(g.points[j].x + (g.points[j + 1].x - g.points[j].x) * t, g.points[j].y + (g.points[j + 1].y - g.points[j].y) * t)
+            }
+            val blockedArcs = g.points.withIndex().filter { it.value.anchor > 0 && it.value.anchor in blocked }.map { gcum[it.index] }
+            val firstFree = gcum[ga.first().index]
+            val lastFree = gcum[ga.last().index]
+            // where the previous pieces stopped on the ghost: at least the arc of the last claimed anchor, or the length already traced
+            val startF = max(blockedArcs.filter { it < firstFree }.maxOrNull() ?: 0f, min(consumed, firstFree))
+            if (total < 0.75f * (gtotal - startF)) {
+                val vx = s.points.last().x - s.points.first().x; val vy = s.points.last().y - s.points.first().y
+                val spanEnd = min(startF + total, gtotal)
+                val p0 = ghostPoint(startF); val p1 = ghostPoint(spanEnd)
+                val gx = p1.first - p0.first; val gy = p1.second - p0.second
+                val trusted = hypot(vx, vy) > 0.6f * total && hypot(gx, gy) > 0.6f * (spanEnd - startF)
+                if (!(trusted && vx * gx + vy * gy < 0f)) {
+                    reversed = false; order = ga; arc0 = startF
+                } else {
+                    val endR = blockedArcs.filter { it > lastFree }.minOrNull() ?: gtotal
+                    if (total < 0.75f * endR) { reversed = true; order = ga.reversed(); arc0 = endR }
+                }
+            } else if (total > 1e-3f && gtotal > 1e-3f) {
+                val k = 24
+                fun sampleAt(px: (Int) -> Float, py: (Int) -> Float, cu: FloatArray, count: Int, arc: Float): Pair<Float, Float> {
+                    var j = 0
+                    while (j < count - 2 && cu[j + 1] < arc) j++
+                    val l = cu[j + 1] - cu[j]
+                    val t = if (l < 1e-6f) 0f else ((arc - cu[j]) / l).coerceIn(0f, 1f)
+                    return Pair(px(j) + (px(j + 1) - px(j)) * t, py(j) + (py(j + 1) - py(j)) * t)
+                }
+                val sp = List(k) { sampleAt({ xs[it] }, { ys[it] }, cum, n, total * it / (k - 1)) }
+                val gp = List(k) { sampleAt({ g.points[it].x }, { g.points[it].y }, gcum, gm, gtotal * it / (k - 1)) }
+                val scale = total / gtotal
+                val csx = sp.sumOf { it.first.toDouble() }.toFloat() / k; val csy = sp.sumOf { it.second.toDouble() }.toFloat() / k
+                val cgx = gp.sumOf { it.first.toDouble() }.toFloat() / k; val cgy = gp.sumOf { it.second.toDouble() }.toFloat() / k
+                fun cost(rev: Boolean): Float {
+                    var c = 0f
+                    for (i in 0 until k) {
+                        val q = gp[if (rev) k - 1 - i else i]
+                        val dx = (sp[i].first - csx) - scale * (q.first - cgx); val dy = (sp[i].second - csy) - scale * (q.second - cgy)
+                        c += dx * dx + dy * dy
+                    }
+                    return c
+                }
+                val fwd = cost(false); val rev = cost(true)
+                // clear winner only; otherwise the start-to-end vector decision above stands
+                if (rev < 0.7f * fwd) { reversed = true; order = ga.reversed() }
+                else if (fwd < 0.7f * rev) { reversed = false; order = ga }
+            }
+        }
         fun nearestProgress(ax: Float, ay: Float, lowerBound: Float): Float {
             var best = Float.MAX_VALUE; var bp = -1f
             for (j in 0 until m - 1) {
@@ -511,6 +581,15 @@ object AutoAnchors {
             val gi = a.index
             val atStart = !gRing && gi == 0
             val atEnd = !gRing && gi == gm - 1
+            if (arc0 >= 0f) {
+                // short piece elsewhere: absolute arc distance from where the previous piece stopped
+                val d = if (reversed) arc0 - gcum[gi] else gcum[gi] - arc0
+                if (d > total * 1.02f || d < -gap) continue // outside this piece: stays free for the next piece
+                val q = max(d.coerceIn(0f, total), last + gap)
+                if (q > total) continue
+                params.add(q to a.value.anchor); last = q
+                continue
+            }
             var p: Float
             if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue // this part of the ghost line is not under this stroke
             if (mono && (atStart || atEnd) && (mode != 2 || distToLine(a.value.x, a.value.y) <= partTol)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
