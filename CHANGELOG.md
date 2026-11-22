@@ -1,3 +1,12 @@
+## 2026-11-22 — Ghost-traced strokes keep reference anchor numbers
+
+- AI model: GPT-6
+- Problem: a stroke traced from a ghost could receive fresh endpoint numbers (for example 3 and 4) instead of the ghost's reference numbers (1 and 2). `AutoAnchors.inherit` filtered out numbers already used in the current cel, then required all reference anchors to remain free before its relative-position fallback could run. A partial overlap therefore made inheritance fail. Even when a partial trace succeeded, the normal post-draw endpoint fallback could add unrelated numbers.
+- Fix: relative-position inheritance now accepts any non-empty ordered set of available ghost anchors. `Canvas.kt` records a ghost-trace decision and prevents traced strokes from receiving fresh auto endpoints when inheritance is partial or the ghost's anchors are already represented in the current cel. The merge path still refreshes structural endpoints on the complete merged stroke.
+- `.inb` format unchanged.
+- Files: `AutoAnchors.kt`, `Canvas.kt`, `WhatsNew.kt` (note 55), `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected build / signing infrastructure untouched.
+- Validation: source assertions and diff review; ZIP integrity check. Not compiled and not tested on a device.
+
 ## 2026-11-22 — Ordered vector interpolation anchors across merged strokes
 - AI model: GPT-6
 - Category: Improved / Vector interpolation

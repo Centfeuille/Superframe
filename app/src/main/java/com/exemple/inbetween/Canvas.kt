@@ -643,6 +643,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
      * first, as a separate undo step, when it has none); otherwise it gets automatic anchors at its ends and tips, with numbers that none of the neighbouring keyframes uses.
      */
     val anchorDeferred = remember { BooleanArray(1) }
+    // A line traced from a ghost must never fall back to fresh endpoint numbering:
+    // the ghost's free anchor numbers are the correspondence contract for this stroke.
+    val anchorGhostTrace = remember { BooleanArray(1) }
     /** Fresh automatic anchors for a stroke that is not traced over a ghost line. */
     fun vecFreshAnchors(l: Layer, stroke: VectorStroke): VectorStroke {
         if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
@@ -656,11 +659,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!ed.vecAutoAnchor) return merged
         val idx = l.indexAt(cut.time)
         val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx)
-        return merged.map { s -> if (s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(s, used, ed.vecTipSens) else s }
+        return merged.map { s -> if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(s, used, ed.vecTipSens) else s }
     }
     /** [deferFresh]: the caller will try to merge the stroke into other lines; it then gets no anchors of its own here (see [anchorDeferred]) so a line drawn in several strokes keeps its first numbers. */
     fun vecAnchorNew(l: Layer, stroke: VectorStroke, deferFresh: Boolean = false): VectorStroke {
         anchorDeferred[0] = false
+        anchorGhostTrace[0] = false
         if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
         val idx = l.indexAt(cut.time)
         val cel = l.cels.getOrNull(idx)
@@ -683,9 +687,17 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     }
                     val ghostNums = ghost.points.filter { it.anchor > 0 }.map { it.anchor }
-                    if (ghostNums.isNotEmpty() && ghostNums.all { it in blocked }) { ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey; return stroke } // every number of this ghost line is already on the keyframe: one more stroke of the same line gets none
+                    if (ghostNums.isNotEmpty() && ghostNums.all { it in blocked }) {
+                        anchorGhostTrace[0] = true
+                        ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
+                        return stroke // this ghost line's correspondence anchors already belong to an earlier traced piece; do not invent 3/4-style replacements
+                    }
                     val traced = AutoAnchors.inherit(stroke, ghost, blocked)
-                    if (traced != null) { ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey; return traced } // stay on this ghost line: the next stroke may be another part of it
+                    if (traced != null) {
+                        anchorGhostTrace[0] = true
+                        ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
+                        return traced // keep the ghost's available anchor numbers; do not add unrelated automatic endpoints
+                    }
                 }
             }
         }
@@ -740,7 +752,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, shape.id))); return }
                 }
             }
-            shape = if (shapeDeferred) vecFreshAnchors(l, shape) else vecWithEnds(l, shape) // it did not merge into anything: it is a line of its own
+            shape = when { anchorGhostTrace[0] -> shape; shapeDeferred -> vecFreshAnchors(l, shape); else -> vecWithEnds(l, shape) } // a ghost trace keeps its reference correspondence even when it remains a separate stroke
             commitOp(l, shape.toInk())
             return
         }
@@ -944,7 +956,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, stroke.id))); return }
             }
         }
-        stroke = if (strokeDeferred) vecFreshAnchors(l, stroke) else vecWithEnds(l, stroke) // it did not merge into anything: it is a line of its own
+        stroke = when { anchorGhostTrace[0] -> stroke; strokeDeferred -> vecFreshAnchors(l, stroke); else -> vecWithEnds(l, stroke) } // a ghost trace keeps its reference correspondence even when it remains a separate stroke
         commitOp(l, stroke.toInk())
     }
 

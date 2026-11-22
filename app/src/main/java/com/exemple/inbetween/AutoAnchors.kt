@@ -258,15 +258,18 @@ object AutoAnchors {
         val diag = max(bboxDiag(s.points), bboxDiag(g.points))
         fun distToLine(ax: Float, ay: Float): Float = distToPoly(ax, ay, s.points)
         val gap = max(0.5f, total * 0.002f)
-        // Three cases. (1) every ghost number lies near the new line: it is drawn over the ghost, numbers go to the nearest points.
-        // (2) the new line lies on the ghost but covers only part of it (one stroke of several): only the numbers near it are taken, the others stay for the next strokes.
-        // (3) the new line is elsewhere (the drawing moved): numbers go to the same relative positions along it, if the ghost's numbers are all still free.
-        val full = ga.size == g.points.count { it.anchor > 0 }
+        // Three cases. (1) available ghost anchors lie near the new line: use their nearest points.
+        // (2) the new line covers only part of the ghost: take only anchors near this part; the others stay for later strokes.
+        // (3) the new line is elsewhere (the drawing moved): map every still-free ghost anchor by its relative path position.
         val nearTol = 0.15f * diag + 4f
         val allNear = ga.all { distToLine(it.value.x, it.value.y) <= nearTol }
         val partTol = 0.05f * diag + 8f
         val onGhost = s.points.all { distToPoly(it.x, it.y, g.points) <= partTol }
-        val mode = when { !mono || allNear -> 1; onGhost -> 2; full -> 3; else -> return null }
+        // A ghost can already have some of its anchor numbers in use in this keyframe
+        // (for example, an earlier piece of the same traced line). The remaining free
+        // anchors still define exact correspondences. Do not require every ghost anchor
+        // to be free before mapping those that remain by their relative position.
+        val mode = when { !mono || allNear -> 1; onGhost -> 2; ga.isNotEmpty() -> 3; else -> return null }
         val useNearest = mode != 3
         val params = ArrayList<Pair<Float, Int>>()
         var last = -gap

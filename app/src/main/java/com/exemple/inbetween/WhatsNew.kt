@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            55, "2026-11-22", "Ghost-traced lines keep the reference anchor numbers",
+            listOf(
+                "A line traced from a ghost now keeps the available anchor numbers from that reference line, even when another piece of the same line has already used some of them. The remaining anchors still map in their original order and by their relative position when the new drawing is offset from the ghost.",
+                "A ghost-traced stroke no longer receives unrelated fresh endpoint numbers when some reference anchors are already in use. This preserves the correspondence that the ghost guide is meant to provide. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             54, "2026-11-22", "Vector interpolation anchors stay ordered through Merge",
             listOf(
                 "Open vector strokes now use automatic anchors only at the two outer ends. Curve-tip anchors are no longer generated on open strokes; add intermediate correspondence anchors where you need to guide interpolation.",

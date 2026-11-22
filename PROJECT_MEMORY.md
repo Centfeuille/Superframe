@@ -644,3 +644,10 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - No `.inb` format change. Existing automatic anchors on open strokes that represented curve tips may be dropped the next time those strokes are refreshed; existing non-automatic anchors are preserved.
 - Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: source-level review, targeted behavior inspection of `VectorMerge.attach`, `AutoAnchors.refresh`, and `AutoAnchors.inherit`; diff and ZIP integrity checks. Not compiled or run on a device; endpoint identity behavior under complex multi-piece merge chains and cross-keyframe interpolation remains to be tested in the app.
+
+
+## 2026-11-22 — Ghost tracing preserves available reference anchor correspondence
+- `AutoAnchors.inherit` no longer requires every anchor on the reference ghost to be free in the current cel before using the remaining free anchors. When the new stroke is offset from the ghost, those available anchors are still placed by their relative path positions and retain their original numbers/order.
+- `Canvas.kt` tracks whether a stroke was actually traced from the ghost. Such strokes do not fall back to fresh automatic endpoint numbering when inheritance is partial or all reference anchors are already present in the current cel. This prevents a ghost with anchors 1 and 2 from producing an unrelated traced stroke with fresh anchors 3 and 4. Merge refresh continues to maintain structural outer endpoints on the complete merged stroke.
+- No `.inb` format change. Files: `AutoAnchors.kt`, `Canvas.kt`, `WhatsNew.kt` (note 55), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: source-level assertions, diff review and ZIP integrity only. Not compiled or tested on a device.
