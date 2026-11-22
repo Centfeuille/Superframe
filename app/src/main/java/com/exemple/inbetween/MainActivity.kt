@@ -224,28 +224,7 @@ fun MenuScreen(ed: Editor, previousStartup: String? = null) {
         note?.let { Text(it, fontSize = 13.sp, color = Color.Gray, modifier = Modifier.padding(top = 6.dp)) }
         Spacer(Modifier.height(12.dp))
         if (ed.cuts.isEmpty()) Text("No cuts yet. Tap “+ New cut” to start.", color = Color.Gray)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(ed.cuts) { c ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color(0xFF2E2E36))
-                        .clickable { ed.open = c }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.width(112.dp).aspectRatio(c.w.toFloat() / c.h).clip(RoundedCornerShape(6.dp)).background(Color.White)) {
-                        c.thumb?.let { Image(it, null, Modifier.fillMaxSize()) }
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(c.name, style = MaterialTheme.typography.titleMedium)
-                        Text("${c.w}×${c.h} · ${c.fps} fps · ${c.dpi} dpi · ${c.layers.count { !it.isGroup }} layers · ${c.total()} frames", fontSize = 13.sp, color = Color.Gray)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        TextButton({ pending = c; exportPick.launch("${c.name}.inbetween") }) { Text("Export") }
-                        TextButton({ ed.remove(c, ctx.filesDir) }) { Text("Delete") }
-                    }
-                }
-            }
-        }
+        CutBrowser(ed, onExport = { c -> pending = c; exportPick.launch("${c.name}.inbetween") }, modifier = Modifier.weight(1f).fillMaxWidth())
     }
     if (creating) NewCutDialog(ed) { creating = false }
     if (diagnosticsOpen) DiagnosticsDialog(

@@ -203,7 +203,8 @@ fun prepareReferenceImage(location: String, cutW: Int, cutH: Int): PreparedRefer
     return PreparedReferenceImage(location, iw, ih, floatArrayOf(scale, 0f, x, 0f, scale, y, 0f, 0f, 1f))
 }
 
-class Cut(val name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = System.currentTimeMillis()) {
+class Cut(name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = System.currentTimeMillis()) {
+    var name by mutableStateOf(name) // renamable from the main menu (stored in the cut's own file)
     private var storedFps by mutableIntStateOf(fps)
     var fps: Int
         get() = storedFps
@@ -772,6 +773,7 @@ class Palette(val id: Long, name: String, colors: List<Color> = emptyList()) {
 
 class Editor : ViewModel() {
     val cuts = mutableStateListOf<Cut>()
+    val library = CutLibrary() // main-menu folders / layout (library.json)
     var open by mutableStateOf<Cut?>(null)
 
     /** 0 brush, 1 eraser, 2 select, 3 fill, 4 line, 5 eyedropper */
@@ -1040,6 +1042,7 @@ class Editor : ViewModel() {
         BrushAssets.init(dir); loadBrushes(dir); loadPalettes(dir)
         val t1 = android.os.SystemClock.elapsedRealtime()
         cuts.addAll(Store.load(dir, context))
+        library.load(dir)
         val t2 = android.os.SystemClock.elapsedRealtime()
         // Thumbnails replay strokes (18.7 s for 7 cuts in the report): done in the background, the list shows them as they arrive.
         val toThumb = cuts.toList()
@@ -1054,7 +1057,7 @@ class Editor : ViewModel() {
         xform?.let { it.entry.count = Int.MAX_VALUE; it.entry.pinned = false }; xform = null; sel = null // drop any pending transform (tiles rebuild)
         open?.let { it.playing = false; Store.save(dir, it); Recovery.afterSave(dir, it); it.refreshThumb() }; open = null
     }
-    fun remove(c: Cut, dir: File) { cuts.remove(c); File(dir, "cut_${c.id}.inb").delete(); Recovery.clear(dir, c.id) }
+    fun remove(c: Cut, dir: File) { cuts.remove(c); File(dir, "cut_${c.id}.inb").delete(); Recovery.clear(dir, c.id); library.forget(c.id, dir) }
 }
 
 /**
