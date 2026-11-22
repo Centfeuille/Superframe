@@ -418,6 +418,38 @@ object AutoAnchors {
     }
 
     /**
+     * Order-preserving assignment of ghost feature anchors to detected features of a traced line.
+     * [desired] lists (ghost point index, wanted progress 0..1) in path order; [cand] the sorted feature distances along the new line (total length [total]).
+     * Minimises the total progress shift with candidates used at most once and in the same order; an anchor with no candidate within [maxShift] stays unmatched (the caller places it by progress).
+     * Returns ghost point index -> distance along the new line.
+     */
+    private fun matchFeatures(desired: List<Pair<Int, Float>>, cand: List<Float>, total: Float, maxShift: Float = 0.25f): Map<Int, Float> {
+        val n = desired.size; val c = cand.size
+        val out = HashMap<Int, Float>()
+        if (n == 0 || c == 0 || total < 1e-3f) return out
+        val dp = Array(n + 1) { FloatArray(c + 1) }
+        val choice = Array(n + 1) { IntArray(c + 1) }
+        for (i in 1..n) dp[i][0] = i * maxShift
+        for (i in 1..n) for (j in 1..c) {
+            var best = dp[i][j - 1]; var ch = 0 // candidate j unused
+            val unmatched = dp[i - 1][j] + maxShift
+            if (unmatched < best) { best = unmatched; ch = 1 } // anchor i unmatched
+            val shift = abs(cand[j - 1] / total - desired[i - 1].second)
+            if (shift <= maxShift) { val matched = dp[i - 1][j - 1] + shift; if (matched <= best) { best = matched; ch = 2 } }
+            dp[i][j] = best; choice[i][j] = ch
+        }
+        var i = n; var j = c
+        while (i > 0 && j > 0) {
+            when (choice[i][j]) {
+                0 -> j--
+                1 -> i--
+                else -> { out[desired[i - 1].first] = cand[j - 1]; i--; j-- }
+            }
+        }
+        return out
+    }
+
+    /**
      * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Automatically detected ghost extrema map to the corresponding detected extrema on [s] by ordered path progress; manual anchors use nearest-path projection. The same order is retained along the line (a line drawn the other way round is read backwards; the ends of the ghost
      * land on the ends of [s]); when the line has no point there, one is inserted. These anchors are not automatic: they say which point matches which, so they are never redone.
      * Null when the ghost carries no usable anchor.
@@ -478,7 +510,7 @@ object AutoAnchors {
         val tracedFeatureVertices = targets(s.points, s.isClosed, sens)
             .filter { sRing || (it != 0 && it != n - 1) }
         val tracedFeatureDistances = tracedFeatureVertices.map { cum[it] }.sorted()
-        val claimedFeatureDistances = HashSet<Float>()
+        val claimedFeatureDistances = HashSet<Float>() // only used for closed lines (see featureAssign)
         val partTol = 0.05f * diag + 8f
         val onGhost = s.points.all { distToPoly(it.x, it.y, g.points) <= partTol }
         // A ghost can already have some of its anchor numbers in use in this keyframe
@@ -502,6 +534,33 @@ object AutoAnchors {
             }
             return bp
         }
+        // A ghost anchor is a curve feature when it is automatic OR when it sits on a feature detected on the ghost
+        // itself. Anchors copied by an earlier trace are stored as fixed (auto = false), so without the geometric
+        // test every line traced from an already-traced ghost lost its feature identity and was placed by plain
+        // proportional position, off the traced line's own features.
+        val ghostFeatureVerts by lazy { targets(g.points, g.isClosed, sens).filter { gRing || (it != 0 && it != gm - 1) } }
+        val ghostFeatureTol = max(6f, 0.04f * gtotal)
+        fun isFeatureAnchor(gi: Int, v: VectorPoint): Boolean {
+            if (v.endpoint || (!gRing && (gi == 0 || gi == gm - 1))) return false
+            if (v.auto) return true
+            return ghostFeatureVerts.any { abs(gcum[it] - gcum[gi]) <= ghostFeatureTol }
+        }
+        // Open lines: assign ALL feature anchors to the traced line's detected features together (order preserving,
+        // minimum total shift) instead of letting each anchor greedily grab the nearest free feature.
+        val featureAssign: Map<Int, Float> = if (mono && tracedFeatureDistances.isNotEmpty()) {
+            val desired = ArrayList<Pair<Int, Float>>()
+            var lower = 0f
+            for (a in order) {
+                val gi = a.index
+                if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue
+                if (!isFeatureAnchor(gi, a.value)) continue
+                val ghostU = (gcum[gi] / gtotal).let { if (reversed) 1f - it else it }
+                val projected = if (mode != 3) nearestProgress(a.value.x, a.value.y, lower + gap) else -1f
+                val u = max(if (projected >= 0f) projected / total else ghostU, lower / total)
+                desired.add(gi to u); lower = u * total
+            }
+            matchFeatures(desired, tracedFeatureDistances, total)
+        } else emptyMap()
         val params = ArrayList<Pair<Float, Int>>()
         var last = -gap
         for (a in order) {
@@ -512,7 +571,7 @@ object AutoAnchors {
             if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue // this part of the ghost line is not under this stroke
             if (mono && (atStart || atEnd) && (mode != 2 || distToLine(a.value.x, a.value.y) <= partTol)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
             else {
-                val isCurveFeature = a.value.auto && !a.value.endpoint && !atStart && !atEnd
+                val isCurveFeature = isFeatureAnchor(gi, a.value)
                 val ghostU = (gcum[gi] / gtotal).let { if (reversed) 1f - it else it }
                 // In both spatially-aligned modes, project onto the new path. Mode 1
                 // means the complete reference contour is near this trace; mode 2
@@ -522,11 +581,11 @@ object AutoAnchors {
                 // a curve even though it lies directly over the ghost.
                 val projected = if (mode != 3) nearestProgress(a.value.x, a.value.y, last + gap) else -1f
                 val featureU = if (projected >= 0f) projected / total else ghostU
-                val featureMatch = if (isCurveFeature && tracedFeatureDistances.isNotEmpty()) {
-                    tracedFeatureDistances.asSequence()
-                        .filter { it !in claimedFeatureDistances && it >= last + gap }
-                        .minByOrNull { abs(it / total - featureU) }
-                } else null
+                val featureMatch = if (!isCurveFeature || tracedFeatureDistances.isEmpty()) null
+                else if (mono) featureAssign[gi]?.takeIf { it >= last + gap }
+                else tracedFeatureDistances.asSequence()
+                    .filter { it !in claimedFeatureDistances && it >= last + gap }
+                    .minByOrNull { abs(it / total - featureU) }
                 if (featureMatch != null) {
                     p = featureMatch
                     claimedFeatureDistances.add(featureMatch)

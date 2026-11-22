@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            65, "2026-11-22", "Ghost anchors land on the matching curve features",
+            listOf(
+                "When you trace a ghost, every intermediate anchor of the ghost (including ones that were themselves inherited from an earlier trace) now goes to the matching curve feature of your new line, in order, instead of being spread by proportion along the line. For example, ghost anchor 2 now lands on the corresponding bend of the traced line rather than beside it.",
+                "The anchors are matched together, so one anchor can no longer take a feature another one needed. Anchors with no feature close enough keep their proportional position. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             64, "2026-11-22", "Ghost curve anchors follow the traced contour",
             listOf(
                 "When tracing a ghost, automatic intermediate anchors now use ordered projection onto the actual drawn path, so curve apexes follow the corresponding contour feature even when the trace is stretched or compressed.",
