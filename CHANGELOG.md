@@ -1,3 +1,14 @@
+## 2026-11-22 — Ordered vector interpolation anchors across merged strokes
+- AI model: GPT-6
+- Category: Improved / Vector interpolation
+- Open vector strokes now use automatic anchors only at their two outer endpoints. Automatic curve-tip anchors remain for closed strokes; intermediate correspondence anchors on open strokes are user-controlled and are not regenerated.
+- Ghost-traced anchors at the actual start/end of an open reference stroke are marked structural. When traced pieces are later merged, `AutoAnchors.refresh` can move those endpoint anchors to the outer ends of the complete merged stroke and discard structural anchors that became internal joins. Intermediate non-automatic anchors keep their point positions and order.
+- No `.inb` format change. Existing non-automatic anchors are preserved; existing auto curve-tip anchors on open strokes may be removed when that stroke is next refreshed.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: inspected `VectorMerge.attach`, `AutoAnchors.refresh`, ghost anchor inheritance and relevant callers; source diff and ZIP integrity checked. Not compiled or run on a device.
+- Known follow-up: exercise multi-piece merges in both drawing directions, partial ghost tracing, intermediate-anchor order, and interpolation between keyframes on device.
+
 ## 2026-11-20 — Auto anchors at ends and curve tips, merge-aware; line ghost with previous / next toggle
 
 - AI model: Claude

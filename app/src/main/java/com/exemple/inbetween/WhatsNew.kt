@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            54, "2026-11-22", "Vector interpolation anchors stay ordered through Merge",
+            listOf(
+                "Open vector strokes now use automatic anchors only at the two outer ends. Curve-tip anchors are no longer generated on open strokes; add intermediate correspondence anchors where you need to guide interpolation.",
+                "When separate strokes are merged, their internal join points are not treated as endpoints. The two structural endpoint anchors are refreshed onto the outer ends of the complete merged stroke, while intermediate anchors keep their identities and point order.",
+                "Ghost-traced endpoint anchors are marked as structural so they can follow the outer ends when traced pieces are merged. This changes anchor behavior only; the .inb format is unchanged. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             53, "2026-11-20", "Auto anchors and the line ghost",
             listOf(
                 "Auto anchors (new anchor icon in the vector draw bar, on by default): a new line gets numbered anchors at its two ends and at the tips of its curves. The Tune button next to it sets how gentle a turn counts as a tip.",

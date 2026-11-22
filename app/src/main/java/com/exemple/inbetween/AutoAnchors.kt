@@ -9,9 +9,9 @@ import kotlin.math.roundToInt
 
 /*
  * Automatic anchors for vector lines.
- *  - [AutoAnchors.targets]: where a line gets anchors, its two ends and the tips of its curves (sharp turns). [AutoAnchors.assignFresh] numbers them.
- *    Those anchors are marked [VectorPoint.auto], so [AutoAnchors.refresh] can redo them when the line changes shape (two lines merged into one): an anchor that is no longer
- *    an end or a tip goes, new ends get one, and the numbers of the points that stay are kept so the pairing with other keyframes does not break. Anchors set by hand,
+ *  - [AutoAnchors.targets]: an open line gets only its two outer endpoints; a closed line gets curve tips. Open-line endpoint anchors are structural and marked [VectorPoint.auto],
+ *    so [AutoAnchors.refresh] moves them to the outer ends after constituent strokes are merged. Internal join anchors are removed; intermediate correspondence anchors are manual
+ *    and remain in their original order. Anchors set by hand,
  *    or inherited from a traced line, are never touched.
  *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers, placed at the nearest points of the new line in the same order.
  *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
@@ -46,13 +46,17 @@ object AutoAnchors {
     }
 
     /**
-     * Indices of the points that get an anchor: the two ends of an open line plus up to [maxTips] tips, the places where the line turns sharply within a short stretch
-     * (a gentle long bend is not a tip). [sens] 0..1: higher finds gentler turns. A closed line has no ends: its tips, or two opposite points when it has none.
+     * Indices of the points that get an automatic anchor. An open line has only its two outer endpoints; intermediate anchors are correspondence guides and are added explicitly,
+     * never regenerated or reordered. A closed line has no endpoints: it gets up to [maxTips] sharp tips, or two opposite points when it has none. [sens] 0..1 controls tip sensitivity.
      */
     fun targets(pts: List<VectorPoint>, closed: Boolean, sens: Float, maxTips: Int = 6): List<Int> {
         val n = pts.size
         if (n < 2) return emptyList()
-        val ring = closed && n >= 3
+        // An open stroke has exactly two structural anchors: the outer endpoints of the
+        // complete (possibly multi-part merged) stroke. Curve tips are not automatic
+        // anchors; intermediate correspondence anchors are deliberately user-controlled.
+        if (!closed) return listOf(0, n - 1)
+        val ring = n >= 3
         val m = if (ring) n + 1 else n
         val xs = FloatArray(m) { pts[it % n].x }; val ys = FloatArray(m) { pts[it % n].y }
         val cum = FloatArray(m)
@@ -246,6 +250,11 @@ object AutoAnchors {
             reversed = dot < 0f
         }
         val order = if (reversed) ga.reversed() else ga
+        // Only the actual ends of the reference stroke are structural endpoints. If a
+        // traced piece is later merged with another piece, refresh() can then move these
+        // anchors to the outside ends of the resulting whole stroke. Intermediate anchors
+        // remain manual correspondence anchors and are never regenerated or reordered.
+        val structuralRanks = if (mono) ga.filter { it.index == 0 || it.index == gm - 1 }.map { it.value.anchor }.toSet() else emptySet()
         val diag = max(bboxDiag(s.points), bboxDiag(g.points))
         fun distToLine(ax: Float, ay: Float): Float = distToPoly(ax, ay, s.points)
         val gap = max(0.5f, total * 0.002f)
@@ -310,12 +319,12 @@ object AutoAnchors {
         val out = ArrayList<VectorPoint>(n + inserts.size)
         for (j in 0 until n) {
             val base = s.points[j]
-            out.add(vertexRank[j]?.let { base.copy(anchor = it, auto = false) } ?: base)
+            out.add(vertexRank[j]?.let { base.copy(anchor = it, auto = it in structuralRanks) } ?: base)
             inserts[j]?.sortedBy { it.first }?.forEach { (p, r) ->
                 val l = cum[j + 1] - cum[j]
                 val t = if (l < 1e-6f) 0f else ((p - cum[j]) / l).coerceIn(0f, 1f)
                 val a = s.points[j]; val b = s.points[(j + 1) % n]
-                out.add(VectorPoint(x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, pressure = a.pressure + (b.pressure - a.pressure) * t, elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, anchor = r))
+                out.add(VectorPoint(x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, pressure = a.pressure + (b.pressure - a.pressure) * t, elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, anchor = r, auto = r in structuralRanks))
             }
         }
         return s.copy(points = out)
