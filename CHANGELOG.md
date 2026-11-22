@@ -1441,3 +1441,13 @@ Inbetween — Changelog
 - Protected files untouched: Gradle wrapper/build scripts, `gradle.properties`, `.github/workflows/**`, manifest, SDK/Java and signing configuration.
 - Validation: Reviewed the modified selection and curve-generation logic; Kotlin parser checks and focused geometric harness checks are pending. No Android SDK / Gradle executable is available in this workspace, so no full Android build or tablet test is claimed.
 - Follow-up: Verify horizontal and vertical line-tool strokes and averaged curved brush strokes on the S Pen, including rotated guides, single-VP and multi-VP setups.
+
+
+## 2026-11-22 — Preserve ghost anchor identities when merged strokes extend a traced line
+- AI model: GPT-6
+- Category: Fixed / Vector ghost interpolation
+- Summary: Corrected `AutoAnchors.refresh` to prioritize existing anchor numbers shared with neighbouring keyframes when structural endpoints move. This lets ghost-traced endpoint identities win over unrelated fresh automatic anchors brought in by another merged stroke, while still reserving neighbouring-keyframe numbers for genuinely new anchors. It prevents ghost-traced endpoints 1/2 from being discarded or displaced by 3/4 after a merge.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper / build scripts, `gradle.properties`, manifest, SDK / Java and signing configuration. `.inb` format unchanged.
+- Validation: focused source review, Kotlin change inspection, complete diff review and ZIP integrity check. No Android SDK / Gradle executable is available here, so no compile or device test was performed.
+- Follow-up: Test a ghost-traced line extended by one and multiple merged strokes; confirm its endpoint anchor numbers remain the reference numbers and intermediate anchors remain ordered.

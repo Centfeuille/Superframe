@@ -651,3 +651,10 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `Canvas.kt` tracks whether a stroke was actually traced from the ghost. Such strokes do not fall back to fresh automatic endpoint numbering when inheritance is partial or all reference anchors are already present in the current cel. This prevents a ghost with anchors 1 and 2 from producing an unrelated traced stroke with fresh anchors 3 and 4. Merge refresh continues to maintain structural outer endpoints on the complete merged stroke.
 - No `.inb` format change. Files: `AutoAnchors.kt`, `Canvas.kt`, `WhatsNew.kt` (note 55), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: source-level assertions, diff review and ZIP integrity only. Not compiled or tested on a device.
+
+
+## 2026-11-22 — Preserve ghost correspondence identities during merge refresh
+- `AutoAnchors.refresh` now distinguishes reuse of an existing automatic anchor identity from allocation of a new anchor number. Existing anchors shared with neighbouring keyframes are prioritized when structural endpoints move, ahead of unrelated automatic anchors brought in by another merged stroke; they can be reassigned to the new outer endpoints even though their numbers also occur in adjacent keyframes.
+- Numbers shared with neighbouring keyframes remain reserved for genuinely new anchors. This fixes the merge regression where ghost-traced endpoints 1/2 were rejected or displaced and replaced by fresh 3/4 after another stroke was merged. No `.inb` format or persistence change.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: focused source inspection and diff review; no Android SDK / Gradle build or tablet runtime test available.

@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            56, "2026-11-22", "Ghost anchor numbers survive merging traced strokes",
+            listOf(
+                "When a ghost-traced line is extended by merging another stroke, its structural endpoint anchor numbers from the ghost now take priority over unrelated automatic numbers brought in by the other stroke. The ghost numbers move to the new outer ends.",
+                "Numbers shared with neighbouring keyframes are still avoided when genuinely new automatic anchors must be created. Existing correspondence identities are preserved through the merge. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             55, "2026-11-22", "Ghost-traced lines keep the reference anchor numbers",
             listOf(
                 "A line traced from a ghost now keeps the available anchor numbers from that reference line, even when another piece of the same line has already used some of them. The remaining anchors still map in their original order and by their relative position when the new drawing is offset from the ghost.",

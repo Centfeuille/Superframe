@@ -141,9 +141,16 @@ object AutoAnchors {
             val old = s.points.filter { it.auto && it.anchor > 0 }
             for (p in s.points) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]--
             val cleared = s.points.map { if (it.auto) it.copy(anchor = 0, auto = false) else it }
-            val taken = HashSet<Int>(avoid)
-            for (q in 1..ANCHOR_MAX) if (count[q] > 0) taken.add(q)
-            for (p in cleared) if (p.anchor > 0) taken.add(p.anchor)
+            // Existing automatic anchors are correspondence identities, not fresh
+            // allocations. A number may also exist in a neighbouring keyframe (that
+            // is precisely why this line is paired with it), so [avoid] must not block
+            // reuse. Shared numbers are prioritized below over unrelated fresh auto
+            // anchors that may have arrived with another stroke during a merge.
+            // Only anchors still used elsewhere in this cel, plus non-auto anchors on
+            // this stroke, block reuse of an existing identity.
+            val claimed = HashSet<Int>()
+            for (q in 1..ANCHOR_MAX) if (count[q] > 0) claimed.add(q)
+            for (p in cleared) if (p.anchor > 0) claimed.add(p.anchor)
             val tol = max(3f, pathLength(cleared, s.isClosed) * 0.03f)
             val pool = old.toMutableList()
             val pts = cleared.toMutableList()
@@ -152,18 +159,25 @@ object AutoAnchors {
             val unmatched = ArrayList<Int>()
             for (i in tg) { // 1. a target that lies where an automatic anchor was keeps its number
                 if (pts[i].anchor > 0) continue
-                val near = pool.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol && it.anchor !in taken }
-                if (near != null) { pool.remove(near); taken.add(near.anchor); pts[i] = pts[i].copy(anchor = near.anchor, auto = true) } else unmatched.add(i)
+                // Prefer anchors shared with neighbouring keyframes: they are the
+                // correspondence contract. A separately-created stroke may bring
+                // its own fresh auto anchors to the merge; those must not displace
+                // the ghost's endpoint identities merely because they sit closer.
+                val candidates = pool.filter { it.anchor in avoid && it.anchor !in claimed }.ifEmpty { pool.filter { it.anchor !in claimed } }
+                val near = candidates.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol }
+                if (near != null) { pool.remove(near); claimed.add(near.anchor); pts[i] = pts[i].copy(anchor = near.anchor, auto = true) } else unmatched.add(i)
             }
-            for (i in unmatched) { // 2. a new end or tip (the line was extended, e.g. drawn in several strokes) takes over the number of the anchor that stopped being one, the nearest first: the line keeps its numbers instead of counting up
-                val heir = pool.filter { it.anchor !in taken }.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) } ?: continue
-                pool.remove(heir); taken.add(heir.anchor); pts[i] = pts[i].copy(anchor = heir.anchor, auto = true)
+            for (i in unmatched) { // 2. a new end or tip takes over an old identity; correspondence anchors outrank unrelated fresh anchors
+                val available = pool.filter { it.anchor !in claimed }
+                val heirs = available.filter { it.anchor in avoid }.ifEmpty { available }
+                val heir = heirs.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) } ?: continue
+                pool.remove(heir); claimed.add(heir.anchor); pts[i] = pts[i].copy(anchor = heir.anchor, auto = true)
             }
             for (i in unmatched) { // 3. what is left gets a free number
                 if (pts[i].anchor > 0) continue
-                while (next in taken && next <= ANCHOR_MAX) next++
+                while ((next in claimed || next in avoid) && next <= ANCHOR_MAX) next++
                 if (next > ANCHOR_MAX) continue
-                taken.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
+                claimed.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
             }
             for (p in pts) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
             if (pts == s.points) out.add(s) else { out.add(s.copy(points = pts)); changed = true }
