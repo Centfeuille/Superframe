@@ -1001,7 +1001,8 @@ class Editor : ViewModel() {
     var vecAnchorOpen by mutableStateOf(false)          // the auto anchor options panel
     var vecGhost by mutableStateOf(false)               // line order onion skin: the next line of the previous / next keyframe shimmers; a new line takes its anchors
     var vecGhostNext by mutableStateOf(false)           // the ghost comes from the next keyframe instead of the previous one
-    var vecGhostSkip by mutableIntStateOf(0)            // skip to the next untraced line (counts round)
+    var vecGhostPin by mutableStateOf<String?>(null)    // id of the ghost line that stays shown (it is not left when a line is drawn over it, so it can be drawn in several strokes); null = the first untraced line
+    var vecGhostPinKey by mutableLongStateOf(-1L)       // layer + keyframe the pin belongs to (a pin is ignored on any other keyframe)
     var vecBrush by mutableIntStateOf(0)                // point edit brush: 0 off, 1 Shift, 2 Smoothen, 3 Distort
     var vecBrushRadius by mutableFloatStateOf(40f)      // point edit brush radius, document px
     var vecBrushStrength by mutableFloatStateOf(0.5f)   // point edit brush strength 0..1

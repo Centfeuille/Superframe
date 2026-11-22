@@ -164,6 +164,17 @@ object AutoAnchors {
         return refresh(strokes, if (idx >= 0) neighbourNumbers(layer, idx) else emptySet(), sens)
     }
 
+    private fun distToPoly(ax: Float, ay: Float, p: List<VectorPoint>): Float {
+        var best = Float.MAX_VALUE
+        for (j in 0 until p.size - 1) {
+            val dx = p[j + 1].x - p[j].x; val dy = p[j + 1].y - p[j].y
+            val l2 = dx * dx + dy * dy
+            val t = if (l2 < 1e-9f) 0f else (((ax - p[j].x) * dx + (ay - p[j].y) * dy) / l2).coerceIn(0f, 1f)
+            best = min(best, hypot(ax - (p[j].x + dx * t), ay - (p[j].y + dy * t)))
+        }
+        return best
+    }
+
     /**
      * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Each number
      * is placed at the point of [s] nearest to the ghost's anchor, in the same order along the line (a line drawn the other way round is read backwards; the ends of the ghost
@@ -196,20 +207,19 @@ object AutoAnchors {
             reversed = dot < 0f
         }
         val order = if (reversed) ga.reversed() else ga
-        fun distToLine(ax: Float, ay: Float): Float {
-            var best = Float.MAX_VALUE
-            for (j in 0 until m - 1) {
-                val l = cum[j + 1] - cum[j]
-                val dx = xs[j + 1] - xs[j]; val dy = ys[j + 1] - ys[j]
-                val t = if (l < 1e-6f) 0f else (((ax - xs[j]) * dx + (ay - ys[j]) * dy) / (l * l)).coerceIn(0f, 1f)
-                best = min(best, hypot(ax - (xs[j] + dx * t), ay - (ys[j] + dy * t)))
-            }
-            return best
-        }
         val diag = max(bboxDiag(s.points), bboxDiag(g.points))
+        fun distToLine(ax: Float, ay: Float): Float = distToPoly(ax, ay, s.points)
         val gap = max(0.5f, total * 0.002f)
-        // The line is a trace of the ghost wherever it was drawn. Lying on the ghost: each number goes to the nearest point. Drawn elsewhere (the drawing moved): each number goes to the same relative position along the line.
-        val useNearest = !mono || ga.all { distToLine(it.value.x, it.value.y) <= 0.15f * diag + 4f }
+        // Three cases. (1) every ghost number lies near the new line: it is drawn over the ghost, numbers go to the nearest points.
+        // (2) the new line lies on the ghost but covers only part of it (one stroke of several): only the numbers near it are taken, the others stay for the next strokes.
+        // (3) the new line is elsewhere (the drawing moved): numbers go to the same relative positions along it, if the ghost's numbers are all still free.
+        val full = ga.size == g.points.count { it.anchor > 0 }
+        val nearTol = 0.15f * diag + 4f
+        val allNear = ga.all { distToLine(it.value.x, it.value.y) <= nearTol }
+        val partTol = 0.05f * diag + 8f
+        val onGhost = s.points.all { distToPoly(it.x, it.y, g.points) <= partTol }
+        val mode = when { !mono || allNear -> 1; onGhost -> 2; full -> 3; else -> return null }
+        val useNearest = mode != 3
         val params = ArrayList<Pair<Float, Int>>()
         var last = -gap
         for (a in order) {
@@ -217,7 +227,8 @@ object AutoAnchors {
             val atStart = !gRing && gi == 0
             val atEnd = !gRing && gi == gm - 1
             var p: Float
-            if (mono && (atStart || atEnd)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
+            if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue // this part of the ghost line is not under this stroke
+            if (mono && (atStart || atEnd) && (mode != 2 || distToLine(a.value.x, a.value.y) <= partTol)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
             else {
                 val ax = a.value.x; val ay = a.value.y
                 var best = Float.MAX_VALUE; var bp = -1f
@@ -311,6 +322,33 @@ object LineGhost {
         }
     }
 
-    /** The line shown now: the [skip]-th untraced line, counting round. */
-    fun current(open: List<VectorStroke>, skip: Int): VectorStroke? = if (open.isEmpty()) null else open[((skip % open.size) + open.size) % open.size]
+    fun key(layer: Layer, idx: Int): Long = layer.id.toLong() * 1_000_000L + idx
+
+    /**
+     * The line shown now: the pinned one while it exists on this keyframe (even after it has been traced, so a line can be drawn in several strokes), otherwise the first
+     * untraced line. The pin moves only when the person skips ([skip]) or draws over another ghost.
+     */
+    fun shown(all: List<VectorStroke>, open: List<VectorStroke>, ed: Editor, key: Long): VectorStroke? {
+        val pin = ed.vecGhostPin
+        if (pin != null && ed.vecGhostPinKey == key) all.firstOrNull { it.id == pin }?.let { return it }
+        return open.firstOrNull()
+    }
+
+    /** Skip to the next ([dir] = 1) or previous (-1) untraced line of the reference keyframe, counting round. Lines already traced are passed over. */
+    fun skip(ed: Editor, layer: Layer, idx: Int, dir: Int) {
+        val cur = layer.cels.getOrNull(idx) ?: return
+        val ref = reference(layer, idx, ed.vecGhostNext) ?: return
+        val all = lines(ref)
+        if (all.isEmpty()) return
+        val open = unclaimed(all, cur.vectorStrokes(), 1f / ed.vecDocZoom.coerceAtLeast(0.0001f))
+        if (open.isEmpty()) return
+        val pk = key(layer, idx)
+        val now = shown(all, open, ed, pk)
+        val start = all.indexOfFirst { it.id == now?.id }.let { if (it < 0) 0 else it }
+        val openIds = open.map { it.id }.toSet()
+        for (k in 1..all.size) {
+            val j = (((start + dir * k) % all.size) + all.size) % all.size
+            if (all[j].id in openIds) { ed.vecGhostPin = all[j].id; ed.vecGhostPinKey = pk; return }
+        }
+    }
 }

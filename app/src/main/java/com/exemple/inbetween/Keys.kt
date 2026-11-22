@@ -53,6 +53,8 @@ enum class KeyAction(val id: String, val group: String, val label: String, val d
     LAYER_UP("layerUp", "Layers and keys", "Select the layer above", listOf(kb(KeyEvent.KEYCODE_DPAD_UP)), true),
     LAYER_DOWN("layerDown", "Layers and keys", "Select the layer below", listOf(kb(KeyEvent.KEYCODE_DPAD_DOWN)), true),
     NEW_LAYER("newLayer", "Layers and keys", "New drawing layer", listOf(kb(KeyEvent.KEYCODE_N, ctrl = true, shift = true))),
+    GHOST_PREV("ghostPrevLine", "Vector lines", "Ghost: skip to the previous line to trace", listOf(kb(KeyEvent.KEYCODE_COMMA)), true),
+    GHOST_NEXT("ghostNextLine", "Vector lines", "Ghost: skip to the next line to trace", listOf(kb(KeyEvent.KEYCODE_PERIOD)), true),
     SET_ANCHOR("setAnchor", "Layers and keys", "Set anchor on selected vector points", listOf(kb(KeyEvent.KEYCODE_A))),
     CLEAR_ANCHOR("clearAnchor", "Layers and keys", "Clear anchor on selected vector points", listOf(kb(KeyEvent.KEYCODE_A, shift = true))),
     ADD_KEY("addKey", "Layers and keys", "Add key at the playhead (Camera / Transformation)", listOf(kb(KeyEvent.KEYCODE_K))),
@@ -339,6 +341,8 @@ fun handleKey(ed: Editor, cut: Cut, e: KeyEvent, act: KeyActions): Boolean {
         KeyAction.RESET_VIEW -> ed.resetView()
         KeyAction.FULLSCREEN -> ed.fullscreen = !ed.fullscreen
         KeyAction.ONION -> ed.onion = !ed.onion
+        KeyAction.GHOST_PREV -> if (ed.vecGhost) cut.layer?.takeIf { it.vector }?.let { LineGhost.skip(ed, it, it.indexAt(cut.time), -1) }
+        KeyAction.GHOST_NEXT -> if (ed.vecGhost) cut.layer?.takeIf { it.vector }?.let { LineGhost.skip(ed, it, it.indexAt(cut.time), 1) }
         KeyAction.MIRROR -> { if (ed.flipH || ed.flipV) { ed.flipH = false; ed.flipV = false } else ed.flipH = true }
         KeyAction.GRID_DEPTH -> ed.gridFront = !ed.gridFront
         KeyAction.REFERENCE_VISIBILITY -> {

@@ -652,8 +652,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val refCel = LineGhost.reference(l, idx, ed.vecGhostNext)
             if (refCel != null) {
                 val px = 1f / vecZoom()
-                val open = LineGhost.unclaimed(LineGhost.lines(refCel), current, px)
-                var ghost = LineGhost.current(open, ed.vecGhostSkip) // the shimmering line IS the one being traced, wherever the new line is drawn
+                val allGhost = LineGhost.lines(refCel)
+                val open = LineGhost.unclaimed(allGhost, current, px)
+                val gKey = LineGhost.key(l, idx)
+                var ghost = LineGhost.shown(allGhost, open, ed, gKey) // the shimmering line IS the one being traced, wherever the new line is drawn; it stays shown afterwards
                 if (ghost != null) {
                     if (ghost.points.none { it.anchor > 0 }) {
                         val refStrokes = refCel.vectorStrokes()
@@ -661,8 +663,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         val ri = l.cels.indexOfFirst { it === refCel }
                         if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     }
+                    val ghostNums = ghost.points.filter { it.anchor > 0 }.map { it.anchor }
+                    if (ghostNums.isNotEmpty() && ghostNums.all { it in blocked }) { ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey; return stroke } // every number of this ghost line is already on the keyframe: one more stroke of the same line gets none
                     val traced = AutoAnchors.inherit(stroke, ghost, blocked)
-                    if (traced != null) { ed.vecGhostSkip = 0; return traced }
+                    if (traced != null) { ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey; return traced } // stay on this ghost line: the next stroke may be another part of it
                 }
             }
         }
@@ -1471,15 +1475,16 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 4) }
     val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
     val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
-    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostSkip, tick, ed.vecAutoAnchor) {
+    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor) {
         val gl = ghostLayer
         val idx = gl?.indexAt(cut.time) ?: -1
         val cur = gl?.cels?.getOrNull(idx)
         val ref = if (gl != null && cur != null) LineGhost.reference(gl, idx, ed.vecGhostNext) else null
         if (cur == null || ref == null) null else {
-            val open = LineGhost.unclaimed(LineGhost.lines(ref), cur.vectorStrokes(), 1f / vecZoom())
-            val shown = LineGhost.current(open, ed.vecGhostSkip)
-            if (shown == null) null else Pair(shown, open.filter { it !== shown })
+            val all = LineGhost.lines(ref)
+            val open = LineGhost.unclaimed(all, cur.vectorStrokes(), 1f / vecZoom())
+            val shown = LineGhost.shown(all, open, ed, LineGhost.key(gl, idx))
+            if (shown == null) null else Pair(shown, open.filter { it.id != shown.id })
         }
     }
 
@@ -1934,7 +1939,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     drawCircle(Color(0xFF1E3A8A), 7f * px1, o, style = Stroke(1.5f * px1))
                 }
             }
-            if (vecPreview.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreview) VectorTessellator.draw(cv.nativeCanvas, vs, pt) }
+            if (vecPreview.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreview) VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = purple.toArgb() or (0xFF shl 24), opacity = (vs.opacity * 0.4f).coerceIn(0.05f, 1f)), pt) }
             // The stroke being drawn with the vector brush, rendered like the committed line (ribbon with pressure width, curve and opacity), so lifting the pen does not change how it looks.
             ghostData?.let { (shown, others) ->
                 val pulse = 0.5f + 0.5f * kotlin.math.sin(ghostStep / 8f * 2f * Math.PI.toFloat())

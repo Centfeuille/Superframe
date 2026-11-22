@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.NavigateNext
+import androidx.compose.material.icons.filled.NavigateBefore
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -188,10 +189,11 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             if (drawBar || lineBar) {
                 VIconBtn(Icons.Filled.MergeType, on = ed.vecMerge, tip = if (ed.vecMerge) "Merge: on. Lines you draw join other lines within the Merge radius (tap to turn off)" else "Merge: off. Tap to join lines you draw to other lines within the Merge radius") { ed.vecMerge = !ed.vecMerge }
                 VIconBtn(Icons.Filled.Anchor, on = ed.vecAutoAnchor, tip = if (ed.vecAutoAnchor) "Auto anchors: on. A new line gets numbered anchors at its ends and curve tips, and keeps them up to date when lines merge (tap to turn off)" else "Auto anchors: off. Tap to give new lines anchors at their ends and curve tips") { ed.vecAutoAnchor = !ed.vecAutoAnchor }
-                VIconBtn(Icons.Filled.AutoAwesome, on = ed.vecGhost, tip = if (ed.vecGhost) "Ghost: on. The next line of the ${if (ed.vecGhostNext) "next" else "previous"} keyframe shimmers; draw over it and your line takes its anchors, so the two match (tap to turn off)" else "Ghost: off. Tap to show the next line to trace from the previous or next keyframe") { ed.vecGhost = !ed.vecGhost; ed.vecGhostSkip = 0 }
+                VIconBtn(Icons.Filled.AutoAwesome, on = ed.vecGhost, tip = if (ed.vecGhost) "Ghost: on. The next line of the ${if (ed.vecGhostNext) "next" else "previous"} keyframe shimmers; draw over it and your line takes its anchors, so the two match (tap to turn off)" else "Ghost: off. Tap to show the next line to trace from the previous or next keyframe") { ed.vecGhost = !ed.vecGhost; ed.vecGhostPin = null }
                 if (ed.vecGhost) {
-                    VIconBtn(if (ed.vecGhostNext) Icons.Filled.SkipNext else Icons.Filled.SkipPrevious, tip = if (ed.vecGhostNext) "Ghost from the NEXT keyframe (tap for the previous one)" else "Ghost from the PREVIOUS keyframe (tap for the next one)") { ed.vecGhostNext = !ed.vecGhostNext; ed.vecGhostSkip = 0 }
-                    VIconBtn(Icons.Filled.NavigateNext, tip = "Skip: show the next line to trace instead (a line you draw over another ghost line is matched with that one anyway)") { ed.vecGhostSkip++ }
+                    VIconBtn(if (ed.vecGhostNext) Icons.Filled.SkipNext else Icons.Filled.SkipPrevious, tip = if (ed.vecGhostNext) "Ghost from the NEXT keyframe (tap for the previous one)" else "Ghost from the PREVIOUS keyframe (tap for the next one)") { ed.vecGhostNext = !ed.vecGhostNext; ed.vecGhostPin = null }
+                    VIconBtn(Icons.Filled.NavigateBefore, tip = "Skip to the previous line to trace (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), -1) } }
+                    VIconBtn(Icons.Filled.NavigateNext, tip = "Skip to the next line to trace. The ghost stays on a line after you draw it, so a line can be drawn in several strokes; skip when it is done (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), 1) } }
                 }
                 VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
             } else if (pointBar) {
