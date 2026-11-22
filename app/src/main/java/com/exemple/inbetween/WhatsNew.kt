@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            59, "2026-11-22", "Adaptive anchors follow the shape of each curve",
+            listOf(
+                "Automatic intermediate anchors are now detected from meaningful shape features: pronounced bends, curvature peaks and S-curve inflections. Simple curves receive fewer anchors; complex contours can receive more, up to a safety limit of 24.",
+                "The existing tip-sensitivity control still affects feature detection. Automatic anchors avoid crowding inherited or manually placed correspondence anchors, while structural endpoints and ghost anchor identities remain protected. No .inb format change. Not compiled or tested on a device."
+            )
+        ),
+        ReleaseNote(
             58, "2026-11-22", "Endpoint anchors are protected from curve-tip renumbering",
             listOf(
                 "Structural endpoint anchors and automatic curve-tip anchors now use separate identity pools. Curve tips can only be reassigned to intermediate curve targets; they can no longer take an endpoint's number.",

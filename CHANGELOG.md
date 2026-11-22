@@ -1474,3 +1474,15 @@ Inbetween — Changelog
 - Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
 - Validation: compared the restored target-detection logic with the original project version; inspected `refresh`, `inherit`, `vecRefreshAnchors` and merge/ghost-trace callers; reviewed the complete four-file diff and ZIP integrity. No Android SDK / Gradle build or device test was available, so compilation and runtime behavior are not claimed.
 - Follow-up: On device, verify automatic tips on open curves and sharp turns, inherited tip numbering across ghost-traced strokes, and preservation of those anchors after one- and multi-piece merges.
+
+
+## 2026-11-22 — Adaptive feature anchors for ghost interpolation
+
+- AI model: GPT-6
+- Category: Improved / Vector ghost interpolation
+- Replaced the fixed six-tip detection quota with adaptive feature selection. Stroke geometry is resampled by distance; local turning / curvature peaks and S-curve inflection points become candidate anchors. Candidate spacing scales with stroke length and a 24-anchor safety ceiling prevents pathological over-detection.
+- Existing tip sensitivity remains in effect. During refresh, new automatic features are not added immediately beside fixed manual or inherited ghost correspondence anchors. Endpoint identities, inherited anchor numbers/order, merged-stroke behavior and `.inb` storage are unchanged.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: source diff review and focused geometric harness checks. No Android SDK / Gradle build or device test was performed.
+- Follow-up: Validate smooth arcs, S-curves, tight corners, long complex contours and ghost-traced strokes after merging on the Android tablet.

@@ -16,6 +16,9 @@ import kotlin.math.roundToInt
  *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
  */
 object AutoAnchors {
+    /** Hard safety ceiling; normal anchor count is determined by detected shape features. */
+    const val MAX_AUTO_TIPS = 24
+
     fun bboxDiag(pts: List<VectorPoint>): Float {
         if (pts.isEmpty()) return 0f
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
@@ -48,64 +51,160 @@ object AutoAnchors {
     }
 
     /**
-     * Indices of the points that get an automatic anchor. An open line gets its two outer endpoints plus up to [maxTips] sharp curve tips between them. A closed line gets up to [maxTips] sharp tips, or two opposite points when it has none. [sens] 0..1 controls tip sensitivity.
+     * Adaptive feature-aware anchor detection. Open strokes always include their two
+     * structural endpoints. Interior anchors are placed only at meaningful geometric
+     * features: pronounced curvature peaks, sharp direction changes and inflections.
+     * The count is therefore driven by the shape, not a fixed per-line quota. [maxTips]
+     * is only a safety ceiling (24 by default); [sens] 0..1 controls how subtle a feature
+     * may be before it is retained.
      */
-    fun targets(pts: List<VectorPoint>, closed: Boolean, sens: Float, maxTips: Int = 6): List<Int> {
+    fun targets(pts: List<VectorPoint>, closed: Boolean, sens: Float, maxTips: Int = MAX_AUTO_TIPS): List<Int> {
         val n = pts.size
         if (n < 2) return emptyList()
-        // Both open and closed strokes detect curve tips. Only the two endpoints of
-        // an open stroke are structural: after a merge they move to the outer ends of
-        // the complete stroke. Interior curve-tip anchors remain automatic, while
-        // inherited/manual correspondence anchors are preserved by refresh().
         val ring = closed && n >= 3
         val m = if (ring) n + 1 else n
-        val xs = FloatArray(m) { pts[it % n].x }; val ys = FloatArray(m) { pts[it % n].y }
+        val xs = FloatArray(m) { pts[it % n].x }
+        val ys = FloatArray(m) { pts[it % n].y }
         val cum = FloatArray(m)
         for (i in 1 until m) cum[i] = cum[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
         val total = cum[m - 1]
-        fun nearestVertex(s: Float): Int { var best = 0; var bd = Float.MAX_VALUE; for (j in 0 until n) { val dd = abs(cum[j] - s); if (dd < bd) { bd = dd; best = j } }; return best }
         if (total < 1e-3f) return if (ring) listOf(0) else listOf(0, n - 1)
-        val cnt = max(8, (total / (total / 160f).coerceIn(1f, 6f)).toInt() + 1)
+
+        // Resample by distance so detection behaves consistently at different point
+        // densities and stylus sampling rates. Cap work for exceptionally long strokes.
+        val step = (total / 180f).coerceIn(2f, 6f)
+        val cnt = (total / step).roundToInt().coerceIn(11, 512) + 1
         val seg = total / (cnt - 1)
-        val sx = FloatArray(cnt); val sy = FloatArray(cnt)
+        val sx = FloatArray(cnt)
+        val sy = FloatArray(cnt)
         var j = 0
         for (i in 0 until cnt) {
-            val s = seg * i
-            while (j < m - 2 && cum[j + 1] < s) j++
-            val l = cum[j + 1] - cum[j]
-            val t = if (l < 1e-6f) 0f else ((s - cum[j]) / l).coerceIn(0f, 1f)
-            sx[i] = xs[j] + (xs[j + 1] - xs[j]) * t; sy[i] = ys[j] + (ys[j + 1] - ys[j]) * t
+            val distance = seg * i
+            while (j < m - 2 && cum[j + 1] < distance) j++
+            val length = cum[j + 1] - cum[j]
+            val t = if (length < 1e-6f) 0f else ((distance - cum[j]) / length).coerceIn(0f, 1f)
+            sx[i] = xs[j] + (xs[j + 1] - xs[j]) * t
+            sy[i] = ys[j] + (ys[j + 1] - ys[j]) * t
         }
-        repeat(2) { // light smoothing, so small jitter is not a tip (the ends stay)
+        // A light smoothing pass rejects hand jitter without erasing real corners.
+        repeat(2) {
             var px = sx[0]; var py = sy[0]
-            for (i in 1 until cnt - 1) { val cx = sx[i]; val cy = sy[i]; sx[i] = 0.25f * px + 0.5f * cx + 0.25f * sx[i + 1]; sy[i] = 0.25f * py + 0.5f * cy + 0.25f * sy[i + 1]; px = cx; py = cy }
+            for (i in 1 until cnt - 1) {
+                val cx = sx[i]; val cy = sy[i]
+                sx[i] = 0.25f * px + 0.5f * cx + 0.25f * sx[i + 1]
+                sy[i] = 0.25f * py + 0.5f * cy + 0.25f * sy[i + 1]
+                px = cx; py = cy
+            }
         }
-        val k = max(2, (((total * 0.06f).coerceIn(6f, 40f)) / seg).roundToInt())
-        fun at(q: Int): Int = if (ring) ((q % (cnt - 1)) + (cnt - 1)) % (cnt - 1) else q
-        val ang = FloatArray(cnt)
-        val lo = if (ring) 0 else k
-        val hi = if (ring) cnt else cnt - k
-        for (i in lo until hi) {
-            val a = at(i - k); val b = at(i); val c = at(i + k)
-            val v1x = sx[b] - sx[a]; val v1y = sy[b] - sy[a]; val v2x = sx[c] - sx[b]; val v2y = sy[c] - sy[b]
-            ang[i] = abs(Math.toDegrees(atan2((v1x * v2y - v1y * v2x).toDouble(), (v1x * v2x + v1y * v2y).toDouble()))).toFloat()
-        }
-        val thresh = 100f - 70f * sens.coerceIn(0f, 1f)
-        val cands = (lo until hi).filter { i -> ang[i] >= thresh && (i - k..i + k).all { q -> val qq = if (ring) at(q) else q; qq !in 0 until cnt || ang[qq] <= ang[i] } }.sortedByDescending { ang[it] }
-        val sep = max(k, (total * 0.12f / seg).roundToInt())
-        val chosen = ArrayList<Int>()
-        for (i in cands) {
-            if (chosen.size >= maxTips) break
-            if (!ring && (i < sep * 0.6f || cnt - 1 - i < sep * 0.6f)) continue
-            if (chosen.any { c -> val dd = abs(c - i); (if (ring) min(dd, cnt - 1 - dd) else dd) < sep }) continue
-            chosen.add(i)
-        }
+
+        val maxInterior = maxTips.coerceIn(0, MAX_AUTO_TIPS)
         val idx = sortedSetOf<Int>()
         if (!ring) { idx.add(0); idx.add(n - 1) }
-        for (i in chosen) idx.add(nearestVertex(seg * i))
+        if (maxInterior == 0) return idx.toList()
+
+        // Measure signed turning over a short distance window. Absolute turning finds
+        // corners and curvature peaks; the sign is also used to detect inflections.
+        val window = (total * 0.035f).coerceIn(5f, 28f)
+        val k = max(2, (window / seg).roundToInt())
+        fun at(q: Int): Int = if (ring) ((q % (cnt - 1)) + (cnt - 1)) % (cnt - 1) else q
+        val lo = if (ring) 0 else k
+        val hi = if (ring) cnt - 1 else cnt - k
+        val signed = FloatArray(cnt)
+        val magnitude = FloatArray(cnt)
+        for (i in lo until hi) {
+            val a = at(i - k); val b = at(i); val c = at(i + k)
+            val v1x = sx[b] - sx[a]; val v1y = sy[b] - sy[a]
+            val v2x = sx[c] - sx[b]; val v2y = sy[c] - sy[b]
+            val turn = Math.toDegrees(atan2(
+                (v1x * v2y - v1y * v2x).toDouble(),
+                (v1x * v2x + v1y * v2y).toDouble()
+            )).toFloat()
+            signed[i] = turn
+            magnitude[i] = abs(turn)
+        }
+
+        val threshold = 12f - 10f * sens.coerceIn(0f, 1f)
+        val features = HashMap<Int, Float>()
+        val neighbourhood = max(2, k / 2)
+
+        // Distinct local maxima represent corners and local curvature extrema. A
+        // plateau (for example a perfect circle) is deliberately not treated as many
+        // separate features; its shape is represented by a sparse pair of anchors.
+        for (i in lo until hi) {
+            val value = magnitude[i]
+            if (value < threshold) continue
+            var localMax = value
+            var localMin = value
+            for (d in 1..neighbourhood) {
+                val left = magnitude[at(i - d)]
+                val right = magnitude[at(i + d)]
+                localMax = max(localMax, max(left, right))
+                localMin = min(localMin, min(left, right))
+            }
+            // Require both a local maximum and a little prominence. This suppresses
+            // evenly curved arcs (whose curvature is nearly constant) while retaining
+            // real peaks and corners.
+            if (value >= localMax - 0.25f && value - localMin >= 0.75f) {
+                features[i] = max(features[i] ?: 0f, value)
+            }
+        }
+
+        // Inflection points are important for S-curves even though their local turning
+        // magnitude can be small. Require meaningful curvature on both sides so tiny
+        // noisy sign changes do not create anchors.
+        val side = max(2, k * 2)
+        for (i in (lo + side) until (hi - side)) {
+            val before = signed[i - side]
+            val after = signed[i + side]
+            if (before * after < 0f && abs(before) >= threshold * 0.18f && abs(after) >= threshold * 0.18f) {
+                val score = min(abs(before), abs(after)) + 0.25f * (abs(before) + abs(after))
+                features[i] = max(features[i] ?: 0f, score)
+            }
+        }
+
+        if (features.isEmpty() && !ring) {
+            // A simple circular arc has nearly constant curvature, so it has no local
+            // curvature peak. If the whole stroke still turns meaningfully, give it a
+            // single midpoint correspondence rather than leaving the curve unanchored.
+            val peak = (lo until hi).maxOfOrNull { magnitude[it] } ?: 0f
+            if (peak >= threshold * 0.75f) features[(lo + hi) / 2] = peak
+        }
+        if (features.isEmpty()) {
+            if (ring) { idx.add(0); idx.add(n / 2) }
+            return idx.toList()
+        }
+
+        // Separation scales with path length and the analysis window. This lets a
+        // complex contour receive more anchors than a simple curve, up to the safety cap.
+        val separation = max(k, (total * 0.045f / seg).roundToInt())
+        val chosen = ArrayList<Int>()
+        val ranked = features.entries.sortedByDescending { it.value }
+        for ((sample, _) in ranked) {
+            if (chosen.size >= maxInterior) break
+            if (!ring && (sample <= separation * 0.55f || cnt - 1 - sample <= separation * 0.55f)) continue
+            val spaced = chosen.none { other ->
+                val distance = abs(other - sample)
+                (if (ring) min(distance, cnt - 1 - distance) else distance) < separation
+            }
+            if (spaced) chosen.add(sample)
+        }
+
+        fun nearestVertex(distance: Float): Int {
+            var best = 0
+            var bestDistance = Float.MAX_VALUE
+            for (q in 0 until n) {
+                val d = abs(cum[q] - distance)
+                if (d < bestDistance) { bestDistance = d; best = q }
+            }
+            return best
+        }
+        for (sample in chosen) {
+            val target = nearestVertex(seg * sample)
+            if (ring || (target != 0 && target != n - 1)) idx.add(target)
+        }
         if (ring) {
             if (idx.isEmpty()) { idx.add(0); idx.add(nearestVertex(total / 2f)) }
-            else if (idx.size == 1) { val a = idx.first(); idx.add(nearestVertex((cum[a] + total / 2f) % total)) }
+            else if (idx.size == 1) { val first = idx.first(); idx.add(nearestVertex((cum[first] + total / 2f) % total)) }
         }
         return idx.toList()
     }
@@ -132,7 +231,7 @@ object AutoAnchors {
 
     /**
      * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. Open-line endpoints and detected curve tips are targets. The numbers of points that are still ends or tips are
-     * kept within their own class: endpoint identities only go to outer endpoints, and curve-tip identities only go to interior targets. New numbers avoid both this keyframe and [avoid]. Returns [strokes] itself when nothing changed.
+     * kept within their own class: endpoint identities only go to outer endpoints, and automatic feature identities only go to interior targets. New numbers avoid both this keyframe and [avoid]. Returns [strokes] itself when nothing changed.
      */
     fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null): List<VectorStroke> {
         if (strokes.none { s -> s.points.any { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() } }) return strokes
@@ -175,6 +274,11 @@ object AutoAnchors {
             for (p in cleared) if (p.anchor > 0) claimed.add(p.anchor)
             val pts = cleared.toMutableList()
             val targets = targets(cleared, s.isClosed, sens)
+            // A correspondence anchor inherited from a ghost (or placed manually) is
+            // already a deliberate feature match. Do not create a second automatic
+            // anchor immediately beside it just because the local geometry also peaks.
+            val protected = cleared.withIndex().filter { it.value.anchor > 0 && !it.value.auto }
+            val featureSpacing = max(5f, pathLength(cleared, s.isClosed) * 0.025f)
             val endpointTargets = if (!s.isClosed && cleared.size >= 2) listOf(0, cleared.lastIndex).filter { pts[it].anchor == 0 } else emptyList()
             val endpointPool = old.filter { it.endpoint && it.rank !in claimed }.distinctBy { it.rank }
             val tipPool = old.filter { !it.endpoint && it.rank !in claimed }.distinctBy { it.rank }.toMutableList()
@@ -203,9 +307,10 @@ object AutoAnchors {
                 if (pick != null) { pts[target] = pts[target].copy(anchor = pick.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(pick.rank) }
             }
 
-            // Curve-tip identities are a separate pool: they can only populate
+            // Automatic feature identities are a separate pool: they can only populate
             // intermediate targets and can never take either endpoint's number.
-            val interiorTargets = if (s.isClosed) targets else targets.filter { it != 0 && it != pts.lastIndex }
+            val interiorTargets = (if (s.isClosed) targets else targets.filter { it != 0 && it != pts.lastIndex })
+                .filter { i -> pts[i].anchor == 0 && protected.none { q -> hypot(q.value.x - pts[i].x, q.value.y - pts[i].y) < featureSpacing } }
             val tol = max(3f, pathLength(cleared, s.isClosed) * 0.03f)
             val unmatched = ArrayList<Int>()
             for (i in interiorTargets) {
