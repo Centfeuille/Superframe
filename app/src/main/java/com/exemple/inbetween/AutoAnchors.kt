@@ -9,10 +9,10 @@ import kotlin.math.roundToInt
 
 /*
  * Automatic anchors for vector lines.
- *  - [AutoAnchors.targets]: an open line gets its two outer endpoints plus detected curve tips; a closed line gets detected curve tips (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.endpoint],
+ *  - [AutoAnchors.targets]: an open line gets its two outer endpoints plus detected curve-lobe extrema and sharp corners; a closed line gets detected features (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.endpoint],
  *    separately from the general [VectorPoint.auto] flag, so curve-tip identities cannot be reassigned to endpoints during [AutoAnchors.refresh]. Curve-tip anchors are refreshed with the curve; inherited/manual correspondence anchors remain in their original order. Anchors set by hand,
  *    or inherited from a traced line, are never touched.
- *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers, placed at the nearest points of the new line in the same order.
+ *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers; automatic curve features map to corresponding extrema on the new line, while manual anchors use nearest-path projection.
  *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
  */
 object AutoAnchors {
@@ -52,8 +52,9 @@ object AutoAnchors {
 
     /**
      * Adaptive feature-aware anchor detection. Open strokes always include their two
-     * structural endpoints. Interior anchors are placed only at meaningful geometric
-     * features: pronounced curvature peaks, sharp direction changes and inflections.
+     * structural endpoints. Interior anchors prefer the apex (maximum chord deviation)
+     * of each curve lobe, with separate sharp-corner anchors. Inflections split S-curves
+     * into lobes; they are not themselves treated as extrema.
      * The count is therefore driven by the shape, not a fixed per-line quota. [maxTips]
      * is only a safety ceiling (24 by default); [sens] 0..1 controls how subtle a feature
      * may be before it is retained.
@@ -127,38 +128,55 @@ object AutoAnchors {
         val features = HashMap<Int, Float>()
         val neighbourhood = max(2, k / 2)
 
-        // Distinct local maxima represent corners and local curvature extrema. A
-        // plateau (for example a perfect circle) is deliberately not treated as many
-        // separate features; its shape is represented by a sparse pair of anchors.
-        for (i in lo until hi) {
-            val value = magnitude[i]
-            if (value < threshold) continue
-            var localMax = value
-            var localMin = value
-            for (d in 1..neighbourhood) {
-                val left = magnitude[at(i - d)]
-                val right = magnitude[at(i + d)]
-                localMax = max(localMax, max(left, right))
-                localMin = min(localMin, min(left, right))
-            }
-            // Require both a local maximum and a little prominence. This suppresses
-            // evenly curved arcs (whose curvature is nearly constant) while retaining
-            // real peaks and corners.
-            if (value >= localMax - 0.25f && value - localMin >= 0.75f) {
-                features[i] = max(features[i] ?: 0f, value)
-            }
-        }
-
-        // Inflection points are important for S-curves even though their local turning
-        // magnitude can be small. Require meaningful curvature on both sides so tiny
-        // noisy sign changes do not create anchors.
+        // A curve anchor belongs at the apex of a curve lobe (the point furthest from
+        // the chord joining that lobe's boundaries), not merely at the strongest local
+        // curvature sample. First find inflections to split S-curves into individual
+        // lobes. Inflections are segmentation boundaries, not anchors themselves.
         val side = max(2, k * 2)
+        val inflections = ArrayList<Int>()
         for (i in (lo + side) until (hi - side)) {
             val before = signed[i - side]
             val after = signed[i + side]
             if (before * after < 0f && abs(before) >= threshold * 0.18f && abs(after) >= threshold * 0.18f) {
-                val score = min(abs(before), abs(after)) + 0.25f * (abs(before) + abs(after))
-                features[i] = max(features[i] ?: 0f, score)
+                inflections.add(i)
+            }
+        }
+        val boundaries = (listOf(lo) + inflections + hi).distinct().sorted()
+        val apexProminence = max(1.5f, bboxDiag(pts) * 0.008f)
+        for (bi in 0 until boundaries.lastIndex) {
+            val first = boundaries[bi]
+            val last = boundaries[bi + 1]
+            if (last - first < max(5, k * 2)) continue
+            val ax = sx[first]; val ay = sy[first]
+            val dx = sx[last] - ax; val dy = sy[last] - ay
+            val chord = hypot(dx, dy)
+            if (chord < 1e-3f) continue
+            var bestSample = -1
+            var bestDeviation = 0f
+            for (q in (first + 1) until last) {
+                val deviation = abs((sx[q] - ax) * dy - (sy[q] - ay) * dx) / chord
+                if (deviation > bestDeviation) { bestDeviation = deviation; bestSample = q }
+            }
+            if (bestSample >= 0 && bestDeviation >= apexProminence) {
+                // Apexes outrank incidental curvature noise so each lobe gets its
+                // semantically meaningful extreme point whenever the spacing allows.
+                features[bestSample] = max(features[bestSample] ?: 0f, 100f + bestDeviation)
+            }
+        }
+
+        // Keep genuine sharp corners as a separate feature class. Smooth curvature
+        // maxima are deliberately not used: their position can slide along an arc as
+        // the shape changes, whereas the lobe apex above is geometrically stable.
+        val cornerThreshold = max(28f, threshold * 2.5f)
+        for (i in lo until hi) {
+            val value = magnitude[i]
+            if (value < cornerThreshold) continue
+            var localMax = value
+            for (d in 1..neighbourhood) {
+                localMax = max(localMax, max(magnitude[at(i - d)], magnitude[at(i + d)]))
+            }
+            if (value >= localMax - 0.25f) {
+                features[i] = max(features[i] ?: 0f, 200f + value)
             }
         }
 
@@ -400,12 +418,11 @@ object AutoAnchors {
     }
 
     /**
-     * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Each number
-     * is placed at the point of [s] nearest to the ghost's anchor, in the same order along the line (a line drawn the other way round is read backwards; the ends of the ghost
+     * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Automatically detected ghost extrema map to the corresponding detected extrema on [s] by ordered path progress; manual anchors use nearest-path projection. The same order is retained along the line (a line drawn the other way round is read backwards; the ends of the ghost
      * land on the ends of [s]); when the line has no point there, one is inserted. These anchors are not automatic: they say which point matches which, so they are never redone.
      * Null when the ghost carries no usable anchor.
      */
-    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>): VectorStroke? {
+    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>, sens: Float = 0.5f): VectorStroke? {
         val n = s.points.size
         val gm = g.points.size
         if (s.fill != 0 || n < 2 || gm < 2) return null
@@ -445,6 +462,15 @@ object AutoAnchors {
         // (3) the new line is elsewhere (the drawing moved): map every still-free ghost anchor by its relative path position.
         val nearTol = 0.15f * diag + 4f
         val allNear = ga.all { distToLine(it.value.x, it.value.y) <= nearTol }
+        // The ghost's automatically detected interior anchors represent curve-lobe
+        // extrema. When tracing, map those identities to the corresponding extrema
+        // detected on the new stroke by ordered path progress, rather than to whichever
+        // sample happens to be spatially closest to the old ghost coordinate. This is
+        // what keeps an apex at the apex even when the artist's trace is slightly offset.
+        val tracedFeatureVertices = targets(s.points, s.isClosed, sens)
+            .filter { sRing || (it != 0 && it != n - 1) }
+        val tracedFeatureDistances = tracedFeatureVertices.map { cum[it] }.sorted()
+        val claimedFeatureDistances = HashSet<Float>()
         val partTol = 0.05f * diag + 8f
         val onGhost = s.points.all { distToPoly(it.x, it.y, g.points) <= partTol }
         // A ghost can already have some of its anchor numbers in use in this keyframe
@@ -453,6 +479,21 @@ object AutoAnchors {
         // to be free before mapping those that remain by their relative position.
         val mode = when { !mono || allNear -> 1; onGhost -> 2; ga.isNotEmpty() -> 3; else -> return null }
         val useNearest = mode != 3
+        fun nearestProgress(ax: Float, ay: Float, lowerBound: Float): Float {
+            var best = Float.MAX_VALUE; var bp = -1f
+            for (j in 0 until m - 1) {
+                if (mono && cum[j + 1] < lowerBound - gap * 0.5f) continue
+                val l = cum[j + 1] - cum[j]
+                val dx = xs[j + 1] - xs[j]; val dy = ys[j + 1] - ys[j]
+                val t = if (l < 1e-6f) 0f else (((ax - xs[j]) * dx + (ay - ys[j]) * dy) / (l * l)).coerceIn(0f, 1f)
+                var pp = cum[j] + t * l
+                if (mono && pp < lowerBound) pp = lowerBound
+                val tt = if (l < 1e-6f) 0f else ((pp - cum[j]) / l).coerceIn(0f, 1f)
+                val dd = hypot(ax - (xs[j] + dx * tt), ay - (ys[j] + dy * tt))
+                if (dd < best) { best = dd; bp = pp }
+            }
+            return bp
+        }
         val params = ArrayList<Pair<Float, Int>>()
         var last = -gap
         for (a in order) {
@@ -463,20 +504,22 @@ object AutoAnchors {
             if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue // this part of the ghost line is not under this stroke
             if (mono && (atStart || atEnd) && (mode != 2 || distToLine(a.value.x, a.value.y) <= partTol)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
             else {
-                val ax = a.value.x; val ay = a.value.y
-                var best = Float.MAX_VALUE; var bp = -1f
-                for (j in 0 until m - 1) {
-                    if (mono && cum[j + 1] < last + gap * 0.5f) continue
-                    val l = cum[j + 1] - cum[j]
-                    val dx = xs[j + 1] - xs[j]; val dy = ys[j + 1] - ys[j]
-                    val t = if (l < 1e-6f) 0f else (((ax - xs[j]) * dx + (ay - ys[j]) * dy) / (l * l)).coerceIn(0f, 1f)
-                    var pp = cum[j] + t * l
-                    if (mono && pp < last + gap) pp = last + gap
-                    val tt = if (l < 1e-6f) 0f else ((pp - cum[j]) / l).coerceIn(0f, 1f)
-                    val dd = hypot(ax - (xs[j] + dx * tt), ay - (ys[j] + dy * tt))
-                    if (dd < best) { best = dd; bp = pp }
+                val isCurveFeature = a.value.auto && !a.value.endpoint && !atStart && !atEnd
+                val ghostU = (gcum[gi] / gtotal).let { if (reversed) 1f - it else it }
+                val projected = if (mode == 2) nearestProgress(a.value.x, a.value.y, last + gap) else -1f
+                val featureU = if (mode == 2 && projected >= 0f) projected / total else ghostU
+                val featureMatch = if (isCurveFeature && tracedFeatureDistances.isNotEmpty()) {
+                    tracedFeatureDistances.asSequence()
+                        .filter { it !in claimedFeatureDistances && it >= last + gap }
+                        .minByOrNull { abs(it / total - featureU) }
+                } else null
+                if (featureMatch != null) {
+                    p = featureMatch
+                    claimedFeatureDistances.add(featureMatch)
+                } else {
+                    val bp = if (projected >= 0f) projected else nearestProgress(a.value.x, a.value.y, last + gap)
+                    p = if (!useNearest || bp < 0f) ghostU * total else bp
                 }
-                p = if (!useNearest || bp < 0f) { val u = gcum[gi] / gtotal; (if (reversed) 1f - u else u) * total } else bp
             }
             if (mono) { if (p < last + gap) p = last + gap; if (p > total) continue }
             else if (params.any { abs(it.first - p) < gap }) continue

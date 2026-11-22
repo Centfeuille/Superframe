@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            60, "2026-11-22", "Curve anchors follow the actual curve extremes",
+            listOf(
+                "Automatic curve anchors now target the apex of each curve lobe: the point furthest from the chord between that lobe's boundaries. Inflection points split S-curves into separate lobes, while sharp corners remain independently detectable.",
+                "When drawing with the ghost onion-skin guide, inherited automatic curve anchors are mapped to the corresponding detected extremes on the new stroke by their order along the path, instead of simply snapping to the nearest point. This is intended to keep each curve's extreme point paired during interpolation. No .inb format change. Full Android build and device behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             59, "2026-11-22", "Adaptive anchors follow the shape of each curve",
             listOf(
                 "Automatic intermediate anchors are now detected from meaningful shape features: pronounced bends, curvature peaks and S-curve inflections. Simple curves receive fewer anchors; complex contours can receive more, up to a safety limit of 24.",

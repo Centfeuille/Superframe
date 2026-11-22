@@ -1,3 +1,13 @@
+## 2026-11-22 — Curve-extreme anchors and ghost-trace feature matching
+- AI model: GPT-6
+- Category: Improved / Vector interpolation anchors
+- Reworked adaptive feature detection to anchor curve lobes at their geometric apex: the point with the greatest perpendicular deviation from the chord joining the lobe boundaries. Inflection points split S-curves into lobes but are not themselves treated as extrema; sharp corners remain a separate feature class.
+- Ghost tracing now maps automatic interior ghost anchors to corresponding detected extrema on the newly drawn stroke by ordered normalized path progress. Manual anchors continue to use nearest-path projection. This makes the traced line inherit the ghost's semantic extreme-point correspondence instead of projecting every anchor to the nearest coordinate.
+- Structural endpoints, anchor numbering, merge behavior and `.inb` storage remain unchanged.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/Canvas.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: compiled the actual `AutoAnchors.kt` logic in an isolated Kotlin harness with model stubs; tested a multi-lobe wave, translated and deformed ghost traces, reversed drawing direction, partial multi-stroke tracing, inherited anchor-number preservation and endpoint refresh. No full Android Gradle build or tablet test was performed.
+
 ## 2026-11-22 — Keep structural endpoint identities separate from automatic curve tips
 
 - AI model: GPT-6
