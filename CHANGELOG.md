@@ -1,3 +1,14 @@
+## 2026-11-22 — Ghost line visible with the selection tool; framing window when the ghost is cropped
+- AI model: Claude
+- Category: Added / Vector ghost line display
+- Request: keep the ghost line visible when switching from the brush to the selection tool (to see where to place anchor points); when zooming / panning crops the ghost partially or completely, show a window in the upper left of the canvas that dynamically frames the ghost line.
+- Change in `Canvas.kt`: (1) `ghostLayer` is now also active for the selection tool (`ed.tool == 2`), so the shimmering ghost line and its anchor numbers are drawn under the vector edit overlay exactly as with the brush; it still requires the Ghost toggle, an unlocked visible vector layer and a reference keyframe. (2) New inset: whenever any point of the shown ghost line, converted to screen coordinates with `toScr`, lies outside the canvas box (3 px margin), a small rounded window (about 170 dp on its longer side, aspect from the ghost's screen bounding box, 90 dp minimum) appears at the top left. It draws the ghost line fitted to the window in screen space (so rotation, flips and layer-group transforms match the canvas), its anchors with numbers and colours, and an amber rectangle for the part of the page currently visible. It recomputes on every pan / zoom / rotate and disappears when the ghost is fully visible. It takes no touch input, so touches pass through to the canvas.
+- Not changed: tracing behavior, anchors, merge, `.inb` format. The Ghost on/off button stays in the brush toolbar.
+- Files: `app/src/main/java/com/exemple/inbetween/Canvas.kt`, `WhatsNew.kt` (note 68), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: source review of the gating condition, coordinate conversion and Compose scope (BoxScope `align`, DrawScope sizes, imports `border` and `kotlin.math.min` added); complete diff review. Not compiled (no Kotlin compiler available) and not run on a device.
+- Known follow-up: compile; check the inset on a rotated / flipped view and on a layer inside a transformed group; check that it does not collide with other top-left overlays (perspective bar shows only on perspective layers); consider tapping the window to zoom the canvas to the ghost.
+
 ## 2026-11-22 — Ghost mode: only the end anchors are inherited
 - AI model: Claude
 - Category: Changed / Vector ghost tracing

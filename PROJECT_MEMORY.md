@@ -713,3 +713,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `AutoAnchors.inherit` and `Canvas.kt` `vecAnchorNew` use only the first and last anchor of an open ghost line (`ghostEnds`); in-between ghost anchors are ignored (closed ghost lines keep theirs). This narrows the piece logic of the previous section: a piece consumes only the ghost's end anchors. No `.inb` change.
 - Unverified: not compiled, not run on a device.
 
+## 2026-11-22 — Ghost line with the selection tool and the framing inset (see CHANGELOG)
+- `Canvas.kt`: `ghostLayer` also for `ed.tool == 2`. A top-left inset (non-interactive Canvas, zIndex 3) appears when the shown ghost line is partly or fully outside the canvas box; it fits the ghost's screen-space points (via `toScr`) into the window with anchors and the visible-area rectangle. No `.inb` change.
+- Unverified: not compiled, not run on a device.
+

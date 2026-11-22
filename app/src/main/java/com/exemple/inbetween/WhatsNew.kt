@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            68, "2026-11-22", "Ghost line stays visible with the selection tool, with a framing window",
+            listOf(
+                "With Ghost on, the ghost line and its anchors now stay visible when you switch from the brush to the selection tool, so you can see where to place your anchor points.",
+                "When you zoom or pan and the ghost line is partly or completely out of the visible canvas, a small window appears in the upper left. It frames the whole ghost line in the same orientation as the canvas, with its anchors, and an amber rectangle shows the part of the page you are looking at. The window disappears as soon as the ghost line is fully visible. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             67, "2026-11-22", "Ghost tracing keeps only the end anchors",
             listOf(
                 "When you trace a ghost line, the new line now takes only the ghost's two end anchors. Anchors between the ends on the ghost are ignored, so nothing is placed or piled up between the ends of the line you draw.",

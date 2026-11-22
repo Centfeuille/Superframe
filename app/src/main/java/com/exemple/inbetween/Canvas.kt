@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
@@ -93,6 +94,7 @@ import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -1608,7 +1610,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     // line order onion skin: the next untraced line of the previous / next keyframe shimmers, with its anchors; a new line drawn over it takes those anchors
-    val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 4) }
+    val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 2 || ed.tool == 4) }
     val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
     val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
     val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor) {
@@ -2309,6 +2311,52 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     antsBlack.pathEffect = android.graphics.DashPathEffect(floatArrayOf(5f * z, 5f * z), ph * z)
                     nc.drawPath(path, antsWhite); nc.drawPath(path, antsBlack)
                     nc.restore()
+                }
+            }
+        }
+        // Ghost inset: while the ghost line is partly or fully outside the visible canvas (zoom / pan), a small window in the
+        // upper left frames the whole ghost line (same orientation as the canvas) with its anchors and the visible area.
+        ghostData?.first?.takeIf { box.width > 0 && box.height > 0 }?.let { ghostLine ->
+            val gScr = ghostLine.points.map { toScr(Offset(it.x, it.y)) }
+            val edge = 3f
+            val cropped = gScr.any { it.x < edge || it.y < edge || it.x > box.width - edge || it.y > box.height - edge }
+            if (cropped) {
+                val minX = gScr.minOf { it.x }; val maxX = gScr.maxOf { it.x }
+                val minY = gScr.minOf { it.y }; val maxY = gScr.maxOf { it.y }
+                val bw = (maxX - minX).coerceAtLeast(1f); val bh = (maxY - minY).coerceAtLeast(1f)
+                val asp = (bw / bh).coerceIn(0.4f, 2.5f)
+                val wDp = if (asp >= 1f) 170f else max(90f, 170f * asp)
+                val hDp = if (asp >= 1f) max(90f, 170f / asp) else 170f
+                val anchorMax = ghostLine.points.maxOfOrNull { it.anchor } ?: 0
+                val shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                Canvas(
+                    Modifier.align(Alignment.TopStart).zIndex(3f).padding(10.dp).size(wDp.dp, hDp.dp)
+                        .background(Color(0xE6111827), shape)
+                        .border(1.dp, Color(0x6622D3EE), shape)
+                        .clipToBounds()
+                ) {
+                    val pad = 12.dp.toPx()
+                    val k = min((size.width - 2f * pad) / bw, (size.height - 2f * pad) / bh)
+                    val ox = (size.width - bw * k) / 2f - minX * k
+                    val oy = (size.height - bh * k) / 2f - minY * k
+                    fun m(p: Offset) = Offset(p.x * k + ox, p.y * k + oy)
+                    // the part of the page currently visible on the canvas
+                    val v0 = m(Offset(0f, 0f))
+                    drawRect(Color(0xFFFFC107), topLeft = v0, size = Size(box.width * k, box.height * k), style = Stroke(1.5.dp.toPx()))
+                    // the ghost line
+                    val path = Path()
+                    gScr.forEachIndexed { i, q -> val mp = m(q); if (i == 0) path.moveTo(mp.x, mp.y) else path.lineTo(mp.x, mp.y) }
+                    if (ghostLine.isClosed) path.close()
+                    drawPath(path, Color(0xFF22D3EE), style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
+                    ghostLine.points.forEachIndexed { i, vp ->
+                        if (vp.anchor > 0) {
+                            val mp = m(gScr[i])
+                            drawCircle(Color.White, 5.dp.toPx(), mp)
+                            drawCircle(Color(anchorColor(vp.anchor, anchorMax)), 3.5.dp.toPx(), mp)
+                            drawIntoCanvas { cv -> cv.nativeCanvas.drawText(vp.anchor.toString(), mp.x + 6.dp.toPx(), mp.y - 5.dp.toPx(), np) }
+                        }
+                    }
                 }
             }
         }
