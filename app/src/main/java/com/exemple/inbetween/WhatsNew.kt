@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            70, "2026-11-22", "Interpolation drag: Joints, Fixed and Shift; selection tool: Displace",
+            listOf(
+                "The guide joints now live in the Interpolation drag bar (the Joints button); the separate guide-joint button and bar are gone. In that bar, Fixed keeps the in-between at the position of the previous keyframe while its points still move relative to each other, and Shift lets you drag the preview to another position like any selection (the refresh button puts it back). The created in-between includes the shift.",
+                "New Displace button in the selection tool: with lines or points selected, tap a selected line to add a joint and drag it; the selection warps with the same smooth even pull as guide joints. The check button applies it in one undo step, the refresh button removes the joints, and turning Displace off cancels it. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             69, "2026-11-22", "Guide joints warp the line evenly",
             listOf(
                 "A guide joint now pulls the line smoothly: the line is exactly on the joint, and between two joints it changes evenly from one joint's offset to the next, with no sharp kinks at the attached points. Away from a joint the pull fades out gradually.",

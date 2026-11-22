@@ -988,6 +988,14 @@ class Editor : ViewModel() {
     var vecPoints by mutableStateOf(true)               // Selection tool on a vector layer: true = pick and edit single points (tap / lasso, drag, brushes), false = select whole lines and transform them
     var vecMergeRadius by mutableFloatStateOf(14f)      // Merge reach, screen px: how close the start / end of a line must come to another line (or to its own other end) to join it
     var vecDragT by mutableFloatStateOf(0.5f)           // interpolation preview position between the previous and current keyframe
+    var vecDragFixed by mutableStateOf(false)           // interpolation drag: the in-between keeps the first keyframe's overall position (its points still interpolate relative to each other)
+    var vecShiftOn by mutableStateOf(false)             // interpolation drag: dragging on the canvas moves the preview instead of changing the position
+    var vecShiftX by mutableFloatStateOf(0f)            // the preview's manual shift (document pixels)
+    var vecShiftY by mutableFloatStateOf(0f)
+    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || vecShiftX != 0f || vecShiftY != 0f) InbetweenPlace(vecDragFixed, vecShiftX, vecShiftY) else null
+    var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
+    var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
+    var vecDisplaceSelected by mutableIntStateOf(-1)
     var vecGuideSelected by mutableIntStateOf(-1)       // selected guide joint index on the active interpolation span
     var vecSel by mutableStateOf<Set<Long>>(emptySet()) // selected points (vecKey: stroke index, point index) across the cels of vecSelCels (see VecScope)
     var vecSelCels by mutableStateOf<List<Cel>>(emptyList()) // the keyframes the selection belongs to (observable, so the widget bar follows it)

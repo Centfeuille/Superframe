@@ -91,6 +91,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
+/** A small text button for the vector widget bar (named options such as Fixed, Shift, Joints, Displace). */
+@Composable
+private fun BarChip(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = 2.dp).clip(RoundedCornerShape(10.dp))
+            .background(if (on) Color(0xFFD0BCFF) else Color(0x33FFFFFF))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 7.dp)
+    ) { Text(label, fontSize = 12.sp, color = if (on) Color(0xFF21005D) else Color.White.copy(alpha = if (enabled) 1f else 0.4f)) }
+}
+
 /**
  * The vector buttons on the timeline bar (shown while a vector layer is selected): Interpolation drag and Cutter. Vector drawing is the regular Brush tool and
  * point selection / editing is the regular Selection tool; their options are in [VectorWidgetBar].
@@ -99,11 +110,8 @@ import kotlin.math.roundToInt
 fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARAMETER") targets: List<Cel>) {
     if (cut.layer?.vector != true) return
     // Drawing and point selection live on the regular Brush and Selection tools (their vector options are in the widget bar at the bottom of the canvas).
-    IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = ed.vecMode == 3 && ed.tool == 0, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Tap again to go back to drawing") {
-        val on = ed.vecMode == 3 && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3
-    }
-    IconBtn(Icons.Filled.Adjust, size = buttonSize, on = ed.vecMode == 4 && ed.tool == 0, tip = "Guide joints: tap the interpolated ghost to add a joint, then drag joints to shape the in-between without changing either keyframe") {
-        val on = ed.vecMode == 4 && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 4; ed.vecGuideSelected = -1
+    IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Its bar also has Fixed (keep the position), Shift (move the preview) and Joints (guide joints). Tap again to go back to drawing") {
+        val on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3; ed.vecGuideSelected = -1; ed.vecShiftOn = false
     }
     IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes: lines, curve, bake") { ed.vecInterpOpen = true }
     IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
@@ -122,11 +130,10 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val layer = cut.layer?.takeIf { it.vector && it.visible } ?: return
     val pointBar = ed.tool == 2
     val pointsMode = pointBar && ed.vecPoints // Selection tool, Points on: single points (the old Point edit); off: whole lines
-    val dragBar = ed.vecMode == 3 && ed.tool == 0
-    val guideBar = ed.vecMode == 4 && ed.tool == 0
+    val dragBar = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0 // Interpolation drag, with or without its guide joints
     val drawBar = ed.vecMode == 0 && ed.tool == 0
     val lineBar = ed.tool == 4 // Line / shapes tool
-    if (!pointBar && !dragBar && !guideBar && !drawBar && !lineBar) return
+    if (!pointBar && !dragBar && !drawBar && !lineBar) return
     val ctx = LocalContext.current
     var falloffOpen by remember { mutableStateOf(false) }
     var anchorOpen by remember { mutableStateOf(false) }
@@ -180,6 +187,24 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     }
     }
     Column(Modifier.align(Alignment.BottomCenter).clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
+        if (pointBar && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (!has) "Displace · select lines (or points) first" else if (ed.vecDisplaceJoints.isEmpty()) "Displace · tap a selected line to add a joint, then drag it" else "Displace · ${ed.vecDisplaceJoints.size} joint${if (ed.vecDisplaceJoints.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            IconBtn(Icons.Filled.Delete, on = ed.vecDisplaceSelected in ed.vecDisplaceJoints.indices, tip = "Delete the selected joint") {
+                val at = ed.vecDisplaceSelected
+                if (at in ed.vecDisplaceJoints.indices) { ed.vecDisplaceJoints = ed.vecDisplaceJoints.toMutableList().also { it.removeAt(at) }; ed.vecDisplaceSelected = -1 }
+            }
+            IconBtn(Icons.Filled.Refresh, tip = "Remove all joints (the selection goes back to how it was)") { ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
+            IconBtn(Icons.Filled.Check, tip = "Apply the displacement to the selection (one undo step)") {
+                if (sc != null && has && ed.vecDisplaceJoints.isNotEmpty()) {
+                    val edited = displaceSelection(sc.strokes, sel, ed.vecDisplaceJoints, !ed.vecPoints)
+                    applyScope(cut, sc, sc.split(edited))
+                    val pickedLines = sel.map { vecKeyStroke(it) }.toSet()
+                    ed.vecSel = if (ed.vecPoints) sel else edited.indices.filter { it in pickedLines }.flatMap { si -> edited[si].points.indices.map { vecKey(si, it) } }.toSet() // a warped line has more points: keep the whole line selected
+                    ed.vecSelCels = vecScope(cut, ed.refAll)?.cels ?: emptyList()
+                    ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1
+                }
+            }
+        }
         if (pointBar) Row(verticalAlignment = Alignment.CenterVertically) {
             // the regular selection widgets (as in SelectionBar), working on the vector selection
             IconBtn(Icons.Filled.Add, ed.selOp == 1, tip = "Add to the selection (or hold Shift)") { ed.selOp = if (ed.selOp == 1) 0 else 1 }
@@ -207,6 +232,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             } else if (pointBar) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
+                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; if (ed.vecDisplace) ed.vecBrush = 0 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 if (pointsMode) {
                     VIconBtn(Icons.Filled.PanTool, on = brushMode == 1, tip = "Shift brush: push points along with the pen") { ed.vecBrush = if (brushMode == 1) 0 else 1 }
@@ -263,20 +289,6 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 }
                 VIconBtn(Icons.Filled.AutoFixHigh, enabled = has, tip = "Smooth the selected points") { smoothOpen = true }
                 VIconBtn(Icons.Filled.Anchor, enabled = has, tint = Color(anchorColor(1, 3)), tip = "Anchor: number the selected points so the same numbers in the next keyframe are interpolated toward each other") { if (sc != null && !autoAnchor(cut, ed, sc)) anchorOpen = true }
-            } else if (guideBar) {
-                val selectedFrames = vecSelectedFrames(layer, ed)
-                val source = if (selectedFrames.size == 3) selectedFrames[0] else layer.cels.getOrNull(idx - 1)
-                Text(if (source == null) "Guide joints · needs a previous keyframe" else "Guide joints · ${(ed.vecDragT * 100).roundToInt()}%", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-                Slider(value = ed.vecDragT, onValueChange = { ed.vecDragT = it }, valueRange = 0f..1f, enabled = source != null, modifier = Modifier.width(140.dp).height(30.dp))
-                val guides = source?.vecCfg?.guideJoints.orEmpty()
-                IconBtn(Icons.Filled.Delete, on = ed.vecGuideSelected in guides.indices, tip = "Delete selected guide joint") {
-                    val cfg = source?.vecCfg
-                    if (source != null && cfg != null && ed.vecGuideSelected in cfg.guideJoints.indices) {
-                        val removeAt = ed.vecGuideSelected
-                        cut.record { source.vecCfg = cfg.copy(guideJoints = cfg.guideJoints.toMutableList().also { it.removeAt(removeAt) }); ed.vecGuideSelected = -1 }
-                    }
-                }
-                IconBtn(Icons.Filled.Check, tip = "Exit guide-joint editing") { ed.vecMode = 0; ed.vecGuideSelected = -1 }
             } else {
                 val frames = vecSelectedFrames(layer, ed)
                 val three = frames.size == 3
@@ -290,13 +302,27 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     else if (badFrames) "Select exactly three frames (two ends and the one between), or none"
                     else if (ready) "In-between ${(ed.vecDragT * 100).roundToInt()}%" + linesNote else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-                IconBtn(Icons.Filled.Refresh, tip = "Back to the middle") { ed.vecDragT = 0.5f }
+                IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
+                BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
+                BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn }
+                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1; ed.vecShiftOn = false }
+                if (ed.vecMode == 4) {
+                    Slider(value = ed.vecDragT, onValueChange = { ed.vecDragT = it }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
+                    val jointSource = if (three) frames[0] else layer.cels.getOrNull(idx - 1)
+                    val jointCfg = jointSource?.vecCfg
+                    IconBtn(Icons.Filled.Delete, on = jointCfg != null && ed.vecGuideSelected in jointCfg.guideJoints.indices, tip = "Delete the selected guide joint") {
+                        if (jointSource != null && jointCfg != null && ed.vecGuideSelected in jointCfg.guideJoints.indices) {
+                            val removeAt = ed.vecGuideSelected
+                            cut.record { jointSource.vecCfg = jointCfg.copy(guideJoints = jointCfg.guideJoints.toMutableList().also { it.removeAt(removeAt) }); ed.vecGuideSelected = -1 }
+                        }
+                    }
+                }
                 IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake") { ed.vecInterpOpen = true }
                 IconBtn(Icons.Filled.Check, tip = if (three) "Apply: the interpolation of the first and last selected frame replaces the middle selected frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
                     if (three) {
-                        if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) ed.vecDragT = 0.5f
+                        if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
                     } else if (badFrames) android.widget.Toast.makeText(ctx, "Select exactly three frames: the two ends are the references, the one between receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
-                    else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel))) ed.vecDragT = 0.5f
+                    else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
                     else android.widget.Toast.makeText(ctx, "Move to a keyframe that has a previous keyframe", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }

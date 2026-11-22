@@ -721,3 +721,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `applyGuideJoints` (`Vector.kt`): the line is densified (max gap 1/150 of its length) and each joint's displacement is applied through an exact smooth offset field (quintic smoothstep between neighbouring joints, fade-out over `reach` = 0.25 of the line length otherwise) instead of summed Gaussians with normalisation. This supersedes any earlier note describing the Gaussian (sigma 0.10) falloff. No `.inb` change.
 - Unverified: not compiled, not run on a device.
 
+## 2026-11-22 — Interpolation drag bar and Displace (see CHANGELOG)
+- Guide joints are part of the Interpolation drag bar (Joints chip, vecMode 4); no separate guide bar or toolstrip button. Drag bar chips: Fixed (`Editor.vecDragFixed`), Shift (`vecShiftOn`, `vecShiftX/Y`), Joints. `InbetweenPlace` is applied before `applyGuideJoints`. Selection tool: Displace chip (`vecDisplace`, `vecDisplaceJoints`, `vecDisplaceSelected`), `displaceSelection` / `displaceStroke`, shared field `guideOffset`. No `.inb` change.
+- Unverified: not compiled, not run on a device.
+
