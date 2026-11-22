@@ -191,13 +191,25 @@ object AutoAnchors {
         var reversed = false
         if (mono) {
             val a0 = s.points.first(); val a1 = s.points.last(); val b0 = g.points.first(); val b1 = g.points.last()
-            val f = hypot(a0.x - b0.x, a0.y - b0.y) + hypot(a1.x - b1.x, a1.y - b1.y)
-            val r = hypot(a0.x - b1.x, a0.y - b1.y) + hypot(a1.x - b0.x, a1.y - b0.y)
-            reversed = r < f
+            // direction from where each line runs (start -> end), not from where it lies, so a line drawn away from the ghost is still read the right way round
+            val dot = (a1.x - a0.x) * (b1.x - b0.x) + (a1.y - a0.y) * (b1.y - b0.y)
+            reversed = dot < 0f
         }
         val order = if (reversed) ga.reversed() else ga
+        fun distToLine(ax: Float, ay: Float): Float {
+            var best = Float.MAX_VALUE
+            for (j in 0 until m - 1) {
+                val l = cum[j + 1] - cum[j]
+                val dx = xs[j + 1] - xs[j]; val dy = ys[j + 1] - ys[j]
+                val t = if (l < 1e-6f) 0f else (((ax - xs[j]) * dx + (ay - ys[j]) * dy) / (l * l)).coerceIn(0f, 1f)
+                best = min(best, hypot(ax - (xs[j] + dx * t), ay - (ys[j] + dy * t)))
+            }
+            return best
+        }
         val diag = max(bboxDiag(s.points), bboxDiag(g.points))
         val gap = max(0.5f, total * 0.002f)
+        // The line is a trace of the ghost wherever it was drawn. Lying on the ghost: each number goes to the nearest point. Drawn elsewhere (the drawing moved): each number goes to the same relative position along the line.
+        val useNearest = !mono || ga.all { distToLine(it.value.x, it.value.y) <= 0.15f * diag + 4f }
         val params = ArrayList<Pair<Float, Int>>()
         var last = -gap
         for (a in order) {
@@ -220,7 +232,7 @@ object AutoAnchors {
                     val dd = hypot(ax - (xs[j] + dx * tt), ay - (ys[j] + dy * tt))
                     if (dd < best) { best = dd; bp = pp }
                 }
-                p = if (bp < 0f || best > 0.6f * diag) { val u = gcum[gi] / gtotal; (if (reversed) 1f - u else u) * total } else bp
+                p = if (!useNearest || bp < 0f) { val u = gcum[gi] / gtotal; (if (reversed) 1f - u else u) * total } else bp
             }
             if (mono) { if (p < last + gap) p = last + gap; if (p > total) continue }
             else if (params.any { abs(it.first - p) < gap }) continue
@@ -301,15 +313,4 @@ object LineGhost {
 
     /** The line shown now: the [skip]-th untraced line, counting round. */
     fun current(open: List<VectorStroke>, skip: Int): VectorStroke? = if (open.isEmpty()) null else open[((skip % open.size) + open.size) % open.size]
-
-    /**
-     * Which untraced line a line just drawn belongs to: the shown one, unless the stroke lies clearly closer to another (order is the default, position decides when they disagree).
-     * Null when it lies on none of them (a new line, not a trace).
-     */
-    fun choose(stroke: VectorStroke, open: List<VectorStroke>, shown: VectorStroke?, px: Float): VectorStroke? {
-        if (open.isEmpty() || stroke.points.size < 2) return null
-        val best = open.minByOrNull { endDist(stroke, it) } ?: return null
-        val pick = if (shown != null && endDist(stroke, shown) <= endDist(stroke, best) * 1.5f + 8f * px) shown else best
-        return if (endDist(stroke, pick) <= 0.6f * max(AutoAnchors.bboxDiag(stroke.points), AutoAnchors.bboxDiag(pick.points)) + 12f * px) pick else null
-    }
 }

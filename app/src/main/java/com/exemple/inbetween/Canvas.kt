@@ -653,7 +653,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             if (refCel != null) {
                 val px = 1f / vecZoom()
                 val open = LineGhost.unclaimed(LineGhost.lines(refCel), current, px)
-                var ghost = LineGhost.choose(stroke, open, LineGhost.current(open, ed.vecGhostSkip), px)
+                var ghost = LineGhost.current(open, ed.vecGhostSkip) // the shimmering line IS the one being traced, wherever the new line is drawn
                 if (ghost != null) {
                     if (ghost.points.none { it.anchor > 0 }) {
                         val refStrokes = refCel.vectorStrokes()
