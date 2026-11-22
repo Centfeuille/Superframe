@@ -126,14 +126,14 @@ object AutoAnchors {
      * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. The numbers of points that are still ends or tips are
      * kept (matched by position), anchors that are no longer one are dropped, new ones get free numbers (not used in this keyframe, not in [avoid]). Returns [strokes] itself when nothing changed.
      */
-    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float): List<VectorStroke> {
+    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null): List<VectorStroke> {
         if (strokes.none { s -> s.points.any { it.auto && it.anchor > 0 } }) return strokes
         val count = IntArray(ANCHOR_MAX + 2)
         for (s in strokes) for (p in s.points) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
         val out = ArrayList<VectorStroke>(strokes.size)
         var changed = false
         for (s in strokes) {
-            if (s.points.none { it.auto && it.anchor > 0 }) { out.add(s); continue }
+            if (s.points.none { it.auto && it.anchor > 0 } || (only != null && s.id !in only)) { out.add(s); continue } // a line that was not merged keeps its numbers, whatever happened around it
             val old = s.points.filter { it.auto && it.anchor > 0 }
             for (p in s.points) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]--
             val cleared = s.points.map { if (it.auto) it.copy(anchor = 0, auto = false) else it }
@@ -163,6 +163,36 @@ object AutoAnchors {
             }
             for (p in pts) if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
             if (pts == s.points) out.add(s) else { out.add(s.copy(points = pts)); changed = true }
+        }
+        return if (changed) out else strokes
+    }
+
+    /** True when both ends of an open line carry an anchor (closed lines and points have no ends). */
+    fun endsAnchored(s: VectorStroke): Boolean = s.isClosed || s.points.size < 2 || (s.points.first().anchor > 0 && s.points.last().anchor > 0)
+
+    /** The two end points of an open line always carry an anchor: a missing one is added on the exact end point, with a number not in [taken] (marked automatic). */
+    fun withEnds(s: VectorStroke, taken: Set<Int>): VectorStroke {
+        if (s.fill != 0 || s.isClosed || s.points.size < 2 || endsAnchored(s)) return s
+        val used = HashSet<Int>(taken)
+        for (p in s.points) if (p.anchor > 0) used.add(p.anchor)
+        val pts = s.points.toMutableList()
+        var next = 1
+        for (i in intArrayOf(0, pts.size - 1)) {
+            if (pts[i].anchor > 0) continue
+            while (next in used && next <= ANCHOR_MAX) next++
+            if (next > ANCHOR_MAX) break
+            used.add(next); pts[i] = pts[i].copy(anchor = next, auto = true)
+        }
+        return s.copy(points = pts)
+    }
+
+    /** [withEnds] for the lines in [only] (all when null). Returns [strokes] itself when nothing changed. */
+    fun ensureEnds(strokes: List<VectorStroke>, avoid: Set<Int>, only: Set<String>? = null): List<VectorStroke> {
+        val used = HashSet<Int>(avoid); used.addAll(usedNumbers(strokes))
+        var changed = false
+        val out = strokes.map { s ->
+            if ((only != null && s.id !in only) || endsAnchored(s)) s
+            else withEnds(s, used).also { r -> if (r !== s) { changed = true; for (p in r.points) if (p.anchor > 0) used.add(p.anchor) } }
         }
         return if (changed) out else strokes
     }

@@ -675,9 +675,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 val gKey = LineGhost.key(l, idx)
                 var ghost = LineGhost.shown(allGhost, open, ed, gKey) // the shimmering line IS the one being traced, wherever the new line is drawn; it stays shown afterwards
                 if (ghost != null) {
-                    if (ghost.points.none { it.anchor > 0 }) {
+                    if (ghost.points.none { it.anchor > 0 } || !AutoAnchors.endsAnchored(ghost)) {
                         val refStrokes = refCel.vectorStrokes()
-                        val anchored = AutoAnchors.assignFresh(ghost, AutoAnchors.usedNumbers(refStrokes), ed.vecTipSens)
+                        val gTaken = AutoAnchors.usedNumbers(refStrokes) + blocked
+                        val anchored = AutoAnchors.withEnds(if (ghost.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(ghost, gTaken, ed.vecTipSens) else ghost, gTaken)
                         val ri = l.cels.indexOfFirst { it === refCel }
                         if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     }
@@ -693,8 +694,28 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     /** After a line was merged into others: its automatic anchors follow the new shape. */
-    fun vecRefreshAnchors(l: Layer, idx: Int, strokes: List<VectorStroke>): List<VectorStroke> =
-        if (!ed.vecAutoAnchor) strokes else AutoAnchors.refresh(strokes, AutoAnchors.neighbourNumbers(l, idx), ed.vecTipSens)
+    fun vecRefreshAnchors(l: Layer, idx: Int, strokes: List<VectorStroke>): List<VectorStroke> {
+        if (!ed.vecAutoAnchor) return strokes
+        // Only lines that really changed (a new line, or an old line whose end moved because another line was joined to it) are renumbered. Lines that merely cross or touch
+        // another one only got a shared vertex: their numbers are not touched. Every open line keeps an anchor on each of its two end points.
+        val before = l.cels.getOrNull(idx)?.vectorStrokes() ?: emptyList()
+        val old = before.associateBy { it.id }
+        val ids = strokes.filter { s ->
+            val o = old[s.id]
+            o == null || o.isClosed != s.isClosed || o.points.size < 2 || s.points.size < 2 ||
+                o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
+                o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
+        }.map { it.id }.toSet()
+        val avoid = AutoAnchors.neighbourNumbers(l, idx)
+        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids), avoid, ids)
+    }
+    /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
+    fun vecWithEnds(l: Layer, stroke: VectorStroke): VectorStroke {
+        if (!ed.vecAutoAnchor) return stroke
+        val idx = l.indexAt(cut.time)
+        val cel = l.cels.getOrNull(idx)
+        return AutoAnchors.withEnds(stroke, AutoAnchors.usedNumbers(cel?.vectorStrokes() ?: emptyList()) + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()))
+    }
 
     /** Line / circle / ellipse: pressure goes through the selected brush's size and opacity curves. */
     fun commitShape(pts: List<Offset>, pAvg: Float) {
@@ -719,7 +740,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, shape.id))); return }
                 }
             }
-            if (shapeDeferred) shape = vecFreshAnchors(l, shape) // it did not merge into anything: it is a line of its own
+            shape = if (shapeDeferred) vecFreshAnchors(l, shape) else vecWithEnds(l, shape) // it did not merge into anything: it is a line of its own
             commitOp(l, shape.toInk())
             return
         }
@@ -923,7 +944,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, stroke.id))); return }
             }
         }
-        if (strokeDeferred) stroke = vecFreshAnchors(l, stroke) // it did not merge into anything: it is a line of its own
+        stroke = if (strokeDeferred) vecFreshAnchors(l, stroke) else vecWithEnds(l, stroke) // it did not merge into anything: it is a line of its own
         commitOp(l, stroke.toInk())
     }
 
