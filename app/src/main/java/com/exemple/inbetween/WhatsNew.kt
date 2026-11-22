@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            69, "2026-11-22", "Guide joints warp the line evenly",
+            listOf(
+                "A guide joint now pulls the line smoothly: the line is exactly on the joint, and between two joints it changes evenly from one joint's offset to the next, with no sharp kinks at the attached points. Away from a joint the pull fades out gradually.",
+                "The line is also given more points before it is warped, so a line with few points no longer shows corners. Your joints and their positions are unchanged, and the .inb format is unchanged. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             68, "2026-11-22", "Ghost line stays visible with the selection tool, with a framing window",
             listOf(
                 "With Ghost on, the ghost line and its anchors now stay visible when you switch from the brush to the selection tool, so you can see where to place your anchor points.",

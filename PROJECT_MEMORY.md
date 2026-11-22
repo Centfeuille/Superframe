@@ -717,3 +717,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `Canvas.kt`: `ghostLayer` also for `ed.tool == 2`. A top-left inset (non-interactive Canvas, zIndex 3) appears when the shown ghost line is partly or fully outside the canvas box; it fits the ghost's screen-space points (via `toScr`) into the window with anchors and the visible-area rectangle. No `.inb` change.
 - Unverified: not compiled, not run on a device.
 
+## 2026-11-22 — Guide joints warp (see CHANGELOG)
+- `applyGuideJoints` (`Vector.kt`): the line is densified (max gap 1/150 of its length) and each joint's displacement is applied through an exact smooth offset field (quintic smoothstep between neighbouring joints, fade-out over `reach` = 0.25 of the line length otherwise) instead of summed Gaussians with normalisation. This supersedes any earlier note describing the Gaussian (sigma 0.10) falloff. No `.inb` change.
+- Unverified: not compiled, not run on a device.
+

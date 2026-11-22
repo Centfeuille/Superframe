@@ -1,3 +1,15 @@
+## 2026-11-22 — Guide joints: even, smooth warp at the attached points
+- AI model: Claude
+- Category: Fixed / Vector interpolation guide joints
+- Report (screenshot, Guide joints at 51 %): the shape the user made is intended, but the line is warped too sharply at the points the guide joints are attached to; the guide points should warp what they affect evenly.
+- Root cause (`VectorInterpolation.applyGuideJoints`, `Vector.kt`): each joint added a Gaussian bump (sigma 0.10 of the line length) to the line's EXISTING points only. (1) On a line with few points the straight pieces between a strongly moved point and barely moved neighbours show as sharp corners. (2) The summed bumps were normalised (`1 / influence`) only where they exceeded 1, and the guide sample was then hard-set to the joint position, so the joint point jumped relative to its neighbours (a kink or tick at every joint). (3) Overlapping joints averaged each other so no joint received its full displacement.
+- Fix: (a) before warping, long pieces of the line are subdivided so that no gap exceeds 1/150 of the line length (new points carry interpolated position, pressure and elevation, no anchor); (b) the Gaussian sum is replaced by an exact, smooth offset field: at a joint the offset is exactly that joint's displacement; between two joints closer than 0.5 of the line length it blends from one offset to the other with a quintic smoothstep (zero slope at each joint, no overshoot); beyond that distance each joint's offset fades to zero over 0.25 of the line length (closed lines wrap around). The final hard pinning of the guide samples is kept and is now consistent with the field. Joints, their stored positions and the `.inb` format are unchanged.
+- Behavior change to expect: the warp profile differs from the former Gaussian (flatter top at each joint, a defined reach of 0.25 of the line), so existing guided interpolations look slightly different.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `WhatsNew.kt` (note 69), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: not compiled (no Kotlin compiler available) and not run on a device. A Python port of the offset field was checked: exactly equal to each joint's displacement at the joints, maximum absolute value equal to the largest joint offset (no overshoot), no steps at 2000 samples, and continuous across the wrap of a closed line. Complete diff reviewed.
+- Known follow-up: compile; compare the same guided interpolation before / after on the tablet; if the reach (0.25) or the flatter top should differ, it is the `reach` constant and the `smoother` function in `applyGuideJoints`.
+
 ## 2026-11-22 — Ghost line visible with the selection tool; framing window when the ghost is cropped
 - AI model: Claude
 - Category: Added / Vector ghost line display

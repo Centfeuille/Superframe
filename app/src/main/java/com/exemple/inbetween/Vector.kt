@@ -1442,7 +1442,30 @@ fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: Li
     return strokes.map { stroke ->
         val joints = byStroke[stroke.id].orEmpty()
         if (joints.isEmpty() || stroke.points.size < 2) stroke else {
-            val original = stroke.points
+            // The offset field is smooth, but it is only applied at the line's points: on a sparse line the straight pieces between a
+            // strongly moved point and its barely moved neighbours showed as sharp corners. Subdivide long pieces first.
+            val original = run {
+                val src = stroke.points
+                val srcClosed = stroke.isClosed && src.size > 2
+                var srcTotal = 0f
+                for (i in 1 until src.size) srcTotal += hypot(src[i].x - src[i - 1].x, src[i].y - src[i - 1].y)
+                if (srcClosed) srcTotal += hypot(src.last().x - src.first().x, src.last().y - src.first().y)
+                val maxGap = max(srcTotal / 150f, 1f)
+                val out = ArrayList<VectorPoint>(src.size + 150)
+                val pieces = if (srcClosed) src.size else src.size - 1
+                for (i in 0 until pieces) {
+                    val a = src[i]; val b = src[(i + 1) % src.size]
+                    out.add(a)
+                    val len = hypot(b.x - a.x, b.y - a.y)
+                    val extra = (len / maxGap).toInt()
+                    for (k in 1..extra) {
+                        val f = k.toFloat() / (extra + 1)
+                        out.add(VectorPoint(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.pressure + (b.pressure - a.pressure) * f, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * f))
+                    }
+                }
+                if (!srcClosed) out.add(src.last())
+                out
+            }
             val lengths = FloatArray(original.size)
             for (i in 1 until original.size) lengths[i] = lengths[i - 1] + hypot(original[i].x - original[i - 1].x, original[i].y - original[i - 1].y)
             val closed = stroke.isClosed && original.size > 2
@@ -1487,9 +1510,8 @@ fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: Li
             val pathLengths = FloatArray(basePoints.size)
             for (i in 1 until basePoints.size) pathLengths[i] = pathLengths[i - 1] + hypot(basePoints[i].x - basePoints[i - 1].x, basePoints[i].y - basePoints[i - 1].y)
             val pathTotal = (pathLengths.last() + if (closed) hypot(basePoints.last().x - basePoints.first().x, basePoints.last().y - basePoints.first().y) else 0f).coerceAtLeast(1e-5f)
-            val offsetX = FloatArray(basePoints.size)
-            val offsetY = FloatArray(basePoints.size)
-            val influence = FloatArray(basePoints.size)
+            // Each joint's displacement: where it was put minus where the line itself is at its arc position.
+            val js = ArrayList<Triple<Float, Float, Float>>() // arc position 0..1, dx, dy
             for (joint in joints) {
                 val target = joint.u.coerceIn(0f, 1f) * pathTotal
                 var seg = 1
@@ -1500,21 +1522,39 @@ fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: Li
                 val startLength = if (onClosing) pathLengths.last() else pathLengths[seg - 1]
                 val span = if (onClosing) (pathTotal - pathLengths.last()).coerceAtLeast(1e-5f) else (pathLengths[seg] - pathLengths[seg - 1]).coerceAtLeast(1e-5f)
                 val f = ((target - startLength) / span).coerceIn(0f, 1f)
-                val dx = joint.x - (from.x + (to.x - from.x) * f)
-                val dy = joint.y - (from.y + (to.y - from.y) * f)
-                val sigma = 0.10f
-                for (i in basePoints.indices) {
-                    val progress = pathLengths[i] / pathTotal
-                    val direct = kotlin.math.abs(progress - joint.u.coerceIn(0f, 1f))
-                    val distance = if (closed) min(direct, 1f - direct) else direct
-                    val q = distance / sigma
-                    val w = kotlin.math.exp(-0.5f * q * q)
-                    offsetX[i] += dx * w; offsetY[i] += dy * w; influence[i] += w
+                js.add(Triple(joint.u.coerceIn(0f, 1f), joint.x - (from.x + (to.x - from.x) * f), joint.y - (from.y + (to.y - from.y) * f)))
+            }
+            js.sortBy { it.first }
+            // Even warp: the displacement is exactly the joint's at the joint and changes smoothly (zero slope at every joint, no
+            // overshoot) to the next joint's, or fades to nothing within `reach` of the line's length when the next joint is farther.
+            // It replaces the summed Gaussians whose normalisation left the pinned joint point out of step with its neighbours.
+            val reach = 0.25f
+            fun smoother(t: Float): Float { val c = t.coerceIn(0f, 1f); return c * c * c * (c * (c * 6f - 15f) + 10f) }
+            fun fall(delta: Float): Float = 1f - smoother(delta / reach)
+            fun offsetAt(p: Float): Pair<Float, Float> {
+                var prev: Triple<Float, Float, Float>? = null; var prevU = 0f
+                var next: Triple<Float, Float, Float>? = null; var nextU = 0f
+                for (j in js) { if (j.first <= p) { prev = j; prevU = j.first } else { next = j; nextU = j.first; break } }
+                if (closed) {
+                    if (prev == null) { prev = js.last(); prevU = prev.first - 1f }
+                    if (next == null) { next = js.first(); nextU = next.first + 1f }
                 }
+                if (prev != null && next != null) {
+                    val gap = max(nextU - prevU, 1e-6f)
+                    if (gap <= 2f * reach) {
+                        val sm = smoother((p - prevU) / gap)
+                        return Pair(prev.second * (1f - sm) + next.second * sm, prev.third * (1f - sm) + next.third * sm)
+                    }
+                    val a = fall(p - prevU); val b = fall(nextU - p)
+                    return Pair(prev.second * a + next.second * b, prev.third * a + next.third * b)
+                }
+                if (prev != null) { val a = fall(p - prevU); return Pair(prev.second * a, prev.third * a) }
+                if (next != null) { val b = fall(nextU - p); return Pair(next.second * b, next.third * b) }
+                return Pair(0f, 0f)
             }
             val pts = basePoints.mapIndexed { i, point ->
-                val scale = if (influence[i] > 1f) 1f / influence[i] else 1f
-                point.copy(x = point.x + offsetX[i] * scale, y = point.y + offsetY[i] * scale)
+                val o = offsetAt(pathLengths[i] / pathTotal)
+                point.copy(x = point.x + o.first, y = point.y + o.second)
             }.toMutableList()
             // Inserted guide samples are hard constraints, even when two guides have overlapping falloff regions.
             for ((index, joint) in guideIndices) if (index in pts.indices) pts[index] = pts[index].copy(x = joint.x, y = joint.y)
