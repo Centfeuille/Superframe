@@ -984,10 +984,11 @@ class Editor : ViewModel() {
     var onionAllLayers by mutableStateOf(true) // show neighbouring drawings from every visible drawing layer
     var outOfPeg by mutableStateOf(false)             // non-destructive onion-reference alignment mode
     // ----- vector layers (session state) -----
-    var vecMode by mutableIntStateOf(0)                 // with the Brush tool on a vector layer: 0 draw, 2 cutter, 3 interpolation drag (1 = old point edit, no longer set: the Selection tool's Points mode replaced it)
+    var vecMode by mutableIntStateOf(0)                 // 0 draw, 2 cutter, 3 interpolation drag, 4 guided interpolation joints
     var vecPoints by mutableStateOf(true)               // Selection tool on a vector layer: true = pick and edit single points (tap / lasso, drag, brushes), false = select whole lines and transform them
     var vecMergeRadius by mutableFloatStateOf(14f)      // Merge reach, screen px: how close the start / end of a line must come to another line (or to its own other end) to join it
-    var vecDragT by mutableFloatStateOf(0.5f)           // interpolation drag: where the in-between sits between the previous and the current keyframe
+    var vecDragT by mutableFloatStateOf(0.5f)           // interpolation preview position between the previous and current keyframe
+    var vecGuideSelected by mutableIntStateOf(-1)       // selected guide joint index on the active interpolation span
     var vecSel by mutableStateOf<Set<Long>>(emptySet()) // selected points (vecKey: stroke index, point index) across the cels of vecSelCels (see VecScope)
     var vecSelCels by mutableStateOf<List<Cel>>(emptyList()) // the keyframes the selection belongs to (observable, so the widget bar follows it)
     var vecFalloff by mutableFloatStateOf(0f)           // point edit: proportional falloff radius in document px (0 = selected points only)

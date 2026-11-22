@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            63, "2026-11-22", "Guide joints shape interpolated in-betweens",
+            listOf(
+                "Turn on Guide joints and tap the interpolated ghost curve to add a joint. Drag a joint to reshape the in-between locally; select it and use Delete to remove it. The joints are separate from correspondence anchors and do not modify either original keyframe.",
+                "Guide joints are stored on the interpolation span and are included in live previews, dragged in-betweens and baked interpolation. New .inb files use V27 only when guide joints are present; older V1–V26 files remain readable. Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             62, "2026-11-22", "Ghost smoothing preserves curve apexes",
             listOf(
                 "Ghost-traced strokes now use one continuous curve fit instead of fitting separately between anchors. Correspondence anchors remain non-removable, but the fitter keeps the neighbouring tangent context around each anchor so an apex is not treated as an artificial endpoint or corner.",

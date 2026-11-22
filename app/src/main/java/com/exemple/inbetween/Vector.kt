@@ -141,17 +141,21 @@ enum class InterpolationMode(val label: String) {
  * (0 hold, 1 linear, 2 ease in-out, 3 smooth in, 4 smooth out; see easeFn) with [ease] as the strength.
  * [customBezier] = x1, y1, x2, y2 of a cubic Bezier easing; when set it replaces [curveType].
  */
+data class VectorGuideJoint(val strokeId: String, val u: Float, val x: Float, val y: Float)
+
 data class InterpolationConfig(
     val mode: InterpolationMode = InterpolationMode.SAME_STROKE,
     val curveType: Int = 1,
     val ease: Float = 0.33f,
     val customBezier: FloatArray? = null,
-    val bakeStep: Int = 1
+    val bakeStep: Int = 1,
+    /** Non-destructive joints that guide the generated in-between only; never alter either source keyframe. */
+    val guideJoints: List<VectorGuideJoint> = emptyList()
 ) {
     override fun equals(other: Any?): Boolean =
         other is InterpolationConfig && mode == other.mode && curveType == other.curveType && ease == other.ease &&
-            bakeStep == other.bakeStep && (customBezier?.toList() == other.customBezier?.toList())
-    override fun hashCode(): Int = ((mode.ordinal * 31 + curveType) * 31 + ease.hashCode()) * 31 + bakeStep
+            bakeStep == other.bakeStep && guideJoints == other.guideJoints && (customBezier?.toList() == other.customBezier?.toList())
+    override fun hashCode(): Int = (((mode.ordinal * 31 + curveType) * 31 + ease.hashCode()) * 31 + bakeStep) * 31 + guideJoints.hashCode()
 }
 
 fun newStrokeId(): String = java.util.UUID.randomUUID().toString()
@@ -1431,6 +1435,103 @@ object VectorInterpolation {
     }
 }
 
+/** Apply local, smooth arc offsets to the generated stroke. Guide positions are normalized arc-length coordinates. */
+fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: List<VectorGuideJoint>): List<VectorStroke> {
+    if (guides.isEmpty()) return strokes
+    val byStroke = guides.groupBy { it.strokeId }
+    return strokes.map { stroke ->
+        val joints = byStroke[stroke.id].orEmpty()
+        if (joints.isEmpty() || stroke.points.size < 2) stroke else {
+            val original = stroke.points
+            val lengths = FloatArray(original.size)
+            for (i in 1 until original.size) lengths[i] = lengths[i - 1] + hypot(original[i].x - original[i - 1].x, original[i].y - original[i - 1].y)
+            val closed = stroke.isClosed && original.size > 2
+            val closing = if (closed) hypot(original.last().x - original.first().x, original.last().y - original.first().y) else 0f
+            val total = (lengths.last() + closing).coerceAtLeast(1e-5f)
+            val indexedGuides = joints.withIndex().sortedBy { it.value.u }
+            val expanded = ArrayList<VectorPoint>(original.size + joints.size)
+            val guideIndices = ArrayList<Pair<Int, VectorGuideJoint>>(joints.size)
+            val segmentCount = if (closed) original.size else original.size - 1
+            for (segment in 0 until segmentCount) {
+                expanded.add(original[segment])
+                val from = original[segment]
+                val to = original[(segment + 1) % original.size]
+                val startLength = lengths[segment]
+                val segmentLength = if (closed && segment == original.lastIndex) closing else lengths[segment + 1] - lengths[segment]
+                for ((_, joint) in indexedGuides) {
+                    val target = joint.u.coerceIn(0f, 1f) * total
+                    if (target < startLength - 1e-4f || target > startLength + segmentLength + 1e-4f) continue
+                    val f = if (segmentLength > 1e-5f) ((target - startLength) / segmentLength).coerceIn(0f, 1f) else 0f
+                    val guideIndex = when {
+                        f <= 1e-5f -> expanded.lastIndex
+                        f >= 1f - 1e-5f && segment == original.lastIndex && closed -> 0
+                        f >= 1f - 1e-5f -> expanded.size
+                        else -> -1
+                    }
+                    if (guideIndex >= 0) {
+                        guideIndices.add(guideIndex to joint)
+                    } else {
+                        val point = VectorPoint(
+                            from.x + (to.x - from.x) * f,
+                            from.y + (to.y - from.y) * f,
+                            from.pressure + (to.pressure - from.pressure) * f,
+                            from.elevationOffset + (to.elevationOffset - from.elevationOffset) * f
+                        )
+                        expanded.add(point)
+                        guideIndices.add(expanded.lastIndex to joint)
+                    }
+                }
+            }
+            if (!closed) expanded.add(original.last())
+            val basePoints = expanded.toList()
+            val pathLengths = FloatArray(basePoints.size)
+            for (i in 1 until basePoints.size) pathLengths[i] = pathLengths[i - 1] + hypot(basePoints[i].x - basePoints[i - 1].x, basePoints[i].y - basePoints[i - 1].y)
+            val pathTotal = (pathLengths.last() + if (closed) hypot(basePoints.last().x - basePoints.first().x, basePoints.last().y - basePoints.first().y) else 0f).coerceAtLeast(1e-5f)
+            val offsetX = FloatArray(basePoints.size)
+            val offsetY = FloatArray(basePoints.size)
+            val influence = FloatArray(basePoints.size)
+            for (joint in joints) {
+                val target = joint.u.coerceIn(0f, 1f) * pathTotal
+                var seg = 1
+                while (seg < pathLengths.size - 1 && pathLengths[seg] < target) seg++
+                val onClosing = closed && target > pathLengths.last()
+                val from = if (onClosing) basePoints.last() else basePoints[seg - 1]
+                val to = if (onClosing) basePoints.first() else basePoints[seg]
+                val startLength = if (onClosing) pathLengths.last() else pathLengths[seg - 1]
+                val span = if (onClosing) (pathTotal - pathLengths.last()).coerceAtLeast(1e-5f) else (pathLengths[seg] - pathLengths[seg - 1]).coerceAtLeast(1e-5f)
+                val f = ((target - startLength) / span).coerceIn(0f, 1f)
+                val dx = joint.x - (from.x + (to.x - from.x) * f)
+                val dy = joint.y - (from.y + (to.y - from.y) * f)
+                val sigma = 0.10f
+                for (i in basePoints.indices) {
+                    val progress = pathLengths[i] / pathTotal
+                    val direct = kotlin.math.abs(progress - joint.u.coerceIn(0f, 1f))
+                    val distance = if (closed) min(direct, 1f - direct) else direct
+                    val q = distance / sigma
+                    val w = kotlin.math.exp(-0.5f * q * q)
+                    offsetX[i] += dx * w; offsetY[i] += dy * w; influence[i] += w
+                }
+            }
+            val pts = basePoints.mapIndexed { i, point ->
+                val scale = if (influence[i] > 1f) 1f / influence[i] else 1f
+                point.copy(x = point.x + offsetX[i] * scale, y = point.y + offsetY[i] * scale)
+            }.toMutableList()
+            // Inserted guide samples are hard constraints, even when two guides have overlapping falloff regions.
+            for ((index, joint) in guideIndices) if (index in pts.indices) pts[index] = pts[index].copy(x = joint.x, y = joint.y)
+            stroke.copy(points = pts)
+        }
+    }
+}
+
+fun VectorInterpolation.interpolateConfigured(
+    a: List<VectorStroke>, b: List<VectorStroke>, cfg: InterpolationConfig, t: Float,
+    chosen: Set<Int>? = null, keepRest: Boolean = false
+): List<VectorStroke> {
+    val raw = if (chosen == null) interpolate(a, b, cfg.mode, t)
+        else interpolateChosen(a, b, chosen, cfg.mode, t, keepRest)
+    return applyGuideJoints(raw, cfg.guideJoints)
+}
+
 /** The key's own interpolation settings, or the default (same line, linear, on 1s). */
 fun Cel.vectorConfig(): InterpolationConfig = vecCfg ?: InterpolationConfig()
 
@@ -1489,7 +1590,7 @@ fun bakeVectorKeys(cut: Cut, layer: Layer, selected: List<Cel>, stepOverride: In
                 val len = min(step, f2 - f)
                 val t = VectorInterpolation.curve(cfg, (f - f1).toFloat() / (f2 - f1))
                 val cel = Cel(len)
-                VectorInterpolation.interpolate(sa, sb, cfg.mode, t).forEach { cel.strokes.add(it.toInk()) }
+                VectorInterpolation.interpolateConfigured(sa, sb, cfg, t).forEach { cel.strokes.add(it.toInk()) }
                 fresh.add(cel)
                 f += step
             }
@@ -1565,7 +1666,7 @@ object VectorLive {
         old?.prev?.let { TileCache.invalidate(it.strokes) } // one generation back is enough
         val u = (t - f1).toFloat() / (f2 - f1)
         val cel = Cel(1)
-        VectorInterpolation.interpolate(a.vectorStrokes(), b.vectorStrokes(), cfg.mode, VectorInterpolation.curve(cfg, u)).forEach { cel.strokes.add(it.toInk()) }
+        VectorInterpolation.interpolateConfigured(a.vectorStrokes(), b.vectorStrokes(), cfg, VectorInterpolation.curve(cfg, u)).forEach { cel.strokes.add(it.toInk()) }
         cache[key] = Entry(sig, cel, old?.cel)
         return cel
     }
@@ -1584,7 +1685,8 @@ fun createDraggedInbetween(cut: Cut, layer: Layer, time: Int, t: Float, keepLeng
     if (i < 1) return false
     val p = layer.cels[i - 1]; val c = layer.cels[i]
     val mode = (p.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-    val strokes = VectorInterpolation.interpolateSelected(p.vectorStrokes(), c.vectorStrokes(), sel, mode, t.coerceIn(0f, 1f), true)
+    val cfg = (p.vecCfg ?: InterpolationConfig()).copy(mode = mode)
+    val strokes = VectorInterpolation.interpolateConfigured(p.vectorStrokes(), c.vectorStrokes(), cfg, t.coerceIn(0f, 1f), sel.takeIf { it.isNotEmpty() }, true)
     cut.record {
         val cel = Cel(1)
         strokes.forEach { cel.strokes.add(it.toInk()) }
@@ -1620,7 +1722,8 @@ fun interpolateIntoFrame(cut: Cut, ed: Editor, layer: Layer, a: Cel, m: Cel, b: 
     val mi = layer.cels.indexOfFirst { it === m }
     if (mi < 0) return false
     val mode = (a.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-    val strokes = VectorInterpolation.interpolateIntoMiddle(a.vectorStrokes(), m.vectorStrokes(), b.vectorStrokes(), chosen, mode, t.coerceIn(0f, 1f))
+    val rawStrokes = VectorInterpolation.interpolateIntoMiddle(a.vectorStrokes(), m.vectorStrokes(), b.vectorStrokes(), chosen, mode, t.coerceIn(0f, 1f))
+    val strokes = VectorInterpolation.applyGuideJoints(rawStrokes, a.vecCfg?.guideJoints.orEmpty())
     var fresh: Cel? = null
     cut.record {
         val f = Cel(m.dur)

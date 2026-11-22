@@ -1,3 +1,13 @@
+## 2026-11-22 — Non-destructive guide joints for vector interpolation
+- AI model: GPT-6
+- Category: Improved / Vector interpolation
+- Added a Guide joints mode beside Interpolation drag. Tap the interpolated ghost curve to add a joint; drag an existing joint to reposition it; use Delete in the widget bar to remove the selected joint. Joints are kept separate from vector correspondence anchors.
+- Each joint stores the matched interpolated stroke id, normalized arc-length position and target document coordinate on the starting keyframe's interpolation config. The generated curve is adjusted with a smooth local Gaussian falloff around each joint; the two source keyframe drawings are never edited. Joints participate in live interpolation, drag-preview / committed in-betweens and bake.
+- Persistence: `.inb` V27 stores guide-joint records inside each vector key's interpolation config. V27 is written only when at least one guide joint exists; otherwise the existing V25/V26 version selection is retained. Readers for V1–V26 are unchanged.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `Canvas.kt`, `Editor.kt`, `VectorUi.kt`, `Store.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle build scripts / wrapper (none supplied in this ZIP), `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: isolated Kotlin harnesses compiled the actual guide-deformation and canvas hit-projection functions. Checks covered exact inserted guide samples, smooth local falloff, multiple joints, closed-path seam projection, unchanged unrelated stroke ids and local endpoint stability. Source diff and ZIP integrity checks completed. No Android Gradle build or tablet runtime test was possible: the supplied ZIP has no Gradle wrapper and no system Gradle installation.
+
 ## 2026-11-22 — Keep curve apex tangent context during ghost-trace smoothing
 - AI model: GPT-6
 - Category: Fixed / Vector ghost tracing and curve anchors

@@ -102,6 +102,9 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
     IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = ed.vecMode == 3 && ed.tool == 0, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Tap again to go back to drawing") {
         val on = ed.vecMode == 3 && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3
     }
+    IconBtn(Icons.Filled.Adjust, size = buttonSize, on = ed.vecMode == 4 && ed.tool == 0, tip = "Guide joints: tap the interpolated ghost to add a joint, then drag joints to shape the in-between without changing either keyframe") {
+        val on = ed.vecMode == 4 && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 4; ed.vecGuideSelected = -1
+    }
     IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes: lines, curve, bake") { ed.vecInterpOpen = true }
     IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
     IconBtn(Icons.Filled.Edit, size = buttonSize, on = ed.vecInkOpen, tip = "Line weight: curvature, light direction and tapers for the selected keyframes (or the current one)") { ed.vecInkOpen = !ed.vecInkOpen; if (ed.vecInkOpen) ed.vecWobbleOpen = false }
@@ -120,9 +123,10 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val pointBar = ed.tool == 2
     val pointsMode = pointBar && ed.vecPoints // Selection tool, Points on: single points (the old Point edit); off: whole lines
     val dragBar = ed.vecMode == 3 && ed.tool == 0
+    val guideBar = ed.vecMode == 4 && ed.tool == 0
     val drawBar = ed.vecMode == 0 && ed.tool == 0
     val lineBar = ed.tool == 4 // Line / shapes tool
-    if (!pointBar && !dragBar && !drawBar && !lineBar) return
+    if (!pointBar && !dragBar && !guideBar && !drawBar && !lineBar) return
     val ctx = LocalContext.current
     var falloffOpen by remember { mutableStateOf(false) }
     var anchorOpen by remember { mutableStateOf(false) }
@@ -259,6 +263,20 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 }
                 VIconBtn(Icons.Filled.AutoFixHigh, enabled = has, tip = "Smooth the selected points") { smoothOpen = true }
                 VIconBtn(Icons.Filled.Anchor, enabled = has, tint = Color(anchorColor(1, 3)), tip = "Anchor: number the selected points so the same numbers in the next keyframe are interpolated toward each other") { if (sc != null && !autoAnchor(cut, ed, sc)) anchorOpen = true }
+            } else if (guideBar) {
+                val selectedFrames = vecSelectedFrames(layer, ed)
+                val source = if (selectedFrames.size == 3) selectedFrames[0] else layer.cels.getOrNull(idx - 1)
+                Text(if (source == null) "Guide joints · needs a previous keyframe" else "Guide joints · ${(ed.vecDragT * 100).roundToInt()}%", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                Slider(value = ed.vecDragT, onValueChange = { ed.vecDragT = it }, valueRange = 0f..1f, enabled = source != null, modifier = Modifier.width(140.dp).height(30.dp))
+                val guides = source?.vecCfg?.guideJoints.orEmpty()
+                IconBtn(Icons.Filled.Delete, on = ed.vecGuideSelected in guides.indices, tip = "Delete selected guide joint") {
+                    val cfg = source?.vecCfg
+                    if (source != null && cfg != null && ed.vecGuideSelected in cfg.guideJoints.indices) {
+                        val removeAt = ed.vecGuideSelected
+                        cut.record { source.vecCfg = cfg.copy(guideJoints = cfg.guideJoints.toMutableList().also { it.removeAt(removeAt) }); ed.vecGuideSelected = -1 }
+                    }
+                }
+                IconBtn(Icons.Filled.Check, tip = "Exit guide-joint editing") { ed.vecMode = 0; ed.vecGuideSelected = -1 }
             } else {
                 val frames = vecSelectedFrames(layer, ed)
                 val three = frames.size == 3
