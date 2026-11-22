@@ -1,3 +1,13 @@
+## 2026-11-22 — Reuse smart vector-brush fitting between ghost anchors
+- AI model: GPT-6
+- Category: Improved / Vector ghost tracing
+- Ghost-traced strokes now use the same curve-aware `VectorSimplify.fit` algorithm as ordinary vector brush strokes, after correspondence anchors have been inherited. The existing zoom-aware fitting tolerance and brush-width pressure weighting are reused.
+- Added `VectorSimplify.fitAnchored`: it fits each span between protected correspondence anchors independently. Ghost anchors, structural endpoints and temporary merge endpoint aliases are hard boundaries, so redundant pen samples can be removed without moving, deleting, reordering or renumbering those points.
+- No `.inb` format change.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `Canvas.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper/build scripts, `gradle.properties`, manifest, SDK/Java and signing configuration.
+- Validation: isolated Kotlin compilation of the actual `VectorSimplify` implementation with minimal model / tessellator stubs; verified redundant sample reduction and exact preservation/order of multiple inherited anchors and structural endpoints. Source diff and ZIP integrity reviewed. No full Android Gradle build or tablet runtime test was performed.
+
 ## 2026-11-22 — Curve-extreme anchors and ghost-trace feature matching
 - AI model: GPT-6
 - Category: Improved / Vector interpolation anchors

@@ -815,6 +815,34 @@ object VectorSimplify {
         return out
     }
 
+    /**
+     * Applies the same curve-aware fit used for ordinary vector brush strokes, but treats
+     * correspondence anchors and structural merge endpoints as hard boundaries. Each span
+     * between protected points is fitted independently, so redundant pen samples are removed
+     * without moving, deleting, reordering or renumbering any ghost-inherited anchor.
+     */
+    fun fitAnchored(stroke: VectorStroke, epsilon: Float, widthScale: Float = 0f): VectorStroke {
+        val pts = stroke.points
+        if (stroke.isClosed || pts.size < 4) return stroke
+        val boundaries = (listOf(0) + pts.indices.filter { i ->
+            val p = pts[i]
+            p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty()
+        } + listOf(pts.lastIndex)).distinct().sorted()
+        if (boundaries.size <= 2) {
+            val fitted = fit(pts, epsilon, widthScale)
+            return if (fitted.size == pts.size) stroke else stroke.copy(points = fitted)
+        }
+        val out = ArrayList<VectorPoint>(pts.size)
+        for (k in 0 until boundaries.lastIndex) {
+            val a = boundaries[k]
+            val b = boundaries[k + 1]
+            if (b <= a) continue
+            val fitted = fit(pts.subList(a, b + 1), epsilon, widthScale)
+            if (out.isEmpty()) out.addAll(fitted) else out.addAll(fitted.drop(1))
+        }
+        return if (out.size == pts.size) stroke else stroke.copy(points = out)
+    }
+
     private fun distToLine(line: FloatArray, px: Float, py: Float): Float {
         var best = Float.MAX_VALUE
         var i = 0

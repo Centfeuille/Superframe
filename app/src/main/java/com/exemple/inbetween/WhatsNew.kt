@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            61, "2026-11-22", "Ghost-traced vector lines keep anchors with fewer points",
+            listOf(
+                "When drawing over a ghost onion-skin line, the new vector stroke now reuses the same curve-aware point fitting as ordinary vector brush strokes. The fitter works separately between correspondence anchors, so redundant pen samples can be removed without moving, deleting or reordering the ghost's anchor points.",
+                "Structural endpoints and merge endpoint aliases are also protected. No .inb format change. Full Android build and tablet behavior remain unverified."
+            )
+        ),
+        ReleaseNote(
             60, "2026-11-22", "Curve anchors follow the actual curve extremes",
             listOf(
                 "Automatic curve anchors now target the apex of each curve lobe: the point furthest from the chord between that lobe's boundaries. Inflection points split S-curves into separate lobes, while sharp corners remain independently detectable.",

@@ -675,3 +675,11 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - The existing sensitivity control remains the feature threshold. During merge refresh, automatically detected features are suppressed near fixed manual or inherited correspondence anchors so the system does not crowd or duplicate ghost anchors. Structural endpoints and inherited anchor identities remain in their separate protected paths.
 - No `.inb` format change. Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`, `app/src/main/java/com/exemple/inbetween/WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: source review and focused geometry harness checks; no Android Gradle build or tablet test was performed.
+
+
+## 2026-11-22 — Curve-aware fitting between ghost correspondence anchors
+- Ghost-traced vector strokes now run through the same `VectorSimplify.fit` curve-aware fitter used by ordinary vector brush strokes, after ghost anchor inheritance.
+- `VectorSimplify.fitAnchored` divides the path at every correspondence anchor, structural endpoint and merge endpoint alias, then fits each span independently. This removes redundant pen samples without allowing simplification to move, remove, reorder or renumber protected anchor points.
+- The screen-zoom-aware tolerance and brush-width pressure weighting follow the existing vector brush capture path. No `.inb` format change.
+- Files: `app/src/main/java/com/exemple/inbetween/Vector.kt`, `Canvas.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: actual `VectorSimplify` implementation compiled in an isolated Kotlin harness with model / tessellator stubs; tested reduction of redundant samples and exact preservation / ordering of multiple inherited anchors and structural endpoints. Full Android Gradle build and tablet behavior remain unverified.

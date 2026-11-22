@@ -696,7 +696,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (traced != null) {
                         anchorGhostTrace[0] = true
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
-                        return traced // keep the ghost's available anchor numbers; do not add unrelated automatic endpoints
+                        // Ghost correspondence points are hard fit boundaries: reuse the ordinary
+                        // vector-brush curve fitter between them, never simplify through an anchor.
+                        val eps = (0.8f / vecZoom()).coerceIn(0.25f, 3f)
+                        return VectorSimplify.fitAnchored(traced, eps, traced.baseWidth)
                     }
                 }
             }
