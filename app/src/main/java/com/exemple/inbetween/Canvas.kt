@@ -683,21 +683,20 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 val gKey = LineGhost.key(l, idx)
                 var ghost = LineGhost.shown(allGhost, open, ed, gKey) // the shimmering line IS the one being traced, wherever the new line is drawn; it stays shown afterwards
                 if (ghost != null) {
-                    if (ghost.points.none { it.anchor > 0 } || !AutoAnchors.endsAnchored(ghost)) {
-                        val refStrokes = refCel.vectorStrokes()
-                        val gTaken = AutoAnchors.usedNumbers(refStrokes) + blocked
-                        val anchored = AutoAnchors.withEnds(if (ghost.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(ghost, gTaken, ed.vecTipSens) else ghost, gTaken)
-                        val ri = l.cels.indexOfFirst { it === refCel }
-                        if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
-                    }
+                    // the ghost line is made ready to be followed: ends and apex tips (a ghost with only automatic ends from an older version gets its tips)
+                    val refStrokes = refCel.vectorStrokes()
+                    val ri = l.cels.indexOfFirst { it === refCel }
+                    val gTaken = AutoAnchors.usedNumbers(refStrokes) + blocked + (if (ri >= 0) AutoAnchors.neighbourNumbers(l, ri) else emptySet())
+                    val anchored = AutoAnchors.completeGhost(ghost, gTaken, ed.vecTipSens)
+                    if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     val gPts = ghost.points; val gClosed = ghost.isClosed
-                    val ghostNums = gPts.withIndex().filter { it.value.anchor > 0 && (gClosed || it.index == 0 || it.index == gPts.lastIndex) }.map { it.value.anchor } // ghost mode uses the end anchors only
-                    if (ghostNums.isNotEmpty() && ghostNums.all { it in blocked }) {
+                    val ghostNums = gPts.withIndex().filter { it.value.anchor > 0 && (gClosed || it.index == 0 || it.index == gPts.lastIndex) }.map { it.value.anchor } // the ghost's end numbers (a closed ghost: all its numbers)
+                    if (ghostNums.isNotEmpty() && ghostNums.any { it in blocked }) {
                         anchorGhostTrace[0] = true
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
                         return stroke // this ghost line's correspondence anchors already belong to an earlier traced piece; do not invent 3/4-style replacements
                     }
-                    val traced = AutoAnchors.inherit(stroke, ghost, blocked, ed.vecTipSens, AutoAnchors.tracedLength(current, ghostNums.toSet()))
+                    val traced = AutoAnchors.inherit(stroke, ghost, blocked, ed.vecTipSens)
                     if (traced != null) {
                         anchorGhostTrace[0] = true
                         ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = gKey
@@ -727,7 +726,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
         val avoid = AutoAnchors.neighbourNumbers(l, idx)
-        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids), avoid, ids)
+        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, AutoAnchors.referenceLines(l, idx, ed.vecGhostNext)), avoid, ids)
     }
     /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
     fun vecWithEnds(l: Layer, stroke: VectorStroke): VectorStroke {

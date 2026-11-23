@@ -1,3 +1,12 @@
+## 2026-11-22 — AutoAnchors rewrite: ends + curve tips, ghost trace, dynamic merge
+- AI model: Claude
+- Category: Changed / Fixed (source code)
+- Request: rewrite the auto anchor feature so it works properly with the ghost line. Decisions given by the user: open lines get their two ends plus the apex of each bend; a traced line always gets the ghost's end numbers, the order set by where the line is started, plus in-between numbers at its own apexes; when a trace is drawn in several pieces and merged, the end where it started does not move, the other end follows the merge to the new end, and the apexes follow dynamically.
+- Changed: `AutoAnchors.kt` rewritten (one `layout` driven by a `Plan`; see PROJECT_MEMORY). Removed `targets`, `tracedLength` and the `consumed` argument of `inherit`; added `completeGhost`, `referenceLines`; `refresh` takes the reference lines; `refreshFor` takes `nextFirst`.
+- `Canvas.kt` (`vecAnchorNew`, `vecRefreshAnchors`): ghost made ready with `completeGhost`; a piece gets nothing when any ghost end number is already used; `inherit` call simplified; merge refresh passes the ghost lines so a traced line keeps following its ghost. `VectorUi.kt`: passes `ed.vecGhostNext` to `refreshFor` (2 places).
+- Protected files untouched: `.github/workflows/**`, Gradle files, `gradle.properties`, manifest, signing. No `.inb` format change.
+- Validation: not compiled (no Kotlin compiler in the sandbox). Bracket balance and local-function declaration order checked by script; the ordered pairing logic was tested in a Python port. NEXT STEP: read the GitHub build log, then test on a device: draw a line with a bend, draw the next frame over its ghost, then draw a trace in two pieces with Merge on.
+
 ## 2026-11-22 — Compile fix: Displace helper declared before use
 - AI model: Claude
 - Category: Fixed / Build (source code)

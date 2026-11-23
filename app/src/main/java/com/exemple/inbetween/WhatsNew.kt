@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            71, "2026-11-22", "Auto anchors rewritten: ends and curve tips, working with the ghost line",
+            listOf(
+                "A new line gets an anchor on each end and on the apex of each bend. A line traced over a ghost line takes the ghost's two end numbers (the end where you start is matched by where you start along the ghost) and its in-between numbers at its own apexes, in order.",
+                "Draw a trace in several pieces with Merge on: the end where you started stays, the other end moves to the new end as pieces join, and the apexes follow the merged line. A ghost line from an older version that only had end anchors gets its tips the first time you trace it.",
+                "Not tested on a device yet. If anchors land in the wrong place, tell me which case it was."
+            )
+        ),
+        ReleaseNote(
             70, "2026-11-22", "Interpolation drag: Joints, Fixed and Shift; selection tool: Displace",
             listOf(
                 "The guide joints now live in the Interpolation drag bar (the Joints button); the separate guide-joint button and bar are gone. In that bar, Fixed keeps the in-between at the position of the previous keyframe while its points still move relative to each other, and Shift lets you drag the preview to another position like any selection (the refresh button puts it back). The created in-between includes the shift.",

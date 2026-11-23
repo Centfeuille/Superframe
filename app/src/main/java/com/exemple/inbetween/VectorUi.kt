@@ -247,7 +247,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.Deselect, enabled = has, tip = "Deselect") { ed.vecSel = emptySet() }
                 VIconBtn(Icons.Filled.Delete, enabled = has, tip = "Delete the selected points") {
                     if (sc != null) {
-                        val parts = sc.perCel.indices.map { c -> val lk = sc.localKeys(sel, c); if (lk.isEmpty()) sc.perCel[c] else VectorEdit.delete(sc.perCel[c], lk).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens) else it } }
+                        val parts = sc.perCel.indices.map { c -> val lk = sc.localKeys(sel, c); if (lk.isEmpty()) sc.perCel[c] else VectorEdit.delete(sc.perCel[c], lk).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens, ed.vecGhostNext) else it } }
                         ed.vecSel = emptySet()
                         applyScope(cut, sc, parts)
                         ed.vecSelCels = vecScope(cut, ed.refAll)?.cels ?: emptyList()
@@ -259,7 +259,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         val tol = ed.vecMergeRadius / ed.vecDocZoom.coerceAtLeast(0.0001f)
                         val parts = sc.perCel.indices.map { c ->
                             val lk = sc.localKeys(sel, c)
-                            if (lk.isEmpty()) sc.perCel[c] else (VectorMerge.mergePoints(sc.perCel[c], lk, tol, ed.vecMergeSharp) ?: sc.perCel[c]).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens) else it }
+                            if (lk.isEmpty()) sc.perCel[c] else (VectorMerge.mergePoints(sc.perCel[c], lk, tol, ed.vecMergeSharp) ?: sc.perCel[c]).let { if (ed.vecAutoAnchor) AutoAnchors.refreshFor(sc.layers[c], sc.cels[c], it, ed.vecTipSens, ed.vecGhostNext) else it }
                         }
                         if (parts.indices.any { parts[it] !== sc.perCel[it] }) {
                             ed.vecSel = emptySet()

@@ -6,17 +6,26 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /*
- * Automatic anchors for vector lines.
- *  - [AutoAnchors.targets]: an open line gets ONLY its two outer endpoints (intermediate anchors are never automatic: they come from the ghost or from the user); a closed line gets detected features (or fallback opposite points). Open-line endpoint anchors are structural and marked [VectorPoint.endpoint],
- *    separately from the general [VectorPoint.auto] flag, so curve-tip identities cannot be reassigned to endpoints during [AutoAnchors.refresh]. Curve-tip anchors are refreshed with the curve; inherited/manual correspondence anchors remain in their original order. Anchors set by hand,
- *    or inherited from a traced line, are never touched.
- *  - [AutoAnchors.inherit]: a line traced over a ghost takes the ghost line's anchor numbers; automatic curve features map to corresponding extrema on the new line, while manual anchors use nearest-path projection.
- *  - [LineGhost]: which line of the previous / next keyframe is the one to trace next.
+ * Automatic anchors for vector lines (rewritten 2026-11-22).
+ *
+ * ONE MODEL. Every automatic anchor is one of two roles, and both are DYNAMIC (redone whenever the line changes shape):
+ *   - an END: the first and the last point of an open line (marked [VectorPoint.auto] + [VectorPoint.endpoint]);
+ *   - a TIP: the apex of a bend of the line (marked [VectorPoint.auto] only). Closed lines have tips only.
+ * Anchors placed by hand (auto = false) are never touched and keep automatic tips away from them.
+ *
+ * Every layout goes through [layout], which is driven by a [Plan]: which number the first end gets, which the last end gets, and an ordered list of numbered
+ * tip positions (as 0..1 progress along the line) that the detected apexes are paired with, in order. Three ways to get a plan:
+ *   - a new line: no numbers yet, so fresh ones are allocated in path order ([assignFresh]);
+ *   - a line traced over a ghost line ([inherit]): the two ends take the ghost's end numbers, the start of the new line decides which one is which,
+ *     and the apexes take the ghost's in-between numbers in order;
+ *   - a line that changed shape (merged, points deleted; [refresh]): its numbers are kept. A traced line keeps following its ghost: the end where the line
+ *     started stays put, the other end moves to wherever the line now ends, and the apexes are detected again on the whole line.
  */
 object AutoAnchors {
-    /** Hard safety ceiling; normal anchor count is determined by detected shape features. */
+    /** Hard safety ceiling for the number of tips on one line. */
     const val MAX_AUTO_TIPS = 24
 
     fun bboxDiag(pts: List<VectorPoint>): Float {
@@ -24,13 +33,6 @@ object AutoAnchors {
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
         for (p in pts) { l = min(l, p.x); r = max(r, p.x); t = min(t, p.y); b = max(b, p.y) }
         return hypot(r - l, b - t)
-    }
-
-    private fun pathLength(pts: List<VectorPoint>, closed: Boolean): Float {
-        var len = 0f
-        for (i in 1 until pts.size) len += hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-        if (closed && pts.size >= 3) len += hypot(pts.first().x - pts.last().x, pts.first().y - pts.last().y)
-        return len
     }
 
     fun usedNumbers(strokes: List<VectorStroke>): Set<Int> {
@@ -50,29 +52,98 @@ object AutoAnchors {
         return out
     }
 
+    /** The lines of the previous and the next keyframe (the one on the [nextFirst] side first): the candidates a traced line can still be following. */
+    fun referenceLines(layer: Layer, idx: Int, nextFirst: Boolean): List<VectorStroke> {
+        val out = ArrayList<VectorStroke>()
+        LineGhost.reference(layer, idx, nextFirst)?.let { out.addAll(LineGhost.lines(it)) }
+        LineGhost.reference(layer, idx, !nextFirst)?.let { out.addAll(LineGhost.lines(it)) }
+        return out
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+    // Geometry: the line as it is DRAWN (the smooth curve through its points), with arc-length progress.
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+
+    private class Dense(val xs: FloatArray, val ys: FloatArray, val cum: FloatArray, val total: Float, val ring: Boolean)
+
+    private fun denseOf(pts: List<VectorPoint>, ring: Boolean): Dense? {
+        if (pts.size < 2) return null
+        var xs = FloatArray(pts.size) { pts[it].x }
+        var ys = FloatArray(pts.size) { pts[it].y }
+        if (pts.size >= 3) {
+            val l = VectorTessellator.centerline(pts, ring)
+            var cnt = l.size / 2
+            if (cnt >= 2) {
+                if (ring && cnt >= 3 && hypot(l[0] - l[(cnt - 1) * 2], l[1] - l[(cnt - 1) * 2 + 1]) < 1e-3f) cnt--
+                xs = FloatArray(cnt) { l[it * 2] }
+                ys = FloatArray(cnt) { l[it * 2 + 1] }
+            }
+        }
+        val n = xs.size
+        val cum = FloatArray(n)
+        for (i in 1 until n) cum[i] = cum[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
+        val closing = if (ring && n >= 3) hypot(xs[0] - xs[n - 1], ys[0] - ys[n - 1]) else 0f
+        val total = cum[n - 1] + closing
+        if (total < 1e-3f) return null
+        return Dense(xs, ys, cum, total, ring && n >= 3)
+    }
+
+    /** The point at progress [u] (0..1 of the length) of [d], written to out[0], out[1]. */
+    private fun pointAt(d: Dense, u: Float, out: FloatArray) {
+        val n = d.xs.size
+        val arc = u.coerceIn(0f, 1f) * d.total
+        val lastCum = d.cum[n - 1]
+        if (arc > lastCum && d.ring) {
+            val l = d.total - lastCum
+            val t = if (l < 1e-6f) 0f else ((arc - lastCum) / l).coerceIn(0f, 1f)
+            out[0] = d.xs[n - 1] + (d.xs[0] - d.xs[n - 1]) * t
+            out[1] = d.ys[n - 1] + (d.ys[0] - d.ys[n - 1]) * t
+            return
+        }
+        var j = 0
+        while (j < n - 2 && d.cum[j + 1] < arc) j++
+        val l = d.cum[j + 1] - d.cum[j]
+        val t = if (l < 1e-6f) 0f else ((arc - d.cum[j]) / l).coerceIn(0f, 1f)
+        out[0] = d.xs[j] + (d.xs[j + 1] - d.xs[j]) * t
+        out[1] = d.ys[j] + (d.ys[j + 1] - d.ys[j]) * t
+    }
+
+    /** The nearest point of [d] to (x, y): out[0] = its progress (0..1), out[1] = the distance. */
+    private fun project(d: Dense, x: Float, y: Float, out: FloatArray) {
+        val n = d.xs.size
+        var best = Float.MAX_VALUE
+        var bestArc = 0f
+        val segs = if (d.ring) n else n - 1
+        for (j in 0 until segs) {
+            val k = (j + 1) % n
+            val dx = d.xs[k] - d.xs[j]; val dy = d.ys[k] - d.ys[j]
+            val l2 = dx * dx + dy * dy
+            val t = if (l2 < 1e-9f) 0f else (((x - d.xs[j]) * dx + (y - d.ys[j]) * dy) / l2).coerceIn(0f, 1f)
+            val dist = hypot(x - (d.xs[j] + dx * t), y - (d.ys[j] + dy * t))
+            if (dist < best) { best = dist; bestArc = d.cum[j] + t * sqrt(l2) }
+        }
+        out[0] = (bestArc / d.total).coerceIn(0f, 1f)
+        out[1] = best
+    }
+
     /**
-     * Adaptive feature-aware anchor detection. Open strokes always include their two
-     * structural endpoints. Interior anchors prefer the apex (maximum chord deviation)
-     * of each curve lobe, with separate sharp-corner anchors. Inflections split S-curves
-     * into lobes; they are not themselves treated as extrema.
-     * The count is therefore driven by the shape, not a fixed per-line quota. [maxTips]
-     * is only a safety ceiling (24 by default); [sens] 0..1 controls how subtle a feature
-     * may be before it is retained.
+     * The apexes of the bends of a line, as progress values (0..1, ascending), without the two end points of an open line. A bend's anchor sits at the point
+     * furthest from the chord that joins the bend's boundaries (inflections split S-curves into bends); sharp corners are a separate kind. [sens] 0..1: how gentle
+     * a bend may be and still count (0 = sharp corners only). The count follows the shape (a straight line has none), up to [MAX_AUTO_TIPS].
      */
-    fun targets(pts: List<VectorPoint>, closed: Boolean, sens: Float, maxTips: Int = MAX_AUTO_TIPS): List<Int> {
-        val n = pts.size
-        if (n < 2) return emptyList()
-        val ring = closed && n >= 3
+    private fun features(d: Dense, ring: Boolean, sens: Float): FloatArray {
+        val n = d.xs.size
+        if (n < 4) return FloatArray(0)
+        val s01 = sens.coerceIn(0f, 1f)
         val m = if (ring) n + 1 else n
-        val xs = FloatArray(m) { pts[it % n].x }
-        val ys = FloatArray(m) { pts[it % n].y }
+        val xs = FloatArray(m) { d.xs[it % n] }
+        val ys = FloatArray(m) { d.ys[it % n] }
         val cum = FloatArray(m)
         for (i in 1 until m) cum[i] = cum[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
         val total = cum[m - 1]
-        if (total < 1e-3f) return if (ring) listOf(0) else listOf(0, n - 1)
+        if (total < 1e-3f) return FloatArray(0)
 
-        // Resample by distance so detection behaves consistently at different point
-        // densities and stylus sampling rates. Cap work for exceptionally long strokes.
+        // Resample by distance so detection behaves the same at any point density.
         val step = (total / 180f).coerceIn(2f, 6f)
         val cnt = (total / step).roundToInt().coerceIn(11, 512) + 1
         val seg = total / (cnt - 1)
@@ -97,111 +168,75 @@ object AutoAnchors {
                 px = cx; py = cy
             }
         }
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (i in 0 until cnt) { minX = min(minX, sx[i]); maxX = max(maxX, sx[i]); minY = min(minY, sy[i]); maxY = max(maxY, sy[i]) }
+        val diag = hypot(maxX - minX, maxY - minY)
 
-        val maxInterior = maxTips.coerceIn(0, MAX_AUTO_TIPS)
-        val idx = sortedSetOf<Int>()
-        if (!ring) { idx.add(0); idx.add(n - 1) }
-        // Open lines get automatic anchors ONLY on their two end points. Intermediate anchors come from the ghost
-        // (inherited correspondence) or from the user; they are never detected automatically.
-        if (!ring) return idx.toList()
-        if (maxInterior == 0) return idx.toList()
-
-        // Measure signed turning over a short distance window. Absolute turning finds
-        // corners and curvature peaks; the sign is also used to detect inflections.
         val window = (total * 0.035f).coerceIn(5f, 28f)
         val k = max(2, (window / seg).roundToInt())
         fun at(q: Int): Int = if (ring) ((q % (cnt - 1)) + (cnt - 1)) % (cnt - 1) else q
         val lo = if (ring) 0 else k
         val hi = if (ring) cnt - 1 else cnt - k
+        if (hi - lo < 4) return FloatArray(0)
         val signed = FloatArray(cnt)
         val magnitude = FloatArray(cnt)
         for (i in lo until hi) {
             val a = at(i - k); val b = at(i); val c = at(i + k)
             val v1x = sx[b] - sx[a]; val v1y = sy[b] - sy[a]
             val v2x = sx[c] - sx[b]; val v2y = sy[c] - sy[b]
-            val turn = Math.toDegrees(atan2(
-                (v1x * v2y - v1y * v2x).toDouble(),
-                (v1x * v2x + v1y * v2y).toDouble()
-            )).toFloat()
+            val turn = Math.toDegrees(atan2((v1x * v2y - v1y * v2x).toDouble(), (v1x * v2x + v1y * v2y).toDouble())).toFloat()
             signed[i] = turn
             magnitude[i] = abs(turn)
         }
 
-        val threshold = 12f - 10f * sens.coerceIn(0f, 1f)
-        val features = HashMap<Int, Float>()
+        val threshold = 12f - 10f * s01
+        val found = HashMap<Int, Float>()
         val neighbourhood = max(2, k / 2)
 
-        // A curve anchor belongs at the apex of a curve lobe (the point furthest from
-        // the chord joining that lobe's boundaries), not merely at the strongest local
-        // curvature sample. First find inflections to split S-curves into individual
-        // lobes. Inflections are segmentation boundaries, not anchors themselves.
-        val side = max(2, k * 2)
-        val inflections = ArrayList<Int>()
-        for (i in (lo + side) until (hi - side)) {
-            val before = signed[i - side]
-            val after = signed[i + side]
-            if (before * after < 0f && abs(before) >= threshold * 0.18f && abs(after) >= threshold * 0.18f) {
-                inflections.add(i)
+        // Bend apexes. Inflections cut an S-curve into single bends; a bend's apex is its point of maximum deviation from the bend's chord.
+        if (s01 >= 0.01f) {
+            val side = max(2, k * 2)
+            val inflections = ArrayList<Int>()
+            for (i in (lo + side) until (hi - side)) {
+                val before = signed[i - side]
+                val after = signed[i + side]
+                if (before * after < 0f && abs(before) >= threshold * 0.18f && abs(after) >= threshold * 0.18f) inflections.add(i)
+            }
+            val boundaries = (listOf(lo) + inflections + hi).distinct().sorted()
+            val prominence = max(1.5f, diag * (0.014f - 0.012f * s01))
+            for (bi in 0 until boundaries.lastIndex) {
+                val first = boundaries[bi]
+                val last = boundaries[bi + 1]
+                if (last - first < max(5, k * 2)) continue
+                val ax = sx[first]; val ay = sy[first]
+                val dx = sx[last] - ax; val dy = sy[last] - ay
+                val chord = hypot(dx, dy)
+                if (chord < 1e-3f) continue
+                var bestSample = -1
+                var bestDeviation = 0f
+                for (q in (first + 1) until last) {
+                    val deviation = abs((sx[q] - ax) * dy - (sy[q] - ay) * dx) / chord
+                    if (deviation > bestDeviation) { bestDeviation = deviation; bestSample = q }
+                }
+                if (bestSample >= 0 && bestDeviation >= prominence) found[bestSample] = max(found[bestSample] ?: 0f, 100f + bestDeviation)
             }
         }
-        val boundaries = (listOf(lo) + inflections + hi).distinct().sorted()
-        val apexProminence = max(1.5f, bboxDiag(pts) * 0.008f)
-        for (bi in 0 until boundaries.lastIndex) {
-            val first = boundaries[bi]
-            val last = boundaries[bi + 1]
-            if (last - first < max(5, k * 2)) continue
-            val ax = sx[first]; val ay = sy[first]
-            val dx = sx[last] - ax; val dy = sy[last] - ay
-            val chord = hypot(dx, dy)
-            if (chord < 1e-3f) continue
-            var bestSample = -1
-            var bestDeviation = 0f
-            for (q in (first + 1) until last) {
-                val deviation = abs((sx[q] - ax) * dy - (sy[q] - ay) * dx) / chord
-                if (deviation > bestDeviation) { bestDeviation = deviation; bestSample = q }
-            }
-            if (bestSample >= 0 && bestDeviation >= apexProminence) {
-                // Apexes outrank incidental curvature noise so each lobe gets its
-                // semantically meaningful extreme point whenever the spacing allows.
-                features[bestSample] = max(features[bestSample] ?: 0f, 100f + bestDeviation)
-            }
-        }
-
-        // Keep genuine sharp corners as a separate feature class. Smooth curvature
-        // maxima are deliberately not used: their position can slide along an arc as
-        // the shape changes, whereas the lobe apex above is geometrically stable.
+        // Sharp corners: local maxima of the turning angle above a threshold.
         val cornerThreshold = max(28f, threshold * 2.5f)
         for (i in lo until hi) {
             val value = magnitude[i]
             if (value < cornerThreshold) continue
             var localMax = value
-            for (d in 1..neighbourhood) {
-                localMax = max(localMax, max(magnitude[at(i - d)], magnitude[at(i + d)]))
-            }
-            if (value >= localMax - 0.25f) {
-                features[i] = max(features[i] ?: 0f, 200f + value)
-            }
+            for (dd in 1..neighbourhood) localMax = max(localMax, max(magnitude[at(i - dd)], magnitude[at(i + dd)]))
+            if (value >= localMax - 0.25f) found[i] = max(found[i] ?: 0f, 200f + value)
         }
+        if (found.isEmpty()) return FloatArray(0)
 
-        if (features.isEmpty() && !ring) {
-            // A simple circular arc has nearly constant curvature, so it has no local
-            // curvature peak. If the whole stroke still turns meaningfully, give it a
-            // single midpoint correspondence rather than leaving the curve unanchored.
-            val peak = (lo until hi).maxOfOrNull { magnitude[it] } ?: 0f
-            if (peak >= threshold * 0.75f) features[(lo + hi) / 2] = peak
-        }
-        if (features.isEmpty()) {
-            if (ring) { idx.add(0); idx.add(n / 2) }
-            return idx.toList()
-        }
-
-        // Separation scales with path length and the analysis window. This lets a
-        // complex contour receive more anchors than a simple curve, up to the safety cap.
+        // Spacing scales with length and the analysis window, so a complex contour gets more tips than a simple curve.
         val separation = max(k, (total * 0.045f / seg).roundToInt())
         val chosen = ArrayList<Int>()
-        val ranked = features.entries.sortedByDescending { it.value }
-        for ((sample, _) in ranked) {
-            if (chosen.size >= maxInterior) break
+        for ((sample, _) in found.entries.sortedByDescending { it.value }) {
+            if (chosen.size >= MAX_AUTO_TIPS) break
             if (!ring && (sample <= separation * 0.55f || cnt - 1 - sample <= separation * 0.55f)) continue
             val spaced = chosen.none { other ->
                 val distance = abs(other - sample)
@@ -209,174 +244,387 @@ object AutoAnchors {
             }
             if (spaced) chosen.add(sample)
         }
-
-        fun nearestVertex(distance: Float): Int {
-            var best = 0
-            var bestDistance = Float.MAX_VALUE
-            for (q in 0 until n) {
-                val d = abs(cum[q] - distance)
-                if (d < bestDistance) { bestDistance = d; best = q }
-            }
-            return best
-        }
-        for (sample in chosen) {
-            val target = nearestVertex(seg * sample)
-            if (ring || (target != 0 && target != n - 1)) idx.add(target)
-        }
-        if (ring) {
-            if (idx.isEmpty()) { idx.add(0); idx.add(nearestVertex(total / 2f)) }
-            else if (idx.size == 1) { val first = idx.first(); idx.add(nearestVertex((cum[first] + total / 2f) % total)) }
-        }
-        return idx.toList()
+        chosen.sort()
+        return FloatArray(chosen.size) { chosen[it].toFloat() / (cnt - 1) }
     }
 
-    /** A new line: anchors at its ends and tips, numbered from the first number that is not in [taken] (marked automatic). Lines that are fills, or too short, stay as they are. */
-    fun assignFresh(s: VectorStroke, taken: Set<Int>, sens: Float): VectorStroke {
-        if (s.fill != 0 || s.points.size < 2) return s
-        val idx = targets(s.points, s.isClosed, sens)
-        if (idx.isEmpty()) return s
-        val used = HashSet<Int>(taken)
-        val pts = s.points.toMutableList()
-        var next = 1
-        for (i in idx) {
-            if (pts[i].anchor > 0) continue
-            while (next in used && next <= ANCHOR_MAX) next++
-            if (next > ANCHOR_MAX) break
-            used.add(next)
-            val endpoint = !s.isClosed && (i == 0 || i == pts.lastIndex)
-            pts[i] = pts[i].copy(anchor = next, auto = true, endpoint = endpoint, endpointAliases = emptyList())
-            next++
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+    // Pairing detected apexes with numbered positions, keeping the order along the line.
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+
+    /** For every element of [a] (ascending), the index of the element of [b] (ascending) it is paired with, or -1. Equal counts pair in order; otherwise an ordered alignment of least total distance. */
+    private fun matchOrdered(a: FloatArray, b: FloatArray): IntArray {
+        val out = IntArray(a.size) { -1 }
+        if (a.isEmpty() || b.isEmpty()) return out
+        if (a.size == b.size) { for (i in a.indices) out[i] = i; return out }
+        val skip = 0.15f
+        val na = a.size; val nb = b.size
+        val cost = Array(na + 1) { FloatArray(nb + 1) }
+        for (i in 1..na) cost[i][0] = i * skip
+        for (j in 1..nb) cost[0][j] = j * skip
+        for (i in 1..na) for (j in 1..nb) {
+            val both = cost[i - 1][j - 1] + abs(a[i - 1] - b[j - 1])
+            cost[i][j] = min(both, min(cost[i - 1][j], cost[i][j - 1]) + skip)
         }
-        return s.copy(points = pts)
+        var i = na; var j = nb
+        while (i > 0 && j > 0) {
+            val both = cost[i - 1][j - 1] + abs(a[i - 1] - b[j - 1])
+            if (cost[i][j] == both) { out[i - 1] = j - 1; i--; j-- }
+            else if (cost[i][j] == cost[i - 1][j] + skip) i--
+            else j--
+        }
+        return out
+    }
+
+    /** [matchOrdered] for closed lines, where progress wraps round: the best turn of [b] onto [a], then nearest unique pairs. */
+    private fun matchCyclic(a: FloatArray, b: FloatArray): IntArray {
+        val out = IntArray(a.size) { -1 }
+        if (a.isEmpty() || b.isEmpty()) return out
+        fun cyc(x: Float, y: Float): Float { val dd = abs(x - y) % 1f; return min(dd, 1f - dd) }
+        var bestOff = 0f
+        var bestCost = Float.MAX_VALUE
+        for (i in a.indices) for (j in b.indices) {
+            val off = a[i] - b[j]
+            var c = 0f
+            for (q in b.indices) {
+                var mn = Float.MAX_VALUE
+                for (r in a.indices) mn = min(mn, cyc(a[r], b[q] + off))
+                c += mn
+            }
+            if (c < bestCost) { bestCost = c; bestOff = off }
+        }
+        class Cand(val i: Int, val j: Int, val d: Float)
+        val cands = ArrayList<Cand>()
+        for (i in a.indices) for (j in b.indices) cands.add(Cand(i, j, cyc(a[i], b[j] + bestOff)))
+        cands.sortBy { it.d }
+        val usedA = BooleanArray(a.size)
+        val usedB = BooleanArray(b.size)
+        for (c in cands) {
+            if (usedA[c.i] || usedB[c.j] || c.d > 0.25f) continue
+            usedA[c.i] = true; usedB[c.j] = true; out[c.i] = c.j
+        }
+        return out
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+    // Plans and the layout they drive.
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+
+    private class PlanTip(val num: Int, val u: Float)
+
+    /**
+     * [start] / [end]: numbers for the first / last point of an open line (0 = none). [tips]: numbered progress positions, ascending. [fresh]: detected apexes with no
+     * number to take get a new one (false for a traced line: only the ghost's numbers are used). [toPlanU]: maps a detected apex (x, y, own progress) into the plan's
+     * progress space; null = own progress (used when the line lies over the ghost, so a partial trace pairs with the right part of the ghost).
+     */
+    private class Plan(val start: Int, val end: Int, val tips: List<PlanTip>, val fresh: Boolean, val toPlanU: ((Float, Float, Float) -> Float)? = null)
+
+    private class Ins(val t: Float, val p: VectorPoint)
+
+    /**
+     * Redoes the automatic anchors of [s] after [plan]: every automatic anchor is cleared (manual ones stay), the ends get the plan's numbers, the detected apexes are
+     * paired with the plan's tips in order, and apexes with no partner get a fresh number when the plan allows. [taken] = numbers that fresh ones must avoid; it is updated.
+     * An anchor goes on the nearest point of the line when one lies at the apex, otherwise a point is inserted exactly on the drawn curve.
+     */
+    private fun layout(s: VectorStroke, plan: Plan, sens: Float, taken: MutableSet<Int>): VectorStroke {
+        val n = s.points.size
+        if (s.fill != 0 || n < 2) return s
+        val ring = s.isClosed && n >= 3
+        val base = ArrayList<VectorPoint>(n)
+        for (p in s.points) base.add(
+            if (p.auto) p.copy(anchor = 0, auto = false, endpoint = false, endpointAliases = emptyList())
+            else if (p.endpointAliases.isNotEmpty()) p.copy(endpointAliases = emptyList())
+            else p
+        )
+        for (p in base) if (p.anchor in 1..ANCHOR_MAX) taken.add(p.anchor)
+        val firstManual = !ring && base.first().anchor > 0
+        val lastManual = !ring && base.last().anchor > 0
+
+        // detected apexes
+        val d = denseOf(base, ring)
+        val tipU = ArrayList<Float>()
+        val tipX = ArrayList<Float>()
+        val tipY = ArrayList<Float>()
+        if (d != null && n >= 3) {
+            val tmp = FloatArray(2)
+            val spacing = max(5f, d.total * 0.025f)
+            for (u in features(d, ring, sens)) {
+                pointAt(d, u, tmp)
+                var nearManual = false
+                for (p in base) if (p.anchor > 0 && hypot(p.x - tmp[0], p.y - tmp[1]) < spacing) { nearManual = true; break }
+                if (!nearManual) { tipU.add(u); tipX.add(tmp[0]); tipY.add(tmp[1]) }
+            }
+            if (ring && tipU.isEmpty() && plan.fresh && plan.tips.isEmpty()) {
+                // a round outline with no bends: two opposite points still give a pairing
+                for (u in floatArrayOf(0f, 0.5f)) { pointAt(d, u, tmp); tipU.add(u); tipX.add(tmp[0]); tipY.add(tmp[1]) }
+            }
+        }
+        val tk = tipU.size
+
+        // pair them with the plan's tips, in order
+        val tipNum = IntArray(tk)
+        if (tk > 0 && plan.tips.isNotEmpty()) {
+            fun space(i: Int): Float = plan.toPlanU?.invoke(tipX[i], tipY[i], tipU[i]) ?: tipU[i]
+            val order = (0 until tk).sortedBy { space(it) }
+            val au = FloatArray(tk) { space(order[it]) }
+            val bu = FloatArray(plan.tips.size) { plan.tips[it].u }
+            val mt = if (ring) matchCyclic(au, bu) else matchOrdered(au, bu)
+            for (q in 0 until tk) { val j = mt[q]; if (j >= 0) tipNum[order[q]] = plan.tips[j].num }
+        }
+        var firstNum = if (!ring && !firstManual) plan.start else 0
+        var lastNum = if (!ring && !lastManual) plan.end else 0
+        if (firstNum > 0) taken.add(firstNum)
+        if (lastNum > 0) taken.add(lastNum)
+        for (q in 0 until tk) if (tipNum[q] > 0) taken.add(tipNum[q])
+
+        // fresh numbers, in path order
+        if (plan.fresh) {
+            fun freshNum(): Int {
+                var c = 1
+                while (c <= ANCHOR_MAX && c in taken) c++
+                if (c > ANCHOR_MAX) return 0
+                taken.add(c)
+                return c
+            }
+            if (!ring && !firstManual && firstNum == 0) firstNum = freshNum()
+            for (q in 0 until tk) if (tipNum[q] == 0) tipNum[q] = freshNum()
+            if (!ring && !lastManual && lastNum == 0) lastNum = freshNum()
+        }
+
+        // put the anchors on the line
+        val pts = ArrayList<VectorPoint>(base)
+        if (!ring) {
+            if (firstNum > 0) pts[0] = pts[0].copy(anchor = firstNum, auto = true, endpoint = true)
+            if (lastNum > 0) pts[n - 1] = pts[n - 1].copy(anchor = lastNum, auto = true, endpoint = true)
+        }
+        val inserts = HashMap<Int, MutableList<Ins>>()
+        val snapTol = if (d != null) max(1f, d.total * 0.01f) else 1f
+        val segs = if (ring) n else n - 1
+        for (q in 0 until tk) {
+            val num = tipNum[q]
+            if (num <= 0) continue
+            val x = tipX[q]; val y = tipY[q]
+            var bv = -1
+            var bd = Float.MAX_VALUE
+            val vlo = if (ring) 0 else 1
+            val vhi = if (ring) n - 1 else n - 2
+            for (v in vlo..vhi) {
+                if (pts[v].anchor > 0) continue
+                val dd = hypot(pts[v].x - x, pts[v].y - y)
+                if (dd < bd) { bd = dd; bv = v }
+            }
+            if (bv >= 0 && bd <= snapTol) { pts[bv] = pts[bv].copy(anchor = num, auto = true, endpoint = false); continue }
+            var bs = -1
+            var bt = 0f
+            var bsd = Float.MAX_VALUE
+            for (j in 0 until segs) {
+                val a = pts[j]; val b = pts[(j + 1) % n]
+                val dx = b.x - a.x; val dy = b.y - a.y
+                val l2 = dx * dx + dy * dy
+                if (l2 < 1e-9f) continue
+                val t = (((x - a.x) * dx + (y - a.y) * dy) / l2).coerceIn(0f, 1f)
+                val dd = hypot(x - (a.x + dx * t), y - (a.y + dy * t))
+                if (dd < bsd) { bsd = dd; bs = j; bt = t }
+            }
+            if (bs < 0) continue
+            val a = pts[bs]; val b = pts[(bs + 1) % n]
+            inserts.getOrPut(bs) { ArrayList() }.add(Ins(bt, VectorPoint(
+                x = x, y = y,
+                pressure = a.pressure + (b.pressure - a.pressure) * bt,
+                elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * bt,
+                anchor = num, auto = true
+            )))
+        }
+        val out = ArrayList<VectorPoint>(n + inserts.size)
+        for (j in 0 until n) {
+            out.add(pts[j])
+            inserts[j]?.sortedBy { it.t }?.forEach { out.add(it.p) }
+        }
+        return if (out == s.points) s else s.copy(points = out)
+    }
+
+    /** The plan of a line that keeps its own numbers: its ends and tips as they are now (used after a merge or a deletion, and for a line with no ghost). */
+    private fun selfPlan(s: VectorStroke, avoid: Set<Int>): Plan {
+        val pts = s.points
+        val n = pts.size
+        val ring = s.isClosed && n >= 3
+        val d = denseOf(pts, ring)
+        val tmp = FloatArray(2)
+        class Held(val num: Int, val x: Float, val y: Float)
+        val ends = ArrayList<Held>()
+        val tips = ArrayList<PlanTip>()
+        for ((i, p) in pts.withIndex()) {
+            val outer = !ring && (i == 0 || i == n - 1)
+            if (p.auto && p.anchor in 1..ANCHOR_MAX) {
+                if (!ring && (p.endpoint || outer)) ends.add(Held(p.anchor, p.x, p.y))
+                else if (d != null) { project(d, p.x, p.y, tmp); tips.add(PlanTip(p.anchor, tmp[0])) }
+            }
+            for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) {
+                if (!ring) ends.add(Held(r, p.x, p.y))
+                else if (d != null) { project(d, p.x, p.y, tmp); tips.add(PlanTip(r, tmp[0])) }
+            }
+        }
+        tips.sortBy { it.u }
+        var a = 0
+        var b = 0
+        val pool = ends.distinctBy { it.num }
+        if (!ring && n >= 2 && pool.isNotEmpty()) {
+            // The end that already carries an end number keeps it (the end where the line started does not move); a number shared with a neighbouring
+            // keyframe beats one that is not; a free end takes the number that was left over nearest to it.
+            val f = pts.first(); val l = pts.last()
+            val kA = if (f.auto && f.anchor > 0) f.anchor else 0
+            val kB = if (l.auto && l.anchor > 0) l.anchor else 0
+            val opts: List<Held?> = pool + listOf<Held?>(null)
+            var best = Double.POSITIVE_INFINITY
+            for (x in opts) for (y in opts) {
+                if (x != null && y != null && x.num == y.num) continue
+                var c = 0.0
+                if (x == null) c += 2e6 else {
+                    if (x.num !in avoid) c += 1e6
+                    if (kA > 0 && x.num != kA) c += 1000.0
+                    c += hypot(x.x - f.x, x.y - f.y).toDouble()
+                }
+                if (y == null) c += 2e6 else {
+                    if (y.num !in avoid) c += 1e6
+                    if (kB > 0 && y.num != kB) c += 1000.0
+                    c += hypot(y.x - l.x, y.y - l.y).toDouble()
+                }
+                if (c < best) { best = c; a = x?.num ?: 0; b = y?.num ?: 0 }
+            }
+        }
+        return Plan(a, b, tips, true)
+    }
+
+    /** True when the first point of [s] lies nearer the first point of [g] than the last one (where a line starts decides which ghost end it takes first). */
+    private fun startsAtGhostStart(s: VectorStroke, g: VectorStroke): Boolean {
+        val s0 = s.points.first(); val s1 = s.points.last(); val g0 = g.points.first(); val g1 = g.points.last()
+        val da = hypot(s0.x - g0.x, s0.y - g0.y)
+        val db = hypot(s0.x - g1.x, s0.y - g1.y)
+        if (abs(da - db) < 0.1f * max(da, db)) {
+            // the start is no clearer than the ends are far apart: compare both ends together
+            val fwd = da + hypot(s1.x - g1.x, s1.y - g1.y)
+            val rev = db + hypot(s1.x - g0.x, s1.y - g0.y)
+            return fwd <= rev
+        }
+        return da <= db
     }
 
     /**
-     * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone. Open-line endpoints and detected curve tips are targets. The numbers of points that are still ends or tips are
-     * kept within their own class: endpoint identities only go to outer endpoints, and automatic feature identities only go to interior targets. New numbers avoid both this keyframe and [avoid]. Returns [strokes] itself when nothing changed.
+     * The direction of [s] along the open ghost line [g] when [s] lies over it (a whole trace or a piece of one) and covers a clear stretch of it: true = the same way
+     * as the ghost. Null when [s] is elsewhere or the stretch is too short to tell; the start of the line decides then.
      */
-    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null): List<VectorStroke> {
-        if (strokes.none { s -> s.points.any { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() } }) return strokes
-        val count = IntArray(ANCHOR_MAX + 2)
-        for (s in strokes) for (p in s.points) {
-            if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
-            for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]++
-        }
-        data class OldAnchor(val x: Float, val y: Float, val rank: Int, val endpoint: Boolean)
-        val out = ArrayList<VectorStroke>(strokes.size)
-        var changed = false
-        for (s in strokes) {
-            if (s.points.none { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() } || (only != null && s.id !in only)) {
-                out.add(s); continue
-            }
-            val old = ArrayList<OldAnchor>()
-            for ((pi, p) in s.points.withIndex()) {
-                if (p.auto && p.anchor in 1..ANCHOR_MAX) {
-                    // Legacy auto anchors at the actual first/last point are structural
-                    // endpoints even if they predate the explicit endpoint marker.
-                    val isEndpoint = p.endpoint || (!s.isClosed && (pi == 0 || pi == s.points.lastIndex))
-                    old.add(OldAnchor(p.x, p.y, p.anchor, isEndpoint))
-                }
-                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) old.add(OldAnchor(p.x, p.y, r, true))
-            }
-            for (p in s.points) {
-                if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]--
-                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]--
-            }
-            val cleared = s.points.map { p ->
-                if (p.auto) p.copy(anchor = 0, auto = false, endpoint = false, endpointAliases = emptyList())
-                else if (p.endpointAliases.isNotEmpty()) p.copy(endpointAliases = emptyList())
-                else p
-            }
-            // Existing identities used elsewhere in this cel and non-auto anchors on
-            // this line are unavailable. Neighbour-frame numbers are deliberately not
-            // blockers when reusing an existing correspondence identity.
-            val claimed = HashSet<Int>()
-            for (q in 1..ANCHOR_MAX) if (count[q] > 0) claimed.add(q)
-            for (p in cleared) if (p.anchor > 0) claimed.add(p.anchor)
-            val pts = cleared.toMutableList()
-            val targets = targets(cleared, s.isClosed, sens)
-            // A correspondence anchor inherited from a ghost (or placed manually) is
-            // already a deliberate feature match. Do not create a second automatic
-            // anchor immediately beside it just because the local geometry also peaks.
-            val protected = cleared.withIndex().filter { it.value.anchor > 0 && !it.value.auto }
-            val featureSpacing = max(5f, pathLength(cleared, s.isClosed) * 0.025f)
-            val endpointTargets = if (!s.isClosed && cleared.size >= 2) listOf(0, cleared.lastIndex).filter { pts[it].anchor == 0 } else emptyList()
-            val endpointPool = old.filter { it.endpoint && it.rank !in claimed }.distinctBy { it.rank }
-            val tipPool = old.filter { !it.endpoint && it.rank !in claimed }.distinctBy { it.rank }.toMutableList()
-
-            // Structural endpoint identities can only be assigned to the two outer
-            // endpoints. Prefer identities shared with the neighbouring keyframes;
-            // freshly generated endpoints from an unrelated merged stroke must not
-            // replace the ghost's endpoint pair. Choose the pair jointly so direction
-            // reversals and asymmetric extensions do not swap the two identities.
-            if (endpointTargets.size == 2 && endpointPool.size >= 2) {
-                val a = endpointTargets[0]; val b = endpointTargets[1]
-                var bestA: OldAnchor? = null; var bestB: OldAnchor? = null; var bestCost = Double.POSITIVE_INFINITY
-                for (x in endpointPool) for (y in endpointPool) {
-                    if (x.rank == y.rank) continue
-                    val priority = (if (x.rank in avoid) 0.0 else 1_000_000.0) + (if (y.rank in avoid) 0.0 else 1_000_000.0)
-                    val cost = priority + hypot(x.x - pts[a].x, x.y - pts[a].y).toDouble() + hypot(y.x - pts[b].x, y.y - pts[b].y).toDouble()
-                    if (cost < bestCost) { bestCost = cost; bestA = x; bestB = y }
-                }
-                if (bestA != null && bestB != null) {
-                    pts[a] = pts[a].copy(anchor = bestA.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(bestA.rank)
-                    pts[b] = pts[b].copy(anchor = bestB.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(bestB.rank)
-                }
-            } else if (endpointTargets.isNotEmpty() && endpointPool.isNotEmpty()) {
-                val target = endpointTargets.minByOrNull { ti -> endpointPool.minOf { (if (it.rank in avoid) 0f else 1_000_000f) + hypot(it.x - pts[ti].x, it.y - pts[ti].y) } }!!
-                val pick = endpointPool.minByOrNull { (if (it.rank in avoid) 0f else 1_000_000f) + hypot(it.x - pts[target].x, it.y - pts[target].y) }
-                if (pick != null) { pts[target] = pts[target].copy(anchor = pick.rank, auto = true, endpoint = true, endpointAliases = emptyList()); claimed.add(pick.rank) }
-            }
-
-            // Automatic feature identities are a separate pool: they can only populate
-            // intermediate targets and can never take either endpoint's number.
-            val interiorTargets = (if (s.isClosed) targets else targets.filter { it != 0 && it != pts.lastIndex })
-                .filter { i -> pts[i].anchor == 0 && protected.none { q -> hypot(q.value.x - pts[i].x, q.value.y - pts[i].y) < featureSpacing } }
-            val tol = max(3f, pathLength(cleared, s.isClosed) * 0.03f)
-            val unmatched = ArrayList<Int>()
-            for (i in interiorTargets) {
-                if (pts[i].anchor > 0) continue
-                val candidates = tipPool.filter { it.rank !in claimed }
-                val preferred = candidates.filter { it.rank in avoid }.ifEmpty { candidates }
-                val near = preferred.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) }
-                    ?.takeIf { hypot(it.x - pts[i].x, it.y - pts[i].y) <= tol }
-                if (near != null) {
-                    tipPool.remove(near); claimed.add(near.rank)
-                    pts[i] = pts[i].copy(anchor = near.rank, auto = true, endpoint = false)
-                } else unmatched.add(i)
-            }
-            for (i in unmatched) {
-                val available = tipPool.filter { it.rank !in claimed }
-                val heirs = available.filter { it.rank in avoid }.ifEmpty { available }
-                val heir = heirs.minByOrNull { hypot(it.x - pts[i].x, it.y - pts[i].y) } ?: continue
-                tipPool.remove(heir); claimed.add(heir.rank)
-                pts[i] = pts[i].copy(anchor = heir.rank, auto = true, endpoint = false)
-            }
-            for (i in unmatched) {
-                if (pts[i].anchor > 0) continue
-                val next = nextFree(claimed, avoid)
-                if (next > ANCHOR_MAX) continue
-                claimed.add(next); pts[i] = pts[i].copy(anchor = next, auto = true, endpoint = false)
-            }
-            for (p in pts) {
-                if (p.anchor in 1..ANCHOR_MAX) count[p.anchor]++
-                for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) count[r]++
-            }
-            if (pts == s.points) out.add(s) else { out.add(s.copy(points = pts)); changed = true }
-        }
-        return if (changed) out else strokes
+    private fun orientationOverGhost(s: VectorStroke, g: VectorStroke): Boolean? {
+        if (g.isClosed || s.isClosed || s.points.size < 2 || g.points.size < 2) return null
+        val gd = denseOf(g.points, false) ?: return null
+        val tmp = FloatArray(2)
+        val tol = 0.05f * bboxDiag(g.points) + 6f
+        var near = 0
+        for (p in s.points) { project(gd, p.x, p.y, tmp); if (tmp[1] <= tol) near++ }
+        if (near < 0.85f * s.points.size) return null
+        project(gd, s.points.first().x, s.points.first().y, tmp)
+        val u0 = tmp[0]
+        project(gd, s.points.last().x, s.points.last().y, tmp)
+        val u1 = tmp[0]
+        return if (abs(u1 - u0) < 0.15f) null else u0 < u1
     }
 
-    private fun nextFree(claimed: Set<Int>, avoid: Set<Int>): Int {
-        var n = 1
-        while (n <= ANCHOR_MAX && (n in claimed || n in avoid)) n++
-        return n
+    /**
+     * The plan of a line [s] that follows the ghost line [g]. Open: the ends take the ghost's end numbers (which one first depends on [forward], or on where [s] starts
+     * when it is null) and the ghost's in-between anchors become the tips to pair the apexes with. Closed: all of the ghost's anchors are tips, read in the direction
+     * of the outline. Numbers in [blocked] are left out. Null when the ghost cannot be followed (open / closed mismatch, or no anchors).
+     */
+    private fun ghostPlan(s: VectorStroke, g: VectorStroke, forward: Boolean?, blocked: Set<Int>): Plan? {
+        val sn = s.points.size; val gn = g.points.size
+        if (sn < 2 || gn < 2 || g.fill != 0) return null
+        val sRing = s.isClosed && sn >= 3
+        val gRing = g.isClosed && gn >= 3
+        if (sRing != gRing) return null
+        val gd = denseOf(g.points, gRing) ?: return null
+        val tmp = FloatArray(2)
+        val fwd: Boolean
+        val tips = ArrayList<PlanTip>()
+        var start = 0
+        var end = 0
+        if (!gRing) {
+            val a = g.points.first().anchor; val b = g.points.last().anchor
+            if (a !in 1..ANCHOR_MAX || b !in 1..ANCHOR_MAX) return null
+            fwd = forward ?: orientationOverGhost(s, g) ?: startsAtGhostStart(s, g)
+            start = if (fwd) a else b
+            end = if (fwd) b else a
+            if (start in blocked) start = 0
+            if (end in blocked) end = 0
+            for (i in 1 until gn - 1) {
+                val p = g.points[i]
+                if (p.anchor !in 1..ANCHOR_MAX || p.anchor in blocked) continue
+                project(gd, p.x, p.y, tmp)
+                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0]))
+            }
+        } else {
+            fun area(p: List<VectorPoint>): Float { var a = 0f; for (i in p.indices) { val q = p[(i + 1) % p.size]; a += p[i].x * q.y - q.x * p[i].y }; return a }
+            fwd = area(s.points) * area(g.points) >= 0f
+            for (p in g.points) {
+                if (p.anchor !in 1..ANCHOR_MAX || p.anchor in blocked) continue
+                project(gd, p.x, p.y, tmp)
+                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0]))
+            }
+        }
+        if (start == 0 && end == 0 && tips.isEmpty()) return null
+        tips.sortBy { it.u }
+        // When the line lies over the ghost (a whole trace or a piece of one) its apexes are paired by where they lie ON the ghost, so a piece pairs with the right part.
+        var toPlanU: ((Float, Float, Float) -> Float)? = null
+        if (!gRing && tips.isNotEmpty()) {
+            val tol = 0.05f * bboxDiag(g.points) + 6f
+            var near = 0
+            for (p in s.points) { project(gd, p.x, p.y, tmp); if (tmp[1] <= tol) near++ }
+            if (near >= 0.85f * sn) {
+                toPlanU = { x, y, _ ->
+                    val q = FloatArray(2)
+                    project(gd, x, y, q)
+                    if (fwd) q[0] else 1f - q[0]
+                }
+            }
+        }
+        return Plan(start, end, tips, false, toPlanU)
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+    // Public entry points.
+    // ---------------------------------------------------------------------------------------------------------------------------------------------
+
+    /** A new line: anchors at its ends and at the apex of each bend, numbered in path order from the first number that is not in [taken] (automatic). Fills and single points stay as they are. */
+    fun assignFresh(s: VectorStroke, taken: Set<Int>, sens: Float): VectorStroke {
+        if (s.fill != 0 || s.points.size < 2) return s
+        return layout(s, Plan(0, 0, emptyList(), true), sens, HashSet(taken))
+    }
+
+    /**
+     * Traces: [s] (a line just drawn) follows the ghost line [g]. The two ends take the ghost's end numbers, the end where [s] starts taking the ghost end it starts nearest to;
+     * the apexes of [s] take the ghost's in-between numbers in order. All of them stay automatic, so merging pieces of one trace later moves them to the new ends and apexes
+     * (see [refresh]). Numbers in [blocked] (used in this keyframe already) are never taken. Null when nothing can be inherited.
+     */
+    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>, sens: Float = 0.5f): VectorStroke? {
+        if (s.fill != 0 || s.points.size < 2) return null
+        val plan = ghostPlan(s, g, null, blocked) ?: return null
+        val r = layout(s, plan, sens, HashSet(blocked))
+        return if (r === s) null else r
     }
 
     /** True when both ends of an open line carry an anchor (closed lines and points have no ends). */
     fun endsAnchored(s: VectorStroke): Boolean = s.isClosed || s.points.size < 2 || (s.points.first().anchor > 0 && s.points.last().anchor > 0)
 
-    /** The two end points of an open line always carry a structural endpoint anchor: a missing one is added on the exact end point, with a number not in [taken]. */
+    /**
+     * The ghost line [g] (a line of the reference keyframe) ready to be followed: with no anchors it gets ends and tips; with automatic anchors only (ends from an older version,
+     * or lost tips) it is laid out again, which keeps its numbers and adds the tips it lacks. Anchors set by hand are never moved. Returns [g] itself when nothing changes.
+     */
+    fun completeGhost(g: VectorStroke, taken: Set<Int>, sens: Float): VectorStroke {
+        if (g.fill != 0 || g.points.size < 2) return g
+        if (g.points.none { it.anchor > 0 }) return withEnds(assignFresh(g, taken, sens), taken)
+        if (g.points.any { it.anchor > 0 && !it.auto }) return withEnds(g, taken)
+        val r = layout(g, selfPlan(g, emptySet()), sens, HashSet(taken))
+        return withEnds(r, taken)
+    }
+
+    /** The two end points of an open line always carry an end anchor: a missing one is added on the exact end point, with a number not in [taken]. */
     fun withEnds(s: VectorStroke, taken: Set<Int>): VectorStroke {
         if (s.fill != 0 || s.isClosed || s.points.size < 2 || endsAnchored(s)) return s
         val used = HashSet<Int>(taken)
@@ -403,261 +651,70 @@ object AutoAnchors {
         return if (changed) out else strokes
     }
 
-    /** [refresh] for the cel [cel] of [layer] (its neighbours decide which numbers are avoided). */
-    fun refreshFor(layer: Layer, cel: Cel, strokes: List<VectorStroke>, sens: Float): List<VectorStroke> {
-        val idx = layer.cels.indexOfFirst { it === cel }
-        return refresh(strokes, if (idx >= 0) neighbourNumbers(layer, idx) else emptySet(), sens)
-    }
-
-    private fun distToPoly(ax: Float, ay: Float, p: List<VectorPoint>): Float {
-        var best = Float.MAX_VALUE
-        for (j in 0 until p.size - 1) {
-            val dx = p[j + 1].x - p[j].x; val dy = p[j + 1].y - p[j].y
-            val l2 = dx * dx + dy * dy
-            val t = if (l2 < 1e-9f) 0f else (((ax - p[j].x) * dx + (ay - p[j].y) * dy) / l2).coerceIn(0f, 1f)
-            best = min(best, hypot(ax - (p[j].x + dx * t), ay - (p[j].y + dy * t)))
+    /** The ghost line (of [refs]) a line is following: one of whose end numbers (or, for a closed ghost, any number) the line carries. Null when it follows none. */
+    private fun ghostFor(s: VectorStroke, refs: List<VectorStroke>): VectorStroke? {
+        for (g in refs) {
+            if (g.fill != 0 || g.points.size < 2) continue
+            val nums = if (g.isClosed) g.points.map { it.anchor }.filter { it > 0 } else listOf(g.points.first().anchor, g.points.last().anchor).filter { it > 0 }
+            if (nums.isEmpty()) continue
+            if (s.points.any { it.anchor in nums || it.endpointAliases.any { r -> r in nums } }) return g
         }
-        return best
-    }
-
-    /** Total path length of the lines of this keyframe that already carry one of the ghost's anchor numbers (the pieces traced so far). */
-    fun tracedLength(strokes: List<VectorStroke>, ghostNumbers: Set<Int>): Float {
-        var len = 0f
-        for (s in strokes) if (s.fill == 0 && s.points.any { it.anchor in ghostNumbers }) len += pathLength(s.points, s.isClosed)
-        return len
+        return null
     }
 
     /**
-     * Traces: [s] (a line just drawn) takes the anchor numbers of the ghost line [g] it was drawn over, except numbers in [blocked] (already used in this keyframe). Automatically detected ghost extrema map to the corresponding detected extrema on [s] by ordered path progress; manual anchors use nearest-path projection. The same order is retained along the line (a line drawn the other way round is read backwards; the ends of the ghost
-     * land on the ends of [s]); when the line has no point there, one is inserted. These anchors are not automatic: they say which point matches which, so they are never redone.
-     * Null when the ghost carries no usable anchor.
+     * After lines changed shape (merged, points deleted): the automatic anchors of every line that has some are redone on the whole new line. A line with no anchors at all
+     * that is listed in [only] gets a complete set. A line that is following a ghost line of [refs] (it carries the ghost's end numbers) keeps following it: the end where it
+     * started keeps its number and stays put, the other end takes the ghost's other end number wherever the line now ends, and the apexes are detected again and paired with
+     * the ghost's in-between numbers. Other lines keep their own numbers (ends first, then tips in order); new apexes get new numbers avoiding this keyframe and [avoid].
+     * Returns [strokes] itself when nothing changed.
      */
-    fun inherit(s: VectorStroke, g: VectorStroke, blocked: Set<Int>, sens: Float = 0.5f, consumed: Float = 0f): VectorStroke? {
-        val n = s.points.size
-        val gm = g.points.size
-        if (s.fill != 0 || n < 2 || gm < 2) return null
-        // Ghost mode transfers ONLY the two end anchors of an open ghost line (a closed line has no ends and keeps its anchors).
-        // Anchors between the ends are neither inherited nor used for placement.
-        val ghostEnds = g.points.withIndex().filter { it.value.anchor > 0 && (g.isClosed || it.index == 0 || it.index == gm - 1) }
-        val ga = ghostEnds.filter { it.value.anchor !in blocked }
-        if (ga.isEmpty()) return null
-        val sRing = s.isClosed && n >= 3
-        val gRing = g.isClosed && gm >= 3
-        val mono = !sRing && !gRing
-        val m = if (sRing) n + 1 else n
-        val xs = FloatArray(m) { s.points[it % n].x }; val ys = FloatArray(m) { s.points[it % n].y }
-        val cum = FloatArray(m)
-        for (i in 1 until m) cum[i] = cum[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
-        val total = cum[m - 1]
-        if (total < 1e-3f) return null
-        val gcum = FloatArray(gm)
-        for (i in 1 until gm) gcum[i] = gcum[i - 1] + hypot(g.points[i].x - g.points[i - 1].x, g.points[i].y - g.points[i - 1].y)
-        val gtotal = max(gcum[gm - 1], 1e-3f)
-        var reversed = false
-        if (mono) {
-            val a0 = s.points.first(); val a1 = s.points.last(); val b0 = g.points.first(); val b1 = g.points.last()
-            // direction from where each line runs (start -> end), not from where it lies, so a line drawn away from the ghost is still read the right way round
-            val dot = (a1.x - a0.x) * (b1.x - b0.x) + (a1.y - a0.y) * (b1.y - b0.y)
-            reversed = dot < 0f
+    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null, refs: List<VectorStroke> = emptyList()): List<VectorStroke> {
+        fun hasAuto(s: VectorStroke) = s.points.any { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() }
+        fun hasAny(s: VectorStroke) = s.points.any { it.anchor > 0 || it.endpointAliases.isNotEmpty() }
+        fun eligible(s: VectorStroke): Boolean {
+            if (s.fill != 0 || s.points.size < 2) return false
+            return if (only == null) hasAuto(s) else s.id in only && (hasAuto(s) || !hasAny(s))
         }
-        var order = if (reversed) ga.reversed() else ga
-        // Only the actual ends of the reference stroke are structural endpoints. If a
-        // traced piece is later merged with another piece, refresh() can then move these
-        // anchors to the outside ends of the resulting whole stroke. Every interior ghost
-        // anchor (including automatic curve tips) is inherited as a fixed correspondence
-        // anchor: its number and order survive later refreshes and merges.
-        val structuralRanks = if (mono) ga.filter { it.index == 0 || it.index == gm - 1 }.map { it.value.anchor }.toSet() else emptySet()
-        val diag = max(bboxDiag(s.points), bboxDiag(g.points))
-        fun distToLine(ax: Float, ay: Float): Float = distToPoly(ax, ay, s.points)
-        val gap = max(0.5f, total * 0.002f)
-        // Three cases. (1) available ghost anchors lie near the new line: use their nearest points.
-        // (2) the new line covers only part of the ghost: take only anchors near this part; the others stay for later strokes.
-        // (3) the new line is elsewhere (the drawing moved): map every still-free ghost anchor by its relative path position.
-        val nearTol = 0.15f * diag + 4f
-        // Classify geometric overlap using every reference anchor, not only the
-        // currently-unblocked subset. If earlier traced pieces have claimed anchors
-        // outside this stroke, testing only [ga] can falsely classify a partial trace
-        // as a complete, near-aligned trace and stretch the remaining anchors over
-        // the whole new stroke by normalized path progress.
-        val allGhostAnchors = ghostEnds
-        val allNear = allGhostAnchors.isNotEmpty() && allGhostAnchors.all {
-            distToLine(it.value.x, it.value.y) <= nearTol
-        }
-        // The ghost's automatically detected interior anchors represent curve-lobe
-        // extrema. When tracing, map those identities to the corresponding extrema
-        // detected on the new stroke by ordered path progress, rather than to whichever
-        // sample happens to be spatially closest to the old ghost coordinate. This is
-        // what keeps an apex at the apex even when the artist's trace is slightly offset.
-        val tracedFeatureVertices = targets(s.points, s.isClosed, sens)
-            .filter { sRing || (it != 0 && it != n - 1) }
-        val tracedFeatureDistances = tracedFeatureVertices.map { cum[it] }.sorted()
-        val claimedFeatureDistances = HashSet<Float>()
-        val partTol = 0.05f * diag + 8f
-        val onGhost = s.points.all { distToPoly(it.x, it.y, g.points) <= partTol }
-        // A ghost can already have some of its anchor numbers in use in this keyframe
-        // (for example, an earlier piece of the same traced line). The remaining free
-        // anchors still define exact correspondences. Do not require every ghost anchor
-        // to be free before mapping those that remain by their relative position.
-        val mode = when { !mono || allNear -> 1; onGhost -> 2; ga.isNotEmpty() -> 3; else -> return null }
-        val useNearest = mode != 3
-        // Ghost drawn somewhere else (the drawing moved).
-        //  (a) A SHORT PIECE of a longer line: squeezing every free ghost anchor onto it by relative progress piled all
-        //      the in-between anchors at one end of the piece, and the start-to-end vector of a short piece says nothing
-        //      about the ghost's direction (it flipped 1 and 3). Instead a piece consumes the free ghost anchors in order,
-        //      at the ghost's own spacing (absolute arc length), from where the previous piece stopped; anchors beyond the
-        //      piece stay free for the next piece. Direction comes from the ghost's local tangent there.
-        //  (b) A FULL-LENGTH line: the direction is chosen by comparing the two shapes (forward / reversed), not by the
-        //      start-to-end vector, which is unstable for outlines whose ends lie close together.
-        var arc0 = -1f
-        if (mono && mode == 3) {
-            fun ghostPoint(arc: Float): Pair<Float, Float> {
-                var j = 0
-                while (j < gm - 2 && gcum[j + 1] < arc) j++
-                val l = gcum[j + 1] - gcum[j]
-                val t = if (l < 1e-6f) 0f else ((arc - gcum[j]) / l).coerceIn(0f, 1f)
-                return Pair(g.points[j].x + (g.points[j + 1].x - g.points[j].x) * t, g.points[j].y + (g.points[j + 1].y - g.points[j].y) * t)
+        if (strokes.none { eligible(it) }) return strokes
+        val cur = strokes.toMutableList()
+        var changed = false
+        for (si in cur.indices) {
+            val s = cur[si]
+            if (!eligible(s)) continue
+            val others = HashSet<Int>()
+            for ((oi, o) in cur.withIndex()) {
+                if (oi == si) continue
+                for (p in o.points) { if (p.anchor > 0) others.add(p.anchor); for (r in p.endpointAliases) if (r > 0) others.add(r) }
             }
-            val blockedArcs = ghostEnds.filter { it.value.anchor in blocked }.map { gcum[it.index] }
-            val firstFree = gcum[ga.first().index]
-            val lastFree = gcum[ga.last().index]
-            // where the previous pieces stopped on the ghost: at least the arc of the last claimed anchor, or the length already traced
-            val startF = max(blockedArcs.filter { it < firstFree }.maxOrNull() ?: 0f, min(consumed, firstFree))
-            if (total < 0.75f * (gtotal - startF)) {
-                val vx = s.points.last().x - s.points.first().x; val vy = s.points.last().y - s.points.first().y
-                val spanEnd = min(startF + total, gtotal)
-                val p0 = ghostPoint(startF); val p1 = ghostPoint(spanEnd)
-                val gx = p1.first - p0.first; val gy = p1.second - p0.second
-                val trusted = hypot(vx, vy) > 0.6f * total && hypot(gx, gy) > 0.6f * (spanEnd - startF)
-                if (!(trusted && vx * gx + vy * gy < 0f)) {
-                    reversed = false; order = ga; arc0 = startF
-                } else {
-                    val endR = blockedArcs.filter { it > lastFree }.minOrNull() ?: gtotal
-                    if (total < 0.75f * endR) { reversed = true; order = ga.reversed(); arc0 = endR }
-                }
-            } else if (startF > 0f) {
-                // a later, long piece continues the ghost in the same direction
-                reversed = false; order = ga
-            } else if (total > 1e-3f && gtotal > 1e-3f) {
-                val k = 24
-                fun sampleAt(px: (Int) -> Float, py: (Int) -> Float, cu: FloatArray, count: Int, arc: Float): Pair<Float, Float> {
-                    var j = 0
-                    while (j < count - 2 && cu[j + 1] < arc) j++
-                    val l = cu[j + 1] - cu[j]
-                    val t = if (l < 1e-6f) 0f else ((arc - cu[j]) / l).coerceIn(0f, 1f)
-                    return Pair(px(j) + (px(j + 1) - px(j)) * t, py(j) + (py(j + 1) - py(j)) * t)
-                }
-                val sp = List(k) { sampleAt({ xs[it] }, { ys[it] }, cum, n, total * it / (k - 1)) }
-                val gp = List(k) { sampleAt({ g.points[it].x }, { g.points[it].y }, gcum, gm, gtotal * it / (k - 1)) }
-                val scale = total / gtotal
-                val csx = sp.sumOf { it.first.toDouble() }.toFloat() / k; val csy = sp.sumOf { it.second.toDouble() }.toFloat() / k
-                val cgx = gp.sumOf { it.first.toDouble() }.toFloat() / k; val cgy = gp.sumOf { it.second.toDouble() }.toFloat() / k
-                fun cost(rev: Boolean): Float {
-                    var c = 0f
-                    for (i in 0 until k) {
-                        val q = gp[if (rev) k - 1 - i else i]
-                        val dx = (sp[i].first - csx) - scale * (q.first - cgx); val dy = (sp[i].second - csy) - scale * (q.second - cgy)
-                        c += dx * dx + dy * dy
+            var plan: Plan? = null
+            val g = ghostFor(s, refs)
+            if (g != null) {
+                val hint: Boolean? = if (g.isClosed) null else {
+                    val f = s.points.first(); val l = s.points.last()
+                    val ga = g.points.first().anchor; val gb = g.points.last().anchor
+                    // where the line lies on the ghost is the surest direction; otherwise the numbers its ends carry say which end started where
+                    orientationOverGhost(s, g) ?: when {
+                        f.anchor == ga || l.anchor == gb -> true
+                        f.anchor == gb || l.anchor == ga -> false
+                        else -> null
                     }
-                    return c
                 }
-                val fwd = cost(false); val rev = cost(true)
-                // clear winner only; otherwise the start-to-end vector decision above stands
-                if (rev < 0.7f * fwd) { reversed = true; order = ga.reversed() }
-                else if (fwd < 0.7f * rev) { reversed = false; order = ga }
+                plan = ghostPlan(s, g, hint, others)
             }
+            if (plan == null) plan = selfPlan(s, avoid)
+            val taken = HashSet<Int>(others); taken.addAll(avoid)
+            val r = layout(s, plan, sens, taken)
+            if (r !== s) { cur[si] = r; changed = true }
         }
-        fun nearestProgress(ax: Float, ay: Float, lowerBound: Float): Float {
-            var best = Float.MAX_VALUE; var bp = -1f
-            for (j in 0 until m - 1) {
-                if (mono && cum[j + 1] < lowerBound - gap * 0.5f) continue
-                val l = cum[j + 1] - cum[j]
-                val dx = xs[j + 1] - xs[j]; val dy = ys[j + 1] - ys[j]
-                val t = if (l < 1e-6f) 0f else (((ax - xs[j]) * dx + (ay - ys[j]) * dy) / (l * l)).coerceIn(0f, 1f)
-                var pp = cum[j] + t * l
-                if (mono && pp < lowerBound) pp = lowerBound
-                val tt = if (l < 1e-6f) 0f else ((pp - cum[j]) / l).coerceIn(0f, 1f)
-                val dd = hypot(ax - (xs[j] + dx * tt), ay - (ys[j] + dy * tt))
-                if (dd < best) { best = dd; bp = pp }
-            }
-            return bp
-        }
-        val params = ArrayList<Pair<Float, Int>>()
-        var last = -gap
-        for (a in order) {
-            val gi = a.index
-            val atStart = !gRing && gi == 0
-            val atEnd = !gRing && gi == gm - 1
-            if (arc0 >= 0f) {
-                // short piece elsewhere: absolute arc distance from where the previous piece stopped
-                val d = if (reversed) arc0 - gcum[gi] else gcum[gi] - arc0
-                if (d > total * 1.02f || d < -gap) continue // outside this piece: stays free for the next piece
-                val q = max(d.coerceIn(0f, total), last + gap)
-                if (q > total) continue
-                params.add(q to a.value.anchor); last = q
-                continue
-            }
-            var p: Float
-            if (mode == 2 && distToLine(a.value.x, a.value.y) > partTol) continue // this part of the ghost line is not under this stroke
-            if (mono && (atStart || atEnd) && (mode != 2 || distToLine(a.value.x, a.value.y) <= partTol)) p = if ((atStart && !reversed) || (atEnd && reversed)) 0f else total
-            else {
-                val isCurveFeature = a.value.auto && !a.value.endpoint && !atStart && !atEnd
-                val ghostU = (gcum[gi] / gtotal).let { if (reversed) 1f - it else it }
-                // In both spatially-aligned modes, project onto the new path. Mode 1
-                // means the complete reference contour is near this trace; mode 2
-                // means this is a partial trace of the reference. Using raw ghostU in
-                // mode 1 assumes identical path lengths and point progress, which
-                // shifts apex anchors whenever the artist's trace stretches/compresses
-                // a curve even though it lies directly over the ghost.
-                val projected = if (mode != 3) nearestProgress(a.value.x, a.value.y, last + gap) else -1f
-                val featureU = if (projected >= 0f) projected / total else ghostU
-                val featureMatch = if (isCurveFeature && tracedFeatureDistances.isNotEmpty()) {
-                    tracedFeatureDistances.asSequence()
-                        .filter { it !in claimedFeatureDistances && it >= last + gap }
-                        .minByOrNull { abs(it / total - featureU) }
-                } else null
-                if (featureMatch != null) {
-                    p = featureMatch
-                    claimedFeatureDistances.add(featureMatch)
-                } else {
-                    val bp = if (projected >= 0f) projected else nearestProgress(a.value.x, a.value.y, last + gap)
-                    p = if (!useNearest || bp < 0f) ghostU * total else bp
-                }
-            }
-            if (mono) { if (p < last + gap) p = last + gap; if (p > total) continue }
-            else if (params.any { abs(it.first - p) < gap }) continue
-            p = p.coerceIn(0f, total)
-            params.add(p to a.value.anchor); last = p
-        }
-        if (params.isEmpty()) return null
-        val vertexRank = HashMap<Int, Int>()
-        val inserts = HashMap<Int, MutableList<Pair<Float, Int>>>()
-        val tol = max(0.75f, total * 0.004f)
-        for ((p, r) in params.sortedBy { it.first }) {
-            var v = -1; var bd = Float.MAX_VALUE
-            for (j in 0 until n) {
-                var dd = abs(cum[j] - p)
-                if (j == 0 && sRing) dd = min(dd, abs(total - p))
-                if (dd < bd) { bd = dd; v = j }
-            }
-            if (bd <= tol && v !in vertexRank) vertexRank[v] = r
-            else {
-                var j = 0
-                while (j < m - 2 && cum[j + 1] < p) j++
-                inserts.getOrPut(j) { ArrayList() }.add(p to r)
-            }
-        }
-        val out = ArrayList<VectorPoint>(n + inserts.size)
-        for (j in 0 until n) {
-            val base = s.points[j]
-            out.add(vertexRank[j]?.let { base.copy(anchor = it, auto = it in structuralRanks, endpoint = it in structuralRanks, endpointAliases = emptyList()) } ?: base)
-            inserts[j]?.sortedBy { it.first }?.forEach { (p, r) ->
-                val l = cum[j + 1] - cum[j]
-                val t = if (l < 1e-6f) 0f else ((p - cum[j]) / l).coerceIn(0f, 1f)
-                val a = s.points[j]; val b = s.points[(j + 1) % n]
-                out.add(VectorPoint(x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, pressure = a.pressure + (b.pressure - a.pressure) * t, elevationOffset = a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, anchor = r, auto = r in structuralRanks, endpoint = r in structuralRanks))
-            }
-        }
-        return s.copy(points = out)
+        return if (changed) cur else strokes
+    }
+
+    /** [refresh] for the cel [cel] of [layer] (its neighbours decide which numbers are avoided and which ghost lines can be followed; [nextFirst] = the next keyframe's lines are preferred). */
+    fun refreshFor(layer: Layer, cel: Cel, strokes: List<VectorStroke>, sens: Float, nextFirst: Boolean = false): List<VectorStroke> {
+        val idx = layer.cels.indexOfFirst { it === cel }
+        if (idx < 0) return refresh(strokes, emptySet(), sens)
+        return refresh(strokes, neighbourNumbers(layer, idx), sens, null, referenceLines(layer, idx, nextFirst))
     }
 }
 
