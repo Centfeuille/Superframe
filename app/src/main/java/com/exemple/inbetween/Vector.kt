@@ -2393,14 +2393,19 @@ object VectorMerge {
         var changed = false
         var joined = false
         var guard = 0
-        while (guard++ < 4 && !cur.isClosed) {
+        // Only the ends of the line that was just drawn may join or snap onto other lines. The far end of an older line it was joined to was not drawn now: if it merely
+        // touches a third line, that line is left alone (extending one line must not fuse it with its neighbour).
+        var firstFree = true; var lastFree = true
+        while (guard++ < 4 && !cur.isClosed && (firstFree || lastFree)) {
             var bi = -1; var bm = 0; var bd = Float.MAX_VALUE
             val c0 = cur.points.first(); val c1 = cur.points.last()
             for ((i, o) in rest.withIndex()) {
                 if (o.isClosed || o.points.size < 2) continue
                 val lim = max(tol, o.baseWidth * 0.5f)
                 val o0 = o.points.first(); val o1 = o.points.last()
-                val cands = listOf(d(c1, o0) to 1, d(c1, o1) to 2, d(c0, o1) to 3, d(c0, o0) to 4)
+                val cands = ArrayList<Pair<Float, Int>>(4)
+                if (lastFree) { cands.add(d(c1, o0) to 1); cands.add(d(c1, o1) to 2) }
+                if (firstFree) { cands.add(d(c0, o1) to 3); cands.add(d(c0, o0) to 4) }
                 for ((dd, m) in cands) if (dd <= lim && dd < bd) { bd = dd; bi = i; bm = m }
             }
             if (bi < 0) break
@@ -2412,6 +2417,7 @@ object VectorMerge {
                 else -> join(o.points.reversed(), cur.points)
             }
             cur = o.copy(points = pts) // the older stroke's identity and look win
+            if (bm <= 2) lastFree = false else firstFree = false // the end that took the join is gone; the other end of the older line is not a drawn end
             changed = true; joined = true
         }
         // a line whose end comes back to its own start closes into a ring (also when it joined nothing else); a short scribble does not count
@@ -2419,6 +2425,7 @@ object VectorMerge {
         // T junctions: an end that lies on the body of another line snaps onto it and the line gets the same vertex
         if (!cur.isClosed) {
             for (end in 0..1) {
+                if ((end == 0 && !firstFree) || (end == 1 && !lastFree)) continue // only ends drawn now snap onto the body of another line
                 val pts = cur.points
                 val e = if (end == 0) pts.first() else pts.last()
                 var bo = -1; var bi = -1; var bt = 0f; var bd = Float.MAX_VALUE

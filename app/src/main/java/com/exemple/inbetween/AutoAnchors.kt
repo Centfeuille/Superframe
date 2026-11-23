@@ -496,11 +496,12 @@ object AutoAnchors {
     }
 
     /**
-     * Which ghost end the line takes first when it does not lie over the ghost: ALWAYS drawing order. The end where the line starts takes the ghost's first number and the end
-     * where it finishes the last one. How far the line is from the ghost, or which ghost end it happens to be near, plays no part (keyframes can sit anywhere and look nothing alike).
+     * Which ghost end the line takes first when it does not lie over the ghost: ALWAYS drawing order. The end where the line starts takes the ghost's LOWEST end number and the end
+     * where it finishes the other one. "First" is by number, not by point order: a ghost that was extended from its first end runs 6..1 along its points but is still numbered 1 to 6.
+     * How far the line is from the ghost, or which ghost end it happens to be near, plays no part (keyframes can sit anywhere and look nothing alike).
+     * True = the line runs along the ghost's point order (it starts at the ghost's first point), which is the case when that end carries the lower number.
      */
-    @Suppress("UNUSED_PARAMETER")
-    private fun startsAtGhostStart(s: VectorStroke, g: VectorStroke): Boolean = true
+    private fun startsAtGhostStart(s: VectorStroke, g: VectorStroke): Boolean = g.points.first().anchor <= g.points.last().anchor
 
     /**
      * The direction of [s] along the open ghost line [g] when [s] lies over it (a whole trace or a piece of one) and covers a clear stretch of it: true = the same way

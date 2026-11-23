@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            75, "2026-11-23", "Extending a line no longer fuses it with a neighbour; ghost traces of extended lines",
+            listOf(
+                "With Merge on, only the end of the line you just drew joins other lines. If the line you extend merely touches a third line at its far end, that line is no longer pulled into the merge: the extension joins the one line and nothing else. The same goes for snapping an end onto another line's body.",
+                "Tracing a ghost line that was extended from its first end: the traced line now takes the ghost's lowest number at the end where you start, so it comes out 1 to 6 in drawing order instead of reversed.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             74, "2026-11-23", "Interpolation drag: Smooth slider",
             listOf(
                 "New Smooth button in the Interpolation drag bar opens a slider that sets the smoothness of the picked preview lines (all lines when none is picked). It evens out the curves between the line's points without adding any: the points only shift a little, and the ends, numbered anchors and joint points stay where they are. The Reset button also puts the smoothness back.",

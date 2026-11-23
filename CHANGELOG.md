@@ -1,3 +1,14 @@
+## 2026-11-23 — Merge: extend one line only; ghost trace order by number
+- AI model: Claude
+- Category: Fixed (source code)
+- Report: (1) a line merged from its first end point keeps the right numbering, but tracing it with the line as ghost gives a reversed order; (2) a line drawn touching another line (not merged), later extended with a merge at its other end, fuses with that other line.
+- Cause 1 (code reading; not reproduced): `VectorMerge.attach` joins at the old line's first end as `join(o.reversed, cur)`, so the merged line's points run last end first; `AutoAnchors.refresh` keeps each number at its position, giving 6..1 along the points. The drawing-order rule `startsAtGhostStart` (always true) then gave the start of the trace the number of the ghost's first POINT (6).
+- Fix 1 (`AutoAnchors.kt`): `startsAtGhostStart` is now `g.points.first().anchor <= g.points.last().anchor`: the start of a trace takes the ghost's lower end number, whatever the point order. Still no distance or shape involved; a trace lying on the ghost still goes by `orientationOverGhost`.
+- Cause 2: the loop in `attach` (up to 4 rounds) re-tested BOTH ends of the joined line against every other line, including the far end of the older line the new piece had just extended; when that end touched a third line, the third line was joined too. The T-junction snap tested both ends as well.
+- Fix 2 (`Vector.kt`, `VectorMerge.attach`): `firstFree` / `lastFree` track which ends of the combined line come from the piece just drawn. Only those ends may join (a join consumes the end that took it) or snap as a T junction. A drawn piece may still bridge two lines with its two ends. Not changed: crossings (they only add shared vertices, never fuse strokes) and ring closing.
+- Files: `Vector.kt`, `AutoAnchors.kt`, `WhatsNew.kt` (note 75).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: extend a line at its first end, then trace it (forward and reverse); two touching unmerged lines, extend one at its other end with Merge on (they must stay two lines); a piece that touches two lines with its two ends (must still bridge).
+
 ## 2026-11-23 — Interpolation drag: Smooth slider (no added points)
 - AI model: Claude
 - Category: Added (source code)
