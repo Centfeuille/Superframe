@@ -1168,7 +1168,11 @@ data class Aff(val sx: Float = 1f, val kx: Float = 0f, val tx: Float = 0f, val k
  * [all] is the manual transform of the whole preview (Shift handles); [lines] adds a transform for single preview lines (key = line id) that is applied after it.
  * Both are applied AFTER the guide joints, so the joints stay attached to their line when the preview is moved, scaled or rotated. [lockWeight] keeps the line weight when scaling.
  */
-data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: Map<String, Aff> = emptyMap(), val lockWeight: Boolean = false) {
+data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: Map<String, Aff> = emptyMap(), val lockWeight: Boolean = false,
+                          val smoothAll: Float = 0f, val smoothLines: Map<String, Float> = emptyMap()) {
+    /** Smoothness 0..1 of line [id] (see [relaxStroke]): its own value, else the whole preview's. */
+    fun smoothOf(id: String): Float = smoothLines[id] ?: smoothAll
+
     /** The whole map a point of line [id] goes through (joint space -> shown on the canvas). */
     fun total(id: String): Aff = lines[id]?.let { all.then(it) } ?: all
 
@@ -1192,6 +1196,8 @@ object VectorInterpolation {
     /** A blended line's last steps, in this order: the Fixed offset, the guide joints (they live in this space), then the manual transform of the preview. */
     private fun finish(s: VectorStroke, fx: Float, fy: Float, guides: List<VectorGuideJoint>, place: InbetweenPlace?): VectorStroke {
         var r = movedBy(s, fx, fy)
+        val sm = place?.smoothOf(s.id) ?: 0f
+        if (sm > 0.001f) r = relaxStroke(r, sm) // before the joints, so a joint still lands exactly where it was put
         if (guides.isNotEmpty()) r = applyGuideJoints(listOf(r), guides).first()
         return place?.applyTo(r) ?: r
     }
@@ -1598,6 +1604,34 @@ fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: 
 }
 
 /** Apply local, smooth arc offsets to the generated stroke. Guide positions are normalized arc-length coordinates. */
+/**
+ * Smoothness of a line WITHOUT adding or removing points: the points are relaxed toward the middle of their neighbours and back out again (Taubin smoothing, so the
+ * line does not shrink), which evens out the bends between the points the way the drawn curve then runs through them. [amount] 0..1 sets how many passes. The ends,
+ * numbered anchors, structural ends and hidden points never move; pressure and everything else stay as they are. Fills and lines of fewer than 3 points are left alone.
+ */
+fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
+    val n = s.points.size
+    val a = amount.coerceIn(0f, 1f)
+    if (a <= 0.001f || n < 3 || s.fill != 0) return s
+    val closed = s.isClosed && n > 2
+    val xs = FloatArray(n) { s.points[it].x }; val ys = FloatArray(n) { s.points[it].y }
+    val fixed = BooleanArray(n) { i -> val p = s.points[i]; (!closed && (i == 0 || i == n - 1)) || p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty() || p.hidden }
+    val nx = FloatArray(n); val ny = FloatArray(n)
+    repeat(1 + (a * 14f).toInt()) {
+        for (k in 0..1) {
+            val f = if (k == 0) 0.5f else -0.53f
+            for (i in 0 until n) {
+                if (fixed[i]) { nx[i] = xs[i]; ny[i] = ys[i]; continue }
+                val p = if (i == 0) (if (closed) n - 1 else 0) else i - 1
+                val q = if (i == n - 1) (if (closed) 0 else n - 1) else i + 1
+                nx[i] = xs[i] + f * ((xs[p] + xs[q]) / 2f - xs[i]); ny[i] = ys[i] + f * ((ys[p] + ys[q]) / 2f - ys[i])
+            }
+            for (i in 0 until n) { xs[i] = nx[i]; ys[i] = ny[i] }
+        }
+    }
+    return s.copy(points = s.points.mapIndexed { i, p -> if (fixed[i]) p else p.copy(x = xs[i], y = ys[i]) })
+}
+
 /** A warped line, with for every one of its points the arc position (0..1) that point has on the line BEFORE the joints moved it (null when the line was not warped). */
 class Warped(val stroke: VectorStroke, val arcs: FloatArray?)
 

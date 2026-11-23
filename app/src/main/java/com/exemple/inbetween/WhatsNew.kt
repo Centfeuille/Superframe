@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            74, "2026-11-23", "Interpolation drag: Smooth slider",
+            listOf(
+                "New Smooth button in the Interpolation drag bar opens a slider that sets the smoothness of the picked preview lines (all lines when none is picked). It evens out the curves between the line's points without adding any: the points only shift a little, and the ends, numbered anchors and joint points stay where they are. The Reset button also puts the smoothness back.",
+                "The smoothness is part of the in-between you create (it is not saved on its own). Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             73, "2026-11-23", "Tracing a ghost line: numbered in drawing order, wherever it is drawn",
             listOf(
                 "A line you trace is numbered in drawing order: the end where you start takes the ghost's first number, the end where you finish its last. How far your line is from the ghost, or which ghost end it is near, no longer matters, and neither does its shape. Only a line drawn directly on top of the ghost still takes its direction from the way it runs along the ghost.",

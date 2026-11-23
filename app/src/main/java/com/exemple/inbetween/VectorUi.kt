@@ -136,6 +136,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     if (!pointBar && !dragBar && !drawBar && !lineBar) return
     val ctx = LocalContext.current
     var falloffOpen by remember { mutableStateOf(false) }
+    var smoothBarOpen by remember { mutableStateOf(false) } // interpolation drag: the smoothness slider is shown
     var anchorOpen by remember { mutableStateOf(false) }
     var smoothOpen by remember { mutableStateOf(false) }
     val idx = layer.indexAt(cut.time)
@@ -187,6 +188,17 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     }
     }
     Column(Modifier.align(Alignment.BottomCenter).clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
+        if (dragBar && smoothBarOpen) Row(verticalAlignment = Alignment.CenterVertically) {
+            // Smoothness of the picked preview lines (every line when none is picked): evens out the curves between the points without adding any
+            val pickedNow = ed.vecPreSel
+            val shownValue = if (pickedNow.isEmpty()) ed.vecSmoothAll else (pickedNow.firstOrNull()?.let { ed.vecSmoothLines[it] } ?: ed.vecSmoothAll)
+            Text(if (pickedNow.isEmpty()) "Smoothness · all lines" else "Smoothness · ${pickedNow.size} picked line${if (pickedNow.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            Slider(value = shownValue, onValueChange = { v ->
+                if (pickedNow.isEmpty()) { ed.vecSmoothAll = v; ed.vecSmoothLines = emptyMap() }
+                else ed.vecSmoothLines = ed.vecSmoothLines + pickedNow.associateWith { v }
+            }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
+            Text("${(shownValue * 100).roundToInt()}%  ·  no points added", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+        }
         if (pointBar && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (!has) "Displace · select lines (or points) first" else if (ed.vecDisplaceJoints.isEmpty()) "Displace · tap a selected line to add a joint, then drag it" else "Displace · ${ed.vecDisplaceJoints.size} joint${if (ed.vecDisplaceJoints.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
             IconBtn(Icons.Filled.Delete, on = ed.vecDisplaceSelected in ed.vecDisplaceJoints.indices, tip = "Delete the selected joint") {
@@ -306,11 +318,12 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
                 BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
                 BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
-                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty()) {
-                    // Reset: the picked lines go back to where the interpolation puts them; with nothing picked, the whole preview does
+                BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
+                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) {
+                    // Reset: the picked lines go back to what the interpolation makes (position and smoothness); with nothing picked, the whole preview does
                     BarChip("Reset", false) {
                         val picked = ed.vecPreSel
-                        if (picked.isEmpty()) ed.resetPlace() else ed.vecPlaceLines = ed.vecPlaceLines - picked
+                        if (picked.isEmpty()) ed.resetPlace() else { ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked }
                     }
                 }
                 BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1; ed.vecShiftOn = false; ed.vecPreSelOn = false }

@@ -994,8 +994,11 @@ class Editor : ViewModel() {
     var vecPlaceLines by mutableStateOf<Map<String, Aff>>(emptyMap()) // extra transform of single preview lines (key = line id), applied after vecPlaceAll
     var vecPreSelOn by mutableStateOf(false)            // interpolation drag "Select": tap a preview line, or drag a rectangle over several
     var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the picked preview lines (ids); empty = the whole preview
-    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap() }
-    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty()) InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight) else null
+    var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (points are not added, see relaxStroke); session only
+    var vecSmoothLines by mutableStateOf<Map<String, Float>>(emptyMap()) // smoothness of single preview lines (key = line id), overriding vecSmoothAll
+    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecSmoothAll = 0f; vecSmoothLines = emptyMap() }
+    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty())
+        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines) else null
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)

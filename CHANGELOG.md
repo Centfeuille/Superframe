@@ -1,3 +1,12 @@
+## 2026-11-23 — Interpolation drag: Smooth slider (no added points)
+- AI model: Claude
+- Category: Added (source code)
+- Request: a button opening a slider on the drag interpolation bar that sets the smoothness of the selected lines; smoothness must not create points but attune the curves between the points.
+- `Vector.kt`: `relaxStroke(stroke, amount)`: Taubin smoothing (a shrinking pass and a re-inflating pass, 1 to 15 pairs by `amount`) of the existing points, so the point count never changes and the line does not shrink. Ends of open lines, numbered anchors, structural ends / aliases and hidden points are fixed; pressure and style untouched; fills and lines under 3 points are skipped. It runs inside `VectorInterpolation.finish` after the Fixed offset and BEFORE the guide joints, so a joint still lands exactly where it was put. `InbetweenPlace` gained `smoothAll` / `smoothLines` (`smoothOf(id)`: the line's own value, else the whole preview's).
+- `Editor.kt`: `vecSmoothAll`, `vecSmoothLines` (session state; `resetPlace()` clears them; `inbetweenPlace()` is non-null when any smoothing is set). `VectorUi.kt`: Smooth chip in the drag bar opens a slider row (picked preview lines from Select, else all lines); Reset chip clears smoothness of picked lines too. `Canvas.kt`: the preview's remember keys include the smoothness. Creating the in-between (check button, three-frame apply) uses the same placement, so the smoothness is baked in with it.
+- Not changed: this is NOT the point-edit Smooth dialog (`VectorSmooth.refine`, which adds points), `.inb` format, protected infrastructure.
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: slider on one picked line vs all, a closed line, a line with anchors (they must not move), joints plus smoothness, point count unchanged after creating the in-between. The strength curve (up to 15 passes) may need tuning on real lines.
+
 ## 2026-11-23 — Ghost trace direction: always drawing order (no distance, no shape)
 - AI model: Claude
 - Category: Fixed (source code)
