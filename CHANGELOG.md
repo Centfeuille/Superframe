@@ -1,3 +1,15 @@
+## 2026-11-23 — Ghost tracing across open / closed: open a ring ghost, close an open ghost
+- AI model: Claude
+- Category: Added / Fixed (source code)
+- Report: a self-merged (closed) ghost line traced as an OPEN line, and an open ghost traced as a CLOSED line, lose the ghost's anchor numbers.
+- Cause (code reading): `AutoAnchors.ghostPlan` returned null whenever the trace and the ghost differed in open / closed, so the trace got fresh numbers (open over ring) or, for an open trace that Merge later closed, `refresh` fell back to `selfPlan` after `dropLast` had removed the closing end point.
+- Fix (`AutoAnchors.kt`): the mismatch now goes to two new plans. `planOpenOverRing`: reads the ring's numbers (anchors and end aliases) round the ring from the lowest number in the direction in which numbers grow; the seam is where they wrap. First number = first end, last number = last end, the rest are tips placed by progress round the ring from first to last. `planRingOverOpen`: every number of the ghost (end numbers included) becomes a tip, read in the direction in which the ghost's numbers grow, progress squeezed by `1 - 1/n` so the two end numbers do not land on one spot of the ring (`matchCyclic` then finds the turn). Both use no distance and no shape, only the numbers and the ghost's own geometry; numbers already used in the keyframe are left out. `refresh` (after a merge) reaches them through `ghostPlan` too.
+- `Canvas.kt` `vecFreshAfterMerge`: the ring-after-merge path added earlier also accepts an OPEN ghost (its end numbers must be free).
+- Unchanged: open-over-open and ring-over-ring plans, the drawing-order rule, `selfPlan`, merge rules.
+- Files: `AutoAnchors.kt`, `Canvas.kt`, `WhatsNew.kt` (note 77).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: ring ghost traced open (numbers 1..n in drawing order, with and without Merge); ring ghost numbered descending along its points; open ghost traced closed (Merge self-close and a closed shape); open over open and ring over ring (must be as before); ghost with only two numbers.
+- Known limits: a trace with fewer or more bends than the ghost pairs what lines up (the unmatched ghost numbers are not used, no new numbers are invented); a ring whose numbers do not grow in one direction around it falls back to the ascending reading.
+
 ## 2026-11-23 — Ghost trace of a closed line that self-merges
 - AI model: Claude
 - Category: Fixed (source code)

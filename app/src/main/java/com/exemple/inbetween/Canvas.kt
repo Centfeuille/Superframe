@@ -678,10 +678,11 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) {
                 // A trace that Merge closed into a ring (it self-merged) follows a closed ghost line like any other trace; it could not before, while it was still open
                 val gh = anchorGhostRef[0]
-                val ringTrace = if (s.isClosed && gh != null && gh.first.isClosed) {
+                val ringTrace = if (s.isClosed && gh != null) { // a closed ghost, or an open one that the trace closes
                     val blocked = AutoAnchors.usedNumbers(merged.filter { it.id != newId })
-                    val ghostNums = gh.first.points.map { it.anchor }.filter { it > 0 }
-                    if (ghostNums.isNotEmpty() && ghostNums.none { it in blocked }) AutoAnchors.inherit(s, gh.first, blocked, ed.vecTipSens) else null
+                    val gp = gh.first
+                    val ghostNums = if (gp.isClosed) gp.points.map { it.anchor }.filter { it > 0 } else listOf(gp.points.first().anchor, gp.points.last().anchor).filter { it > 0 }
+                    if (ghostNums.isNotEmpty() && ghostNums.none { it in blocked }) AutoAnchors.inherit(s, gp, blocked, ed.vecTipSens) else null
                 } else null
                 if (ringTrace != null) { anchorGhostTrace[0] = true; ed.vecGhostPin = gh!!.first.id; ed.vecGhostPinKey = gh.second; ringTrace }
                 else AutoAnchors.assignFresh(s, used, ed.vecTipSens)

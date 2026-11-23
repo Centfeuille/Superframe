@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            77, "2026-11-23", "Ghost tracing: open a closed ghost line, close an open one",
+            listOf(
+                "Tracing a closed (ring) ghost line with an open line now keeps the ghost's anchor numbers: the line starts at the ghost's lowest number and ends at its highest, and the numbers in between are paired with your bends in order. The ring is opened where its numbers wrap, so where you draw and how far you are from the ghost do not matter.",
+                "Tracing an open ghost line with a line that closes (with Merge, or a closed shape) now keeps the ghost's numbers too: the ghost's two end numbers become ordinary tips of the ring and everything is paired round the ring in the ghost's number order.",
+                "Open-over-open and ring-over-ring traces are unchanged. Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             76, "2026-11-23", "Tracing a closed ghost line that self-merges",
             listOf(
                 "With Merge on, a line you trace over a closed (ring) ghost line and close onto itself now takes the ghost's anchor numbers, like any other trace, instead of getting brand-new numbers. Everything else about anchors and ghost tracing is unchanged.",

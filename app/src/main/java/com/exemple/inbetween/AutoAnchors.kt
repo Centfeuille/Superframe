@@ -523,6 +523,68 @@ object AutoAnchors {
     }
 
     /**
+     * An OPEN line traced over a CLOSED ghost (the ring is opened up): the ring's numbers are read round the ring from its lowest number in the direction in which the numbers grow
+     * (the seam is where they wrap, i.e. where the ring was closed). The first number is the new line's first end, the last number its last end, the ones between are tips placed by their
+     * progress round the ring from the first number to the last. Distance to the ghost and shape play no part.
+     */
+    private fun planOpenOverRing(g: VectorStroke, blocked: Set<Int>): Plan? {
+        val gd = denseOf(g.points, true) ?: return null
+        val tmp = FloatArray(2)
+        class At(val num: Int, val u: Float)
+        val found = ArrayList<At>()
+        for (p in g.points) {
+            val nums = ArrayList<Int>()
+            if (p.anchor in 1..ANCHOR_MAX) nums.add(p.anchor)
+            for (r in p.endpointAliases) if (r in 1..ANCHOR_MAX) nums.add(r)
+            if (nums.isEmpty()) continue
+            project(gd, p.x, p.y, tmp)
+            for (n in nums) found.add(At(n, tmp[0]))
+        }
+        val ring = found.distinctBy { it.num }.sortedBy { it.u }
+        val m = ring.size
+        if (m < 2) return null
+        var descents = 0; var ascents = 0
+        for (i in 0 until m) { val a = ring[i].num; val b = ring[(i + 1) % m].num; if (a > b) descents++ else if (a < b) ascents++ }
+        val ascending = descents <= ascents // the numbers grow along the ring's own direction (one wrap) rather than against it
+        val startIdx = ring.indices.minByOrNull { ring[it].num } ?: return null
+        val order = (0 until m).map { k -> if (ascending) ring[(startIdx + k) % m] else ring[(((startIdx - k) % m) + m) % m] }
+        fun progress(a: At): Float { val d = if (ascending) a.u - order[0].u else order[0].u - a.u; return ((d % 1f) + 1f) % 1f }
+        val span = progress(order.last())
+        if (span < 1e-3f) return null
+        var start = order.first().num; var end = order.last().num
+        if (start in blocked) start = 0
+        if (end in blocked) end = 0
+        val tips = (1 until m - 1).map { order[it] }.filter { it.num !in blocked }.map { PlanTip(it.num, (progress(it) / span).coerceIn(0f, 1f)) }.sortedBy { it.u }
+        if (start == 0 && end == 0 && tips.isEmpty()) return null
+        return Plan(start, end, tips, false)
+    }
+
+    /**
+     * A CLOSED line traced over an OPEN ghost (the ghost is closed into a ring): a ring has no ends, so every number of the ghost, its two end numbers included, becomes a tip,
+     * read in the direction in which the ghost's numbers grow. The two end numbers would land on the same spot of a ring, so the ghost's progress is squeezed to leave a gap for the seam.
+     */
+    private fun planRingOverOpen(g: VectorStroke, blocked: Set<Int>): Plan? {
+        val gn = g.points.size
+        val gd = denseOf(g.points, false) ?: return null
+        val a = g.points.first().anchor; val b = g.points.last().anchor
+        if (a !in 1..ANCHOR_MAX || b !in 1..ANCHOR_MAX) return null
+        val fwd = a <= b
+        val tmp = FloatArray(2)
+        val raw = ArrayList<PlanTip>()
+        fun add(num: Int, u: Float) { if (num !in blocked) raw.add(PlanTip(num, if (fwd) u else 1f - u)) }
+        add(a, 0f); add(b, 1f)
+        for (i in 1 until gn - 1) {
+            val p = g.points[i]
+            if (p.anchor !in 1..ANCHOR_MAX) continue
+            project(gd, p.x, p.y, tmp)
+            add(p.anchor, tmp[0])
+        }
+        if (raw.isEmpty()) return null
+        val squeeze = 1f - 1f / max(raw.size, 2)
+        return Plan(0, 0, raw.map { PlanTip(it.num, it.u * squeeze) }.sortedBy { it.u }, false)
+    }
+
+    /**
      * The plan of a line [s] that follows the ghost line [g]. Open: the ends take the ghost's end numbers (which one first depends on [forward], or on where [s] starts
      * when it is null) and the ghost's in-between anchors become the tips to pair the apexes with. Closed: all of the ghost's anchors are tips, read in the direction
      * of the outline. Numbers in [blocked] are left out. Null when the ghost cannot be followed (open / closed mismatch, or no anchors).
@@ -532,7 +594,7 @@ object AutoAnchors {
         if (sn < 2 || gn < 2 || g.fill != 0) return null
         val sRing = s.isClosed && sn >= 3
         val gRing = g.isClosed && gn >= 3
-        if (sRing != gRing) return null
+        if (sRing != gRing) return if (gRing) planOpenOverRing(g, blocked) else planRingOverOpen(g, blocked) // the trace is opened up / closed where the ghost is not
         val gd = denseOf(g.points, gRing) ?: return null
         val tmp = FloatArray(2)
         val fwd: Boolean
