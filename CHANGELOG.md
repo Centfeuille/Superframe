@@ -1,3 +1,12 @@
+## 2026-11-23 — Ghost trace of a closed line that self-merges
+- AI model: Claude
+- Category: Fixed (source code)
+- Report: a ghost line with a line that self-merges does not work; new anchor points are created.
+- Cause (code reading; assumed to be a closed ghost, not reproduced): while the trace is drawn it is still an OPEN stroke, so `AutoAnchors.inherit` fails against a closed ghost (open / closed mismatch in `ghostPlan`) and the stroke is deferred for Merge. `VectorMerge.attach` then closes it into a ring, and `vecFreshAfterMerge` gave that ring brand-new numbers (`assignFresh`) because no ghost trace had been recorded.
+- Fix (`Canvas.kt` only): `anchorGhostRef` remembers the ghost made ready in `vecAnchorNew`. In `vecFreshAfterMerge`, a new stroke that ended up closed, with no anchors, and a closed ghost whose numbers are not used in this keyframe, now goes through `AutoAnchors.inherit` (ring against ring, existing code) and pins the ghost like a normal trace; the later `refresh` already follows a closed ghost. Every other case, including open ghosts, falls through to `assignFresh` exactly as before.
+- Files: `Canvas.kt`, `WhatsNew.kt` (note 76).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: trace a ring ghost with Merge on and close the line (numbers must match the ghost); same with Merge off; an open ghost traced into a ring (still fresh numbers); ordinary open traces (unchanged).
+
 ## 2026-11-23 — Merge: extend one line only; ghost trace order by number
 - AI model: Claude
 - Category: Fixed (source code)

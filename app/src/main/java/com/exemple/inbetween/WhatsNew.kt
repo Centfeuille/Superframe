@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            76, "2026-11-23", "Tracing a closed ghost line that self-merges",
+            listOf(
+                "With Merge on, a line you trace over a closed (ring) ghost line and close onto itself now takes the ghost's anchor numbers, like any other trace, instead of getting brand-new numbers. Everything else about anchors and ghost tracing is unchanged.",
+                "Not compiled or tested on a device yet. If it still invents new numbers, tell me whether the ghost was a ring or an open line."
+            )
+        ),
+        ReleaseNote(
             75, "2026-11-23", "Extending a line no longer fuses it with a neighbour; ghost traces of extended lines",
             listOf(
                 "With Merge on, only the end of the line you just drew joins other lines. If the line you extend merely touches a third line at its far end, that line is no longer pulled into the merge: the extension joins the one line and nothing else. The same goes for snapping an end onto another line's body.",

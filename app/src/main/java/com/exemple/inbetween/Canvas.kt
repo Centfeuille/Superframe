@@ -658,6 +658,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     // A line traced from a ghost must never fall back to fresh endpoint numbering:
     // the ghost's free anchor numbers are the correspondence contract for this stroke.
     val anchorGhostTrace = remember { BooleanArray(1) }
+    // The ghost line (made ready, with its key) that the stroke being committed could not follow while it was still open: a closed ghost and a trace that only becomes a ring
+    // when Merge closes its ends. vecFreshAfterMerge lets the closed trace follow it then.
+    val anchorGhostRef = remember { arrayOfNulls<Pair<VectorStroke, Long>>(1) }
     /** Fresh automatic anchors for a stroke that is not traced over a ghost line. */
     fun vecFreshAnchors(l: Layer, stroke: VectorStroke): VectorStroke {
         if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
@@ -671,12 +674,25 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!ed.vecAutoAnchor) return merged
         val idx = l.indexAt(cut.time)
         val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx)
-        return merged.map { s -> if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) AutoAnchors.assignFresh(s, used, ed.vecTipSens) else s }
+        return merged.map { s ->
+            if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) {
+                // A trace that Merge closed into a ring (it self-merged) follows a closed ghost line like any other trace; it could not before, while it was still open
+                val gh = anchorGhostRef[0]
+                val ringTrace = if (s.isClosed && gh != null && gh.first.isClosed) {
+                    val blocked = AutoAnchors.usedNumbers(merged.filter { it.id != newId })
+                    val ghostNums = gh.first.points.map { it.anchor }.filter { it > 0 }
+                    if (ghostNums.isNotEmpty() && ghostNums.none { it in blocked }) AutoAnchors.inherit(s, gh.first, blocked, ed.vecTipSens) else null
+                } else null
+                if (ringTrace != null) { anchorGhostTrace[0] = true; ed.vecGhostPin = gh!!.first.id; ed.vecGhostPinKey = gh.second; ringTrace }
+                else AutoAnchors.assignFresh(s, used, ed.vecTipSens)
+            } else s
+        }
     }
     /** [deferFresh]: the caller will try to merge the stroke into other lines; it then gets no anchors of its own here (see [anchorDeferred]) so a line drawn in several strokes keeps its first numbers. */
     fun vecAnchorNew(l: Layer, stroke: VectorStroke, deferFresh: Boolean = false): VectorStroke {
         anchorDeferred[0] = false
         anchorGhostTrace[0] = false
+        anchorGhostRef[0] = null
         if (!ed.vecAutoAnchor || stroke.fill != 0) return stroke
         val idx = l.indexAt(cut.time)
         val cel = l.cels.getOrNull(idx)
@@ -697,6 +713,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     val gTaken = AutoAnchors.usedNumbers(refStrokes) + blocked + (if (ri >= 0) AutoAnchors.neighbourNumbers(l, ri) else emptySet())
                     val anchored = AutoAnchors.completeGhost(ghost, gTaken, ed.vecTipSens)
                     if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
+                    anchorGhostRef[0] = ghost to gKey
                     val gPts = ghost.points; val gClosed = ghost.isClosed
                     val ghostNums = gPts.withIndex().filter { it.value.anchor > 0 && (gClosed || it.index == 0 || it.index == gPts.lastIndex) }.map { it.value.anchor } // the ghost's end numbers (a closed ghost: all its numbers)
                     if (ghostNums.isNotEmpty() && ghostNums.any { it in blocked }) {
