@@ -38,6 +38,17 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            72, "2026-11-23", "Interpolation drag: Shift handles, Select, joints that follow the preview; Displace on the preview",
+            listOf(
+                "Shift now shows transform handles around the preview: drag inside to move, the corners and sides to scale, and outside a corner to rotate (the rotation magnet and the aspect lock of the selection tools apply). A new Reset button puts the preview, or the picked lines, back where the interpolation puts them.",
+                "New Select button in the Interpolation drag bar: tap a line of the preview to pick it, or drag a rectangle to pick several (picked lines turn orange). With Shift on, the handles then move, scale and rotate only the picked lines, independently of the others. Tap on nothing to clear.",
+                "Guide joints are now attached to their line: moving, scaling or rotating the preview carries the joints along instead of warping the interpolation.",
+                "Displace (selection tool): once a joint warps the selection, tap the orange preview to add the next joint, not the original line underneath it.",
+                "After joints are applied (interpolation and Displace) the line is thinned again with the same curve-aware fit used for lines you draw, so it does not keep the many extra points the warp needs. Joint points, anchors and ends are kept.",
+                "Not compiled or tested on a device yet. The .inb format is unchanged; Shift transforms and picked lines are not saved."
+            )
+        ),
+        ReleaseNote(
             71, "2026-11-22", "Auto anchors rewritten: ends and curve tips, working with the ghost line",
             listOf(
                 "A new line gets an anchor on each end and on the apex of each bend. A line traced over a ghost line takes the ghost's two end numbers (the end where you start is matched by where you start along the ghost) and its in-between numbers at its own apexes, in order.",

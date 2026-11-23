@@ -989,10 +989,13 @@ class Editor : ViewModel() {
     var vecMergeRadius by mutableFloatStateOf(14f)      // Merge reach, screen px: how close the start / end of a line must come to another line (or to its own other end) to join it
     var vecDragT by mutableFloatStateOf(0.5f)           // interpolation preview position between the previous and current keyframe
     var vecDragFixed by mutableStateOf(false)           // interpolation drag: the in-between keeps the first keyframe's overall position (its points still interpolate relative to each other)
-    var vecShiftOn by mutableStateOf(false)             // interpolation drag: dragging on the canvas moves the preview instead of changing the position
-    var vecShiftX by mutableFloatStateOf(0f)            // the preview's manual shift (document pixels)
-    var vecShiftY by mutableFloatStateOf(0f)
-    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || vecShiftX != 0f || vecShiftY != 0f) InbetweenPlace(vecDragFixed, vecShiftX, vecShiftY) else null
+    var vecShiftOn by mutableStateOf(false)             // interpolation drag "Shift": transform handles on the preview (inside moves, corners / sides scale, outside the corners rotates)
+    var vecPlaceAll by mutableStateOf(Aff.ID)           // the preview's manual transform (document plane); session only
+    var vecPlaceLines by mutableStateOf<Map<String, Aff>>(emptyMap()) // extra transform of single preview lines (key = line id), applied after vecPlaceAll
+    var vecPreSelOn by mutableStateOf(false)            // interpolation drag "Select": tap a preview line, or drag a rectangle over several
+    var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the picked preview lines (ids); empty = the whole preview
+    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap() }
+    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty()) InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight) else null
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)

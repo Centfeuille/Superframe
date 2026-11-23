@@ -111,7 +111,7 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
     if (cut.layer?.vector != true) return
     // Drawing and point selection live on the regular Brush and Selection tools (their vector options are in the widget bar at the bottom of the canvas).
     IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Its bar also has Fixed (keep the position), Shift (move the preview) and Joints (guide joints). Tap again to go back to drawing") {
-        val on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3; ed.vecGuideSelected = -1; ed.vecShiftOn = false
+        val on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3; ed.vecGuideSelected = -1; ed.vecShiftOn = false; ed.vecPreSelOn = false
     }
     IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes: lines, curve, bake") { ed.vecInterpOpen = true }
     IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
@@ -300,12 +300,20 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 Text(
                     if (three) "In-between ${(ed.vecDragT * 100).roundToInt()}% → middle frame" + linesNote + (if (layer.celAt(cut.time) !== frames[1]) " (go to it to preview)" else "")
                     else if (badFrames) "Select exactly three frames (two ends and the one between), or none"
-                    else if (ready) "In-between ${(ed.vecDragT * 100).roundToInt()}%" + linesNote else "Needs a previous keyframe",
+                    else if (ready) "In-between ${(ed.vecDragT * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty() && (ed.vecShiftOn || ed.vecPreSelOn)) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-                IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
+                IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
-                BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn }
-                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1; ed.vecShiftOn = false }
+                BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
+                BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
+                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty()) {
+                    // Reset: the picked lines go back to where the interpolation puts them; with nothing picked, the whole preview does
+                    BarChip("Reset", false) {
+                        val picked = ed.vecPreSel
+                        if (picked.isEmpty()) ed.resetPlace() else ed.vecPlaceLines = ed.vecPlaceLines - picked
+                    }
+                }
+                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1; ed.vecShiftOn = false; ed.vecPreSelOn = false }
                 if (ed.vecMode == 4) {
                     Slider(value = ed.vecDragT, onValueChange = { ed.vecDragT = it }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
                     val jointSource = if (three) frames[0] else layer.cels.getOrNull(idx - 1)
@@ -320,9 +328,9 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake") { ed.vecInterpOpen = true }
                 IconBtn(Icons.Filled.Check, tip = if (three) "Apply: the interpolation of the first and last selected frame replaces the middle selected frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
                     if (three) {
-                        if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
+                        if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                     } else if (badFrames) android.widget.Toast.makeText(ctx, "Select exactly three frames: the two ends are the references, the one between receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
-                    else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.vecShiftX = 0f; ed.vecShiftY = 0f }
+                    else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                     else android.widget.Toast.makeText(ctx, "Move to a keyframe that has a previous keyframe", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }

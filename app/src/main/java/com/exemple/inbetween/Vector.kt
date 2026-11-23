@@ -798,6 +798,22 @@ object VectorSimplify {
     private fun fitKeeping(pts: List<VectorPoint>, epsilon: Float, widthScale: Float, protected: Set<Int>): List<VectorPoint> {
         val n = pts.size
         if (n < 4) return rdp(pts, epsilon, widthScale)
+        val keep = fitFlags(pts, epsilon, widthScale, protected)
+        val out = ArrayList<VectorPoint>()
+        for (i in 0 until n) if (keep[i]) out.add(pts[i])
+        return out
+    }
+
+    /** Indices of the samples the curve-aware fit keeps; [protected] samples are never dropped. Fewer than 4 points keep everything. */
+    fun fitIndices(pts: List<VectorPoint>, epsilon: Float, widthScale: Float, protected: Set<Int>): List<Int> {
+        val n = pts.size
+        if (n < 4) return pts.indices.toList()
+        val keep = fitFlags(pts, epsilon, widthScale, protected)
+        return (0 until n).filter { keep[it] }
+    }
+
+    private fun fitFlags(pts: List<VectorPoint>, epsilon: Float, widthScale: Float, protected: Set<Int>): BooleanArray {
+        val n = pts.size
         val keep = rdpKeep(pts, epsilon * 1.8f, widthScale)
         for (i in protected) if (i in 0 until n) keep[i] = true
         var round = 0
@@ -823,9 +839,7 @@ object VectorSimplify {
             }
             if (!added) break
         }
-        val out = ArrayList<VectorPoint>()
-        for (i in 0 until n) if (keep[i]) out.add(pts[i])
-        return out
+        return keep
     }
 
     /**
@@ -1131,12 +1145,56 @@ object VectorEdit {
 
 // ---------- Interpolation and baking ----------
 
-/** Interpolation drag placement: [fixed] keeps the in-between's overall position at the first keyframe's (the points still interpolate relative to each other); [dx], [dy] move the whole preview. */
-data class InbetweenPlace(val fixed: Boolean, val dx: Float, val dy: Float)
+/** An affine map of the document plane; the six numbers are in the order of android.graphics.Matrix.getValues (x' = sx x + kx y + tx, y' = ky x + sy y + ty). */
+data class Aff(val sx: Float = 1f, val kx: Float = 0f, val tx: Float = 0f, val ky: Float = 0f, val sy: Float = 1f, val ty: Float = 0f) {
+    val isIdentity: Boolean get() = this == ID
+    /** Uniform scale factor of the map (square root of the area change). */
+    val area: Float get() = kotlin.math.sqrt(abs(sx * sy - kx * ky))
+    fun map(x: Float, y: Float): Offset = Offset(sx * x + kx * y + tx, ky * x + sy * y + ty)
+    fun toMatrix(): android.graphics.Matrix = android.graphics.Matrix().also { it.setValues(floatArrayOf(sx, kx, tx, ky, sy, ty, 0f, 0f, 1f)) }
+    /** This map followed by [m]. */
+    fun after(m: android.graphics.Matrix): Aff { val c = toMatrix(); c.postConcat(m); return of(c) }
+    /** This map followed by [o]. */
+    fun then(o: Aff): Aff = after(o.toMatrix())
+    fun inverse(): Aff? { val i = android.graphics.Matrix(); return if (toMatrix().invert(i)) of(i) else null }
+    companion object {
+        val ID = Aff()
+        fun of(m: android.graphics.Matrix): Aff { val v = FloatArray(9); m.getValues(v); return Aff(v[0], v[1], v[2], v[3], v[4], v[5]) }
+    }
+}
+
+/**
+ * Interpolation drag placement. [fixed] keeps the in-between's overall position at the first keyframe's (the points still interpolate relative to each other).
+ * [all] is the manual transform of the whole preview (Shift handles); [lines] adds a transform for single preview lines (key = line id) that is applied after it.
+ * Both are applied AFTER the guide joints, so the joints stay attached to their line when the preview is moved, scaled or rotated. [lockWeight] keeps the line weight when scaling.
+ */
+data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: Map<String, Aff> = emptyMap(), val lockWeight: Boolean = false) {
+    /** The whole map a point of line [id] goes through (joint space -> shown on the canvas). */
+    fun total(id: String): Aff = lines[id]?.let { all.then(it) } ?: all
+
+    fun applyTo(s: VectorStroke): VectorStroke {
+        val l = lines[s.id]
+        if (all.isIdentity && l == null) return s
+        val area = if (lockWeight) 1f else (all.area * (l?.area ?: 1f)).coerceIn(0.02f, 50f)
+        val pts = s.points.map { p ->
+            var o = all.map(p.x, p.y)
+            if (l != null) o = l.map(o.x, o.y)
+            p.copy(x = o.x, y = o.y, elevationOffset = p.elevationOffset * area)
+        }
+        return s.copy(points = pts, baseWidth = s.baseWidth * area)
+    }
+}
 
 object VectorInterpolation {
     private fun movedBy(s: VectorStroke, dx: Float, dy: Float): VectorStroke =
         if (dx == 0f && dy == 0f) s else s.copy(points = s.points.map { it.copy(x = it.x + dx, y = it.y + dy) })
+
+    /** A blended line's last steps, in this order: the Fixed offset, the guide joints (they live in this space), then the manual transform of the preview. */
+    private fun finish(s: VectorStroke, fx: Float, fy: Float, guides: List<VectorGuideJoint>, place: InbetweenPlace?): VectorStroke {
+        var r = movedBy(s, fx, fy)
+        if (guides.isNotEmpty()) r = applyGuideJoints(listOf(r), guides).first()
+        return place?.applyTo(r) ?: r
+    }
 
     /** Fixed position: the offset that puts the centre of the blended lines' bounding box where the first keyframe's matching lines have theirs. */
     private fun fixedShift(aSide: List<VectorStroke>, blended: List<VectorStroke>, place: InbetweenPlace?): Pair<Float, Float> {
@@ -1412,14 +1470,13 @@ object VectorInterpolation {
      * with its [pairSelected] partner in [a]; nothing else of [a] takes part and nothing fades. With [keepRest] the result is [b] itself with those lines replaced in place (stacking order
      * kept; unselected lines and chosen lines without a partner stay as they are); without it only the blended lines are returned (live preview: the rest is already on screen).
      */
-    fun interpolateChosen(a: List<VectorStroke>, b: List<VectorStroke>, chosen: Set<Int>?, mode: InterpolationMode, t: Float, keepRest: Boolean, place: InbetweenPlace? = null): List<VectorStroke> {
-        if (chosen == null) return interpolate(a, b, mode, t, place)
+    fun interpolateChosen(a: List<VectorStroke>, b: List<VectorStroke>, chosen: Set<Int>?, mode: InterpolationMode, t: Float, keepRest: Boolean, place: InbetweenPlace? = null, guides: List<VectorGuideJoint> = emptyList()): List<VectorStroke> {
+        if (chosen == null) return interpolate(a, b, mode, t, place, guides)
         val pairs = pairSelected(a, b, chosen)
         val blended = pairs.map { blend(a[it.first], b[it.second], t) }
         val fixed = fixedShift(pairs.map { a[it.first] }, blended, place)
-        val sx = fixed.first + (place?.dx ?: 0f); val sy = fixed.second + (place?.dy ?: 0f)
         val moved = HashMap<Int, VectorStroke>()
-        for ((k, pr) in pairs.withIndex()) blended[k].takeIf { visibleStroke(it) }?.let { moved[pr.second] = movedBy(it, sx, sy) }
+        for ((k, pr) in pairs.withIndex()) blended[k].takeIf { visibleStroke(it) }?.let { moved[pr.second] = finish(it, fixed.first, fixed.second, guides, place) }
         val paired = pairs.map { it.second }.toSet()
         return if (keepRest) b.mapIndexedNotNull { j, st -> if (j in paired) moved[j] else st } else paired.sorted().mapNotNull { moved[it] }
     }
@@ -1430,31 +1487,29 @@ object VectorInterpolation {
      * The new content of the middle frame [m] (three frames): the chosen lines of [b] (null = all lines) are replaced by the interpolation with their partners in [a]; the other lines of [m]
      * stay. A line of [m] is replaced when it has the id of the partner in [a] or of the chosen line in [b].
      */
-    fun interpolateIntoMiddle(a: List<VectorStroke>, m: List<VectorStroke>, b: List<VectorStroke>, chosen: Set<Int>?, mode: InterpolationMode, t: Float, place: InbetweenPlace? = null): List<VectorStroke> {
-        if (chosen == null) return interpolate(a, b, mode, t, place)
+    fun interpolateIntoMiddle(a: List<VectorStroke>, m: List<VectorStroke>, b: List<VectorStroke>, chosen: Set<Int>?, mode: InterpolationMode, t: Float, place: InbetweenPlace? = null, guides: List<VectorGuideJoint> = emptyList()): List<VectorStroke> {
+        if (chosen == null) return interpolate(a, b, mode, t, place, guides)
         val pairs = pairSelected(a, b, chosen)
         val blended = pairs.map { blend(a[it.first], b[it.second], t) }
         val fixed = fixedShift(pairs.map { a[it.first] }, blended, place)
-        val sx = fixed.first + (place?.dx ?: 0f); val sy = fixed.second + (place?.dy ?: 0f)
         val ids = HashSet<String>()
         val moved = ArrayList<VectorStroke>()
-        for ((k, pr) in pairs.withIndex()) { ids.add(a[pr.first].id); ids.add(b[pr.second].id); blended[k].takeIf { visibleStroke(it) }?.let { moved.add(movedBy(it, sx, sy)) } }
+        for ((k, pr) in pairs.withIndex()) { ids.add(a[pr.first].id); ids.add(b[pr.second].id); blended[k].takeIf { visibleStroke(it) }?.let { moved.add(finish(it, fixed.first, fixed.second, guides, place)) } }
         val rest = m.filter { it.id !in ids }
         return rest.filter { it.fill != 0 } + moved + rest.filter { it.fill == 0 }
     }
-    fun interpolate(a: List<VectorStroke>, b: List<VectorStroke>, mode: InterpolationMode, t: Float, place: InbetweenPlace? = null): List<VectorStroke> {
-        if (mode == InterpolationMode.NONE) return a
+    fun interpolate(a: List<VectorStroke>, b: List<VectorStroke>, mode: InterpolationMode, t: Float, place: InbetweenPlace? = null, guides: List<VectorGuideJoint> = emptyList()): List<VectorStroke> {
+        if (mode == InterpolationMode.NONE) return if (guides.isEmpty()) a else applyGuideJoints(a, guides)
         val pairs = pairAuto(a, b)
         val usedA = BooleanArray(a.size); val usedB = BooleanArray(b.size)
         val out = ArrayList<VectorStroke>()
         val paired = HashMap<Int, VectorStroke>()
         for ((i, j) in pairs) { usedA[i] = true; usedB[j] = true; paired[i] = blend(a[i], b[j], t) }
         val fixed = fixedShift(pairs.map { a[it.first] }, pairs.map { paired.getValue(it.first) }, place)
-        val sx = place?.dx ?: 0f; val sy = place?.dy ?: 0f
         for (i in a.indices) {
-            if (usedA[i]) out.add(movedBy(paired.getValue(i), fixed.first + sx, fixed.second + sy)) else out.add(movedBy(faded(a[i], (1f - t).coerceIn(0f, 1f)), sx, sy))
+            if (usedA[i]) out.add(finish(paired.getValue(i), fixed.first, fixed.second, guides, place)) else out.add(finish(faded(a[i], (1f - t).coerceIn(0f, 1f)), 0f, 0f, guides, place))
         }
-        for (j in b.indices) if (!usedB[j]) out.add(movedBy(faded(b[j], t.coerceIn(0f, 1f)), sx, sy))
+        for (j in b.indices) if (!usedB[j]) out.add(finish(faded(b[j], t.coerceIn(0f, 1f)), 0f, 0f, guides, place))
         return out.filter { it.points.isNotEmpty() && (it.fill != 0 || it.baseWidth > 0.02f || it.points.any { p -> p.elevationOffset > 0f }) && it.opacity > 0.004f }
     }
 }
@@ -1493,9 +1548,9 @@ private fun guideOffset(js: List<Triple<Float, Float, Float>>, closed: Boolean, 
  * Selection "Displace": warps [stroke] with the guide-joint field. Whole line ([only] == null): the line is densified and gets the joint samples, exactly like the
  * guide joints of an interpolation. Points ([only]): only those points move, the point count is unchanged.
  */
-fun displaceStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>, only: Set<Int>?): VectorStroke {
-    if (joints.isEmpty() || stroke.points.size < 2) return stroke
-    if (only == null) return VectorInterpolation.applyGuideJoints(listOf(stroke), joints).first()
+fun displaceStrokeWarped(stroke: VectorStroke, joints: List<VectorGuideJoint>, only: Set<Int>?): Warped {
+    if (joints.isEmpty() || stroke.points.size < 2) return Warped(stroke, null)
+    if (only == null) return warpStroke(stroke, joints)
     val pts = stroke.points
     val lengths = FloatArray(pts.size)
     for (i in 1 until pts.size) lengths[i] = lengths[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
@@ -1516,30 +1571,51 @@ fun displaceStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>, only: S
         js.add(Triple(u, joint.x - (from.x + (to.x - from.x) * f), joint.y - (from.y + (to.y - from.y) * f)))
     }
     js.sortBy { it.first }
-    return stroke.copy(points = pts.mapIndexed { i, p ->
+    val moved = stroke.copy(points = pts.mapIndexed { i, p ->
         if (i !in only) p else { val o = guideOffset(js, closed, lengths[i] / total); p.copy(x = p.x + o.first, y = p.y + o.second) }
     })
+    return Warped(moved, FloatArray(pts.size) { (lengths[it] / total).coerceIn(0f, 1f) })
 }
 
-/** The selection warped by displace joints. [selected] holds scope-wide (stroke index, point index) keys; [wholeLines] warps every selected line, otherwise only the selected points. */
-fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: List<VectorGuideJoint>, wholeLines: Boolean): List<VectorStroke> {
-    if (joints.isEmpty() || selected.isEmpty()) return strokes
+fun displaceStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>, only: Set<Int>?): VectorStroke = displaceStrokeWarped(stroke, joints, only).stroke
+
+/** The selection warped by displace joints, with the arc positions of every warped line's points (see [Warped]); lines without joints or not selected come back unchanged with no arcs. */
+fun displaceSelectionWarped(strokes: List<VectorStroke>, selected: Set<Long>, joints: List<VectorGuideJoint>, wholeLines: Boolean): List<Warped> {
+    if (joints.isEmpty() || selected.isEmpty()) return strokes.map { Warped(it, null) }
     val byStroke = joints.groupBy { it.strokeId }
     val picked = HashMap<Int, HashSet<Int>>()
     for (k in selected) picked.getOrPut(vecKeyStroke(k)) { HashSet() }.add(vecKeyPoint(k))
     return strokes.mapIndexed { si, st ->
         val js = byStroke[st.id]; val pts = picked[si]
-        if (js == null || pts == null) st else displaceStroke(st, js, if (wholeLines) null else pts)
+        if (js == null || pts == null) Warped(st, null) else displaceStrokeWarped(st, js, if (wholeLines) null else pts)
     }
 }
 
+/** The selection warped by displace joints. [selected] holds scope-wide (stroke index, point index) keys; [wholeLines] warps every selected line, otherwise only the selected points. */
+fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: List<VectorGuideJoint>, wholeLines: Boolean): List<VectorStroke> {
+    if (joints.isEmpty() || selected.isEmpty()) return strokes
+    return displaceSelectionWarped(strokes, selected, joints, wholeLines).map { it.stroke }
+}
+
 /** Apply local, smooth arc offsets to the generated stroke. Guide positions are normalized arc-length coordinates. */
+/** A warped line, with for every one of its points the arc position (0..1) that point has on the line BEFORE the joints moved it (null when the line was not warped). */
+class Warped(val stroke: VectorStroke, val arcs: FloatArray?)
+
+/** Fit tolerance (document px) used to thin a line after joints densified it. */
+const val WARP_FIT_EPS = 0.5f
+
 fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: List<VectorGuideJoint>): List<VectorStroke> {
     if (guides.isEmpty()) return strokes
     val byStroke = guides.groupBy { it.strokeId }
     return strokes.map { stroke ->
         val joints = byStroke[stroke.id].orEmpty()
-        if (joints.isEmpty() || stroke.points.size < 2) stroke else {
+        if (joints.isEmpty() || stroke.points.size < 2) stroke else warpStroke(stroke, joints).stroke
+    }
+}
+
+/** Warps [stroke] by [joints] (all of them belong to it): smooth offset field, joint samples pinned, then thinned again (see [WARP_FIT_EPS]). */
+fun warpStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>): Warped {
+    if (joints.isEmpty() || stroke.points.size < 2) return Warped(stroke, null)
             // The offset field is smooth, but it is only applied at the line's points: on a sparse line the straight pieces between a
             // strongly moved point and its barely moved neighbours showed as sharp corners. Subdivide long pieces first.
             val original = run {
@@ -1632,19 +1708,24 @@ fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: Li
             }.toMutableList()
             // Inserted guide samples are hard constraints, even when two guides have overlapping falloff regions.
             for ((index, joint) in guideIndices) if (index in pts.indices) pts[index] = pts[index].copy(x = joint.x, y = joint.y)
-            stroke.copy(points = pts)
-        }
-    }
+            // The line was densified to carry a smooth warp; thin it again with the fitter used for drawn vector lines (curve-aware, so the shape is the same
+            // within WARP_FIT_EPS). Joint samples, numbered anchors, end markers and hidden points are never dropped. Closed lines keep their samples.
+            val arcs = FloatArray(pts.size) { (pathLengths[it] / pathTotal).coerceIn(0f, 1f) }
+            if (closed) return Warped(stroke.copy(points = pts), arcs)
+            val protect = HashSet<Int>()
+            for ((index, _) in guideIndices) protect.add(index)
+            for (i in pts.indices) { val q = pts[i]; if (q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.hidden) protect.add(i) }
+            val keep = VectorSimplify.fitIndices(pts, WARP_FIT_EPS, stroke.baseWidth, protect)
+            return Warped(stroke.copy(points = keep.map { pts[it] }), FloatArray(keep.size) { arcs[keep[it]] })
 }
 
 fun VectorInterpolation.interpolateConfigured(
     a: List<VectorStroke>, b: List<VectorStroke>, cfg: InterpolationConfig, t: Float,
     chosen: Set<Int>? = null, keepRest: Boolean = false, place: InbetweenPlace? = null
 ): List<VectorStroke> {
-    // placement first, guide joints after: joints are put on the preview as it is shown, so they live in the placed space
-    val raw = if (chosen == null) interpolate(a, b, cfg.mode, t, place)
-        else interpolateChosen(a, b, chosen, cfg.mode, t, keepRest, place)
-    return applyGuideJoints(raw, cfg.guideJoints)
+    // Fixed offset, then the guide joints, then the manual transform of the preview (Shift handles): the joints are attached to their line, so moving the preview does not warp it
+    return if (chosen == null) interpolate(a, b, cfg.mode, t, place, cfg.guideJoints)
+        else interpolateChosen(a, b, chosen, cfg.mode, t, keepRest, place, cfg.guideJoints)
 }
 
 /** The key's own interpolation settings, or the default (same line, linear, on 1s). */
@@ -1837,8 +1918,7 @@ fun interpolateIntoFrame(cut: Cut, ed: Editor, layer: Layer, a: Cel, m: Cel, b: 
     val mi = layer.cels.indexOfFirst { it === m }
     if (mi < 0) return false
     val mode = (a.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-    val rawStrokes = VectorInterpolation.interpolateIntoMiddle(a.vectorStrokes(), m.vectorStrokes(), b.vectorStrokes(), chosen, mode, t.coerceIn(0f, 1f), ed.inbetweenPlace())
-    val strokes = VectorInterpolation.applyGuideJoints(rawStrokes, a.vecCfg?.guideJoints.orEmpty())
+    val strokes = VectorInterpolation.interpolateIntoMiddle(a.vectorStrokes(), m.vectorStrokes(), b.vectorStrokes(), chosen, mode, t.coerceIn(0f, 1f), ed.inbetweenPlace(), a.vecCfg?.guideJoints.orEmpty())
     var fresh: Cel? = null
     cut.record {
         val f = Cel(m.dur)
