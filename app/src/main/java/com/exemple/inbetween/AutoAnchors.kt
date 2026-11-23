@@ -495,19 +495,12 @@ object AutoAnchors {
         return Plan(a, b, tips, true)
     }
 
-    /** True when the first point of [s] lies nearer the first point of [g] than the last one (where a line starts decides which ghost end it takes first). */
-    private fun startsAtGhostStart(s: VectorStroke, g: VectorStroke): Boolean {
-        val s0 = s.points.first(); val s1 = s.points.last(); val g0 = g.points.first(); val g1 = g.points.last()
-        val da = hypot(s0.x - g0.x, s0.y - g0.y)
-        val db = hypot(s0.x - g1.x, s0.y - g1.y)
-        if (abs(da - db) < 0.1f * max(da, db)) {
-            // the start is no clearer than the ends are far apart: compare both ends together
-            val fwd = da + hypot(s1.x - g1.x, s1.y - g1.y)
-            val rev = db + hypot(s1.x - g0.x, s1.y - g0.y)
-            return fwd <= rev
-        }
-        return da <= db
-    }
+    /**
+     * Which ghost end the line takes first when it does not lie over the ghost: ALWAYS drawing order. The end where the line starts takes the ghost's first number and the end
+     * where it finishes the last one. How far the line is from the ghost, or which ghost end it happens to be near, plays no part (keyframes can sit anywhere and look nothing alike).
+     */
+    @Suppress("UNUSED_PARAMETER")
+    private fun startsAtGhostStart(s: VectorStroke, g: VectorStroke): Boolean = true
 
     /**
      * The direction of [s] along the open ghost line [g] when [s] lies over it (a whole trace or a piece of one) and covers a clear stretch of it: true = the same way

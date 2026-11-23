@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            73, "2026-11-23", "Tracing a ghost line: numbered in drawing order, wherever it is drawn",
+            listOf(
+                "A line you trace is numbered in drawing order: the end where you start takes the ghost's first number, the end where you finish its last. How far your line is from the ghost, or which ghost end it is near, no longer matters, and neither does its shape. Only a line drawn directly on top of the ghost still takes its direction from the way it runs along the ghost.",
+                "Not compiled or tested on a device yet. If a trace still comes out reversed, tell me where the ghost and your line started."
+            )
+        ),
+        ReleaseNote(
             72, "2026-11-23", "Interpolation drag: Shift handles, Select, joints that follow the preview; Displace on the preview",
             listOf(
                 "Shift now shows transform handles around the preview: drag inside to move, the corners and sides to scale, and outside a corner to rotate (the rotation magnet and the aspect lock of the selection tools apply). A new Reset button puts the preview, or the picked lines, back where the interpolation puts them.",

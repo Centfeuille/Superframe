@@ -1,3 +1,12 @@
+## 2026-11-23 — Ghost trace direction: always drawing order (no distance, no shape)
+- AI model: Claude
+- Category: Fixed (source code)
+- Report: screenshots of a keyframe 1 line numbered 1 (top) to 6 (right end), and a keyframe 2 line drawn in the same order but numbered 1 at the right end and 6 at the top. Follow-up: shape must not be a factor (keyframes can look very different); where the line starts informs the order.
+- Cause (from the code and the screenshot positions, not reproduced on a device): `AutoAnchors.startsAtGhostStart` took the ghost end nearest the line's first point. The new line was about 200 px from the ghost, so its first point (the top) was nearer the ghost's LAST end and the numbering reversed. (A first attempt compared shapes; it was removed again as unwanted.)
+- Fix: `startsAtGhostStart` now always returns true: a line that is not lying on the ghost takes the ghost's first number at the end where it starts and the last at the end where it finishes. Distance to the ghost and its ends is no factor (a distance-based "clearly reversed" test added in between was removed on request). Unchanged: `orientationOverGhost` (a line drawn on top of the ghost takes the direction it runs along the ghost) and `refresh` after merges.
+- Files: `app/src/main/java/com/exemple/inbetween/AutoAnchors.kt`; `WhatsNew.kt` note 73.
+- Validation: code reading and arithmetic on the screenshot positions only. Not compiled, not run on a device. Next: redraw the trace away from the ghost forward and reversed (reversed drawn starting beside the ghost's last end), and in pieces with Merge on.
+
 ## 2026-11-23 — Interpolation drag: Shift handles, Select, joints relative to the line; Displace on the preview; thinning after joints
 - AI model: Claude
 - Category: Added / Changed (source code)
