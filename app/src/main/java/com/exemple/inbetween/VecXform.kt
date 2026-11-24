@@ -183,13 +183,58 @@ fun vecAllKeys(strokes: List<VectorStroke>): Set<Long> {
     return out
 }
 
+/** How far each point of a line was displaced by a warp: sampled along the line ([u] = fraction of its length, 0..1), so it can be put on the line again when it changes. */
+class LineOffsets(val u: FloatArray, val dx: FloatArray, val dy: FloatArray)
+
+private fun arcFractions(pts: List<VectorPoint>): FloatArray {
+    val u = FloatArray(pts.size)
+    var total = 0f
+    for (i in 1 until pts.size) { total += hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); u[i] = total }
+    if (total > 1e-6f) for (i in u.indices) u[i] /= total
+    return u
+}
+
+/** The displacement [d] makes along line [s] (densified so that it is smooth). */
+fun lineOffsets(s: VectorStroke, d: VecDeform): LineOffsets {
+    val dense = densified(s)
+    val u = arcFractions(dense)
+    val dx = FloatArray(dense.size); val dy = FloatArray(dense.size); val xy = FloatArray(2)
+    for (i in dense.indices) { d.map(dense[i].x, dense[i].y, xy); dx[i] = xy[0] - dense[i].x; dy[i] = xy[1] - dense[i].y }
+    return LineOffsets(u, dx, dy)
+}
+
+/** Puts recorded offsets on line [s]: each point gets the offset recorded at the same fraction of the line's length. */
+private fun applyOffsets(s: VectorStroke, o: LineOffsets): VectorStroke {
+    if (o.u.size < 2 || s.points.size < 2) return s
+    val dense = densified(s)
+    val u = arcFractions(dense)
+    var j = 0
+    val moved = dense.mapIndexed { i, p ->
+        while (j < o.u.size - 2 && o.u[j + 1] < u[i]) j++
+        val span = o.u[j + 1] - o.u[j]
+        val t = if (span > 1e-6f) ((u[i] - o.u[j]) / span).coerceIn(0f, 1f) else 0f
+        p.copy(x = p.x + o.dx[j] + (o.dx[j + 1] - o.dx[j]) * t, y = p.y + o.dy[j] + (o.dy[j + 1] - o.dy[j]) * t)
+    }
+    val closed = s.isClosed && moved.size > 2
+    if (closed) return s.copy(points = moved)
+    val protect = HashSet<Int>()
+    for (i in moved.indices) { val q = moved[i]; if (i == 0 || i == moved.lastIndex || q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.hidden) protect.add(i) }
+    val keep = VectorSimplify.fitIndices(moved, WARP_FIT_EPS, s.baseWidth, protect)
+    return s.copy(points = keep.map { moved[it] })
+}
+
 /**
  * One applied Transform / Warp / Puppet step on the interpolation preview. The steps of an [InbetweenPlace] are applied in order after everything else, so what
- * is on screen when a step is applied is what the in-between is made with. [ids] = the preview lines it works on (null = every line).
+ * is on screen when a step is applied is what the in-between is made with. Two kinds: a matrix step ([deform] without a mesh; [ids] = its lines, null = all),
+ * and a warp step ([offsets]: per line id, how far its points were pushed along the line), which stays on its lines when the interpolation is dragged, instead
+ * of being a fixed field the lines slide through (that made them wobble).
  */
-class PreviewWarp(val ids: Set<String>?, val deform: VecDeform, val lockWeight: Boolean) {
+class PreviewWarp(val ids: Set<String>?, val deform: VecDeform?, val lockWeight: Boolean, val offsets: Map<String, LineOffsets>? = null) {
     fun applyTo(s: VectorStroke): VectorStroke {
+        val off = offsets
+        if (off != null) return off[s.id]?.let { applyOffsets(s, it) } ?: s
+        val d = deform ?: return s
         if (ids != null && s.id !in ids) return s
-        return vecDeform(listOf(s), vecAllKeys(listOf(s)), deform, lockWeight, true).first()
+        return vecDeform(listOf(s), vecAllKeys(listOf(s)), d, lockWeight, true).first()
     }
 }

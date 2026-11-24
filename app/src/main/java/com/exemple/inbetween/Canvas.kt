@@ -1440,7 +1440,19 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (d.isIdentity) { vecXfCancelNow(); return }
         if (vx.onPreview) {
             // the step joins the preview's placement; the in-between is made with it (and it is undone with Reset on the bar)
-            ed.vecPlaceSteps = ed.vecPlaceSteps + PreviewWarp(vx.ids?.takeIf { it.isNotEmpty() }, d, ed.vecLockWeight)
+            val ids = vx.ids?.takeIf { it.isNotEmpty() }
+            val prev = vecXfPrev
+            val gridMesh = vx.mesh
+            if (gridMesh != null && prev != null) {
+                // a warp stays on its lines: record how far each line's points were pushed (along the line), then the box handles' matrix as a separate step
+                val meshOnly = VecDeform(vx.rect, gridMesh.copy(), Aff.ID)
+                val offs = HashMap<String, LineOffsets>()
+                if (!meshOnly.isIdentity) for ((si, s0) in prev.withIndex()) if (s0.points.indices.any { vecKey(si, it) in vx.sel }) offs[s0.id] = lineOffsets(s0, meshOnly)
+                var steps = ed.vecPlaceSteps
+                if (offs.isNotEmpty()) steps = steps + PreviewWarp(offs.keys.toSet(), null, ed.vecLockWeight, offs)
+                if (!vx.mat.isIdentity) steps = steps + PreviewWarp(ids, VecDeform(vx.rect, null, Aff.of(vx.mat)), ed.vecLockWeight)
+                ed.vecPlaceSteps = steps
+            } else ed.vecPlaceSteps = ed.vecPlaceSteps + PreviewWarp(ids, d, ed.vecLockWeight)
             vecXfEnd(); return
         }
         val sc = vecXfSc; val orig = vecXfOrig

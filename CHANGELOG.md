@@ -1,3 +1,13 @@
+## 2026-11-25 (2) — Warped preview wobbled when the interpolation was dragged: warp steps now stay on their lines
+- AI model: Claude
+- Category: Changed (source code, no format change)
+- Report: dragging an interpolation preview that had been warped made it wobble.
+- Cause: a warp step was a fixed field in the document; dragging moves the lines through it, so each point is pushed differently from frame to frame. (Also thinned again every frame.)
+- Change (`VecXform.kt`, `Canvas.kt`): applying a Warp / Puppet session on the preview now records, per line id, the displacement of the line's points along its length (`LineOffsets`, `lineOffsets`), and `PreviewWarp.applyTo` puts it back on the line at the same fraction of its length, whatever the interpolation makes. The box handles' matrix, if any, is a separate matrix step (a matrix moves with everything, no wobble). The session's live display still uses the field (it does not move while the session runs). The fade-outside-the-box change of the entry below stays for matrix+mesh steps made on real lines / the live session.
+- Known: the offsets are in document coordinates (not rotated with the line), so if the interpolation turns a line a lot, the bend does not turn with it. Thinning is still done every frame (0.5 px); a faint shimmer of the line's point count is possible.
+- Files: `VecXform.kt`, `Canvas.kt`, `CHANGELOG.md`.
+- Validation: code reading only; not built. Next: warp / puppet the preview, drag the interpolation (Fixed on and off): no wobble; check button makes the same shape.
+
 ## 2026-11-25 — Interpolation drag after a Warp / Puppet step on the preview
 - AI model: Claude
 - Category: Fixed (source code, no format change)
