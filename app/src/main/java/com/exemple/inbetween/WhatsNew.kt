@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            81, "2026-11-24", "Freer joints, rotation magnet in Interpolation drag, tap a joint again to delete it",
+            listOf(
+                "Joints (Interpolation drag and Displace) now bend the line locally: how far a joint pulls the line along grows with how far you drag it, so a small move no longer drags a long stretch of the line with it and the line between joints is less stiff.",
+                "Interpolation drag: with Shift on there is now a rotation magnet button; turn it off to rotate the preview freely instead of in 30-degree steps.",
+                "The Lock weight button is gone from the Selection tool: transforming always scales the line weight with the line.",
+                "Tapping a selected joint a second time (without dragging) deletes it. The Delete button in the bar now deletes all joints of the picked lines (all joints when no line is picked in Interpolation drag; all joints of the selected lines in Displace). Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             80, "2026-11-23", "Interpolation drag: picked lines only; guide joints follow the line",
             listOf(
                 "Dragging the interpolation position (on the canvas or with the slider) now changes only the picked preview lines when some are picked (Select button); every other line keeps its own position. With nothing picked it moves the whole preview as before. Reset puts the picked lines back to the whole preview's position.",

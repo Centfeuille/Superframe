@@ -42,7 +42,6 @@ import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.Transform
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.ScatterPlot
 import androidx.compose.material.icons.filled.MergeType
@@ -201,9 +200,9 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         }
         if (pointBar && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (!has) "Displace · select lines (or points) first" else if (ed.vecDisplaceJoints.isEmpty()) "Displace · tap a selected line to add a joint, then drag it" else "Displace · ${ed.vecDisplaceJoints.size} joint${if (ed.vecDisplaceJoints.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-            IconBtn(Icons.Filled.Delete, on = ed.vecDisplaceSelected in ed.vecDisplaceJoints.indices, tip = "Delete the selected joint") {
-                val at = ed.vecDisplaceSelected
-                if (at in ed.vecDisplaceJoints.indices) { ed.vecDisplaceJoints = ed.vecDisplaceJoints.toMutableList().also { it.removeAt(at) }; ed.vecDisplaceSelected = -1 }
+            IconBtn(Icons.Filled.Delete, on = ed.vecDisplaceJoints.isNotEmpty(), tip = "Delete all joints of the selected lines (tap a selected joint a second time to delete just that one)") {
+                val pickedIds = if (sc != null) sel.map { vecKeyStroke(it) }.toSet().mapNotNull { sc.strokes.getOrNull(it)?.id }.toSet() else emptySet()
+                ed.vecDisplaceJoints = ed.vecDisplaceJoints.filter { it.strokeId !in pickedIds }; ed.vecDisplaceSelected = -1
             }
             IconBtn(Icons.Filled.Refresh, tip = "Remove all joints (the selection goes back to how it was)") { ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
             IconBtn(Icons.Filled.Check, tip = "Apply the displacement to the selection (one undo step)") {
@@ -245,7 +244,6 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
                 BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; if (ed.vecDisplace) ed.vecBrush = 0 }
-                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 if (pointsMode) {
                     VIconBtn(Icons.Filled.PanTool, on = brushMode == 1, tip = "Shift brush: push points along with the pen") { ed.vecBrush = if (brushMode == 1) 0 else 1 }
                     VIconBtn(Icons.Filled.Gesture, on = brushMode == 2, tip = "Smoothen brush: smooth the points under the pen") { ed.vecBrush = if (brushMode == 2) 0 else 2 }
@@ -318,6 +316,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
                 BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
                 BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
+                if (ed.vecShiftOn) MagnetBtn(ed, size = 32.dp) // rotation magnet: snap the preview's rotation to 30-degree steps, or turn it off for freeform rotation
                 BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
                 if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
                     // Reset: the picked lines go back to what the interpolation makes (position and smoothness); with nothing picked, the whole preview does
@@ -331,10 +330,10 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     Slider(value = ed.dragTShown(), onValueChange = { ed.setDragT(it) }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
                     val jointSource = if (three) frames[0] else layer.cels.getOrNull(idx - 1)
                     val jointCfg = jointSource?.vecCfg
-                    IconBtn(Icons.Filled.Delete, on = jointCfg != null && ed.vecGuideSelected in jointCfg.guideJoints.indices, tip = "Delete the selected guide joint") {
-                        if (jointSource != null && jointCfg != null && ed.vecGuideSelected in jointCfg.guideJoints.indices) {
-                            val removeAt = ed.vecGuideSelected
-                            cut.record { jointSource.vecCfg = jointCfg.copy(guideJoints = jointCfg.guideJoints.toMutableList().also { it.removeAt(removeAt) }); ed.vecGuideSelected = -1 }
+                    IconBtn(Icons.Filled.Delete, on = jointCfg != null && jointCfg.guideJoints.isNotEmpty(), tip = "Delete all guide joints of the picked preview lines (of every line when none is picked). Tap a selected joint a second time to delete just that one") {
+                        if (jointSource != null && jointCfg != null && jointCfg.guideJoints.isNotEmpty()) {
+                            val picked = ed.vecPreSel
+                            cut.record { jointSource.vecCfg = jointCfg.copy(guideJoints = if (picked.isEmpty()) emptyList() else jointCfg.guideJoints.filter { it.strokeId !in picked }); ed.vecGuideSelected = -1 }
                         }
                     }
                 }

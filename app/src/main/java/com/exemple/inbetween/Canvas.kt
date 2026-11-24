@@ -169,6 +169,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     var vecSc by remember { mutableStateOf<VecScope?>(null) }                // the scope a drag started on
     var vecBefore by remember { mutableStateOf<Snap?>(null) }
     var vecGuideChanged by remember { mutableStateOf(false) }
+    var vecJointTapDel by remember { mutableStateOf(-1) }                    // guide joint gesture started on the already selected joint: a tap without drag deletes it (second tap)
+    var vecDispTapDel by remember { mutableStateOf(-1) }                     // same for a Displace joint
     var vecPlHandle by remember { mutableIntStateOf(H_NONE) }                // interpolation drag, Shift: handle being dragged (move when none is hit)
     var vecPlBox by remember { mutableStateOf<List<Offset>>(emptyList()) }   // its box at drag start (document space)
     var vecPlD0 by remember { mutableStateOf(Offset.Zero) }
@@ -1279,13 +1281,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val reach = 24f / vecZoom()
         val joints = ed.vecDisplaceJoints
         val near = joints.indices.minByOrNull { hypot(joints[it].x - d.x, joints[it].y - d.y) }
-        if (near != null && hypot(joints[near].x - d.x, joints[near].y - d.y) <= reach) { ed.vecDisplaceSelected = near; st.kind = 28; return }
+        if (near != null && hypot(joints[near].x - d.x, joints[near].y - d.y) <= reach) { vecDispTapDel = if (near == ed.vecDisplaceSelected) near else -1; ed.vecDisplaceSelected = near; st.kind = 28; return }
         // Once joints warp the selection, the new joint goes on the PREVIEW (the orange line), not on the line it comes from; the preview's arc positions say where on the original line it belongs
         val shown = vecDisplaceRef[0]
         val picked = ed.vecSel.map { vecKeyStroke(it) }.toSet().sorted().mapNotNull { sc.strokes.getOrNull(it) }
         val hit = (if (joints.isNotEmpty() && !shown.isNullOrEmpty()) nearestGuideJointPoint(shown.map { it.stroke }, d, reach, shown.map { it.arcs }) else nearestGuideJointPoint(picked, d, reach)) ?: return
         ed.vecDisplaceJoints = joints + hit
         ed.vecDisplaceSelected = ed.vecDisplaceJoints.lastIndex
+        vecDispTapDel = -1
         st.kind = 28
     }
 
@@ -1448,6 +1451,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                             }
                             vecBefore = cut.snap()
                             vecGuideChanged = false
+                            vecJointTapDel = if (hitIndex != null && hitIndex == ed.vecGuideSelected) hitIndex else -1 // second tap on the selected joint deletes it (when the pen lifts without dragging)
                             if (hitIndex != null) ed.vecGuideSelected = hitIndex else {
                                 val next = cfg.copy(mode = mode, guideJoints = cfg.guideJoints + hit)
                                 source.vecCfg = next
@@ -1565,8 +1569,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             22 -> ed.setDragT((vecDragT0 + (ev.x - vecDragX0) / (260f * vecCtx.resources.displayMetrics.density)).coerceIn(0f, 1f)) // only the picked preview lines when there are any
             27 -> vecPlaceMove(d)
             29 -> preSel = listOf(st.start, Offset(d.x, st.start.y), d, Offset(st.start.x, d.y))
-            28 -> { val j = ed.vecDisplaceJoints; val at = ed.vecDisplaceSelected; if (at in j.indices) ed.vecDisplaceJoints = j.toMutableList().also { it[at] = it[at].copy(x = d.x, y = d.y) } }
-            26 -> cut.drawLayer?.let { layer -> guideSourceFor(layer)?.first?.let { source ->
+            28 -> if (vecDispTapDel < 0 || st.farScr) { val j = ed.vecDisplaceJoints; val at = ed.vecDisplaceSelected; if (at in j.indices) ed.vecDisplaceJoints = j.toMutableList().also { it[at] = it[at].copy(x = d.x, y = d.y) } }
+            26 -> if (vecJointTapDel < 0 || st.farScr) cut.drawLayer?.let { layer -> guideSourceFor(layer)?.first?.let { source ->
                 val cfg = source.vecCfg
                 val at = ed.vecGuideSelected
                 if (cfg != null && at in cfg.guideJoints.indices) {
@@ -1631,7 +1635,21 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             24 -> vecBrushUp()
             25 -> cut.drawLayer?.let { vecEraseUp(it) }
             17 -> cut.drawLayer?.let { vecCutUp(it) }
-            26 -> { if (vecGuideChanged) vecBefore?.let { cut.pushStruct(it) }; vecBefore = null; vecGuideChanged = false }
+            26 -> {
+                if (vecJointTapDel >= 0 && !st.farScr) cut.drawLayer?.let { layer -> guideSourceFor(layer)?.first?.let { source -> // second tap on the selected joint: delete it
+                    val cfg = source.vecCfg
+                    if (cfg != null && vecJointTapDel in cfg.guideJoints.indices) {
+                        source.vecCfg = cfg.copy(guideJoints = cfg.guideJoints.toMutableList().also { it.removeAt(vecJointTapDel) })
+                        ed.vecGuideSelected = -1; vecGuideChanged = true
+                    }
+                } }
+                vecJointTapDel = -1
+                if (vecGuideChanged) vecBefore?.let { cut.pushStruct(it) }; vecBefore = null; vecGuideChanged = false
+            }
+            28 -> {
+                if (vecDispTapDel in ed.vecDisplaceJoints.indices && !st.farScr) { ed.vecDisplaceJoints = ed.vecDisplaceJoints.toMutableList().also { it.removeAt(vecDispTapDel) }; ed.vecDisplaceSelected = -1 } // second tap on the selected joint
+                vecDispTapDel = -1
+            }
             18 -> vecXfUp()
             29 -> vecPreSelectUp(ev, d)
             19, 20, 21 -> cut.drawLayer?.let { vecSelectUp(it, ev, d) }

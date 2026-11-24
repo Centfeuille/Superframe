@@ -1551,14 +1551,18 @@ object VectorInterpolation {
 }
 
 /**
- * The guide-joint displacement field at arc position [p] (0..1). [js] = (arc position, dx, dy) of each joint, sorted by position. Exactly the joint's displacement at
- * the joint; between two joints closer than 0.5 of the line it changes with a quintic smoothstep (zero slope at every joint, no overshoot); farther apart, each joint's
- * displacement fades to nothing over 0.25 of the line. Closed lines wrap around.
+ * The guide-joint displacement field at arc position [p] (0..1) on a line of length [total]. [js] = (arc position, dx, dy) of each joint, sorted by position. Exactly the
+ * joint's displacement at the joint. Each joint pulls the line over a stretch that grows with how far it was pulled (about 2.5 times the pull, 3 %..25 % of the line, see
+ * [guideReach]), so a small nudge bends the line only locally and the rest keeps its own curve instead of being dragged along. Between two joints closer than that reach
+ * the displacement changes with a quintic smoothstep (zero slope at every joint, no overshoot); farther apart, each joint's displacement fades to nothing over its own
+ * reach, and in between the two are cross-faded so the field stays continuous while a joint is dragged. Closed lines wrap around.
  */
-private fun guideOffset(js: List<Triple<Float, Float, Float>>, closed: Boolean, p: Float): Pair<Float, Float> {
-    val reach = 0.25f
+private fun guideReach(dx: Float, dy: Float, total: Float): Float = (hypot(dx, dy) * 2.5f / max(total, 1e-3f)).coerceIn(0.03f, 0.25f)
+
+private fun guideOffset(js: List<Triple<Float, Float, Float>>, closed: Boolean, p: Float, total: Float): Pair<Float, Float> {
     fun smoother(t: Float): Float { val c = t.coerceIn(0f, 1f); return c * c * c * (c * (c * 6f - 15f) + 10f) }
-    fun fall(delta: Float): Float = 1f - smoother(delta / reach)
+    fun fall(delta: Float, reach: Float): Float = 1f - smoother(delta / reach)
+    fun reachOf(j: Triple<Float, Float, Float>): Float = guideReach(j.second, j.third, total)
     var prev: Triple<Float, Float, Float>? = null; var prevU = 0f
     var next: Triple<Float, Float, Float>? = null; var nextU = 0f
     for (j in js) { if (j.first <= p) { prev = j; prevU = j.first } else { next = j; nextU = j.first; break } }
@@ -1568,15 +1572,18 @@ private fun guideOffset(js: List<Triple<Float, Float, Float>>, closed: Boolean, 
     }
     if (prev != null && next != null) {
         val gap = max(nextU - prevU, 1e-6f)
-        if (gap <= 2f * reach) {
-            val sm = smoother((p - prevU) / gap)
-            return Pair(prev.second * (1f - sm) + next.second * sm, prev.third * (1f - sm) + next.third * sm)
-        }
-        val a = fall(p - prevU); val b = fall(nextU - p)
-        return Pair(prev.second * a + next.second * b, prev.third * a + next.third * b)
+        val rp = reachOf(prev); val rn = reachOf(next)
+        val r = max(rp, rn)
+        val sm = smoother((p - prevU) / gap)
+        val bx = prev.second * (1f - sm) + next.second * sm; val by = prev.third * (1f - sm) + next.third * sm
+        if (gap <= r) return Pair(bx, by)
+        val a = fall(p - prevU, rp); val b = fall(nextU - p, rn)
+        val lx = prev.second * a + next.second * b; val ly = prev.third * a + next.third * b
+        val w = smoother((gap - r) / r)
+        return Pair(bx * (1f - w) + lx * w, by * (1f - w) + ly * w)
     }
-    if (prev != null) { val a = fall(p - prevU); return Pair(prev.second * a, prev.third * a) }
-    if (next != null) { val b = fall(nextU - p); return Pair(next.second * b, next.third * b) }
+    if (prev != null) { val a = fall(p - prevU, reachOf(prev)); return Pair(prev.second * a, prev.third * a) }
+    if (next != null) { val b = fall(nextU - p, reachOf(next)); return Pair(next.second * b, next.third * b) }
     return Pair(0f, 0f)
 }
 
@@ -1608,7 +1615,7 @@ fun displaceStrokeWarped(stroke: VectorStroke, joints: List<VectorGuideJoint>, o
     }
     js.sortBy { it.first }
     val moved = stroke.copy(points = pts.mapIndexed { i, p ->
-        if (i !in only) p else { val o = guideOffset(js, closed, lengths[i] / total); p.copy(x = p.x + o.first, y = p.y + o.second) }
+        if (i !in only) p else { val o = guideOffset(js, closed, lengths[i] / total, total); p.copy(x = p.x + o.first, y = p.y + o.second) }
     })
     return Warped(moved, FloatArray(pts.size) { (lengths[it] / total).coerceIn(0f, 1f) })
 }
@@ -1769,7 +1776,7 @@ fun warpStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>): Warped {
             // overshoot) to the next joint's, or fades to nothing within `reach` of the line's length when the next joint is farther.
             // It replaces the summed Gaussians whose normalisation left the pinned joint point out of step with its neighbours.
             val pts = basePoints.mapIndexed { i, point ->
-                val o = guideOffset(js, closed, pathLengths[i] / pathTotal)
+                val o = guideOffset(js, closed, pathLengths[i] / pathTotal, pathTotal)
                 point.copy(x = point.x + o.first, y = point.y + o.second)
             }.toMutableList()
             // Inserted guide samples are hard constraints, even when two guides have overlapping falloff regions.
