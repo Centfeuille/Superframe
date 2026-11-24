@@ -174,6 +174,9 @@ class Xform(val items: List<XformItem>) {
     var warpN by mutableIntStateOf(4)
     var strength by mutableFloatStateOf(0.5f)
     val pins = ArrayList<Pin>()
+    /** Puppet Warp: the pin last placed or touched (-1 = none), and the radius new pins get (0 = no limit). */
+    var pinSel by mutableIntStateOf(-1)
+    var pinRadius by mutableFloatStateOf(0f)
     /** Puppet Warp: the mesh the pins deform (the mesh as it was when the tool was entered). */
     var puppetBase: WarpMesh? = null
 
@@ -184,7 +187,7 @@ class Xform(val items: List<XformItem>) {
 
     fun switchMode(m: Int) {
         if (m == mode) return
-        mode = m; pins.clear(); puppetBase = null
+        mode = m; pins.clear(); pinSel = -1; puppetBase = null
         when (m) {
             1 -> { val cur = mesh; if (cur == null) mesh = meshOrGrid(warpN) else warpN = cur.cols.coerceIn(2, 16) }
             2 -> { val base = meshOrGrid(PUPPET_CELLS).resampled(PUPPET_CELLS, PUPPET_CELLS); puppetBase = base; mesh = base.copy() }
@@ -202,11 +205,14 @@ class Xform(val items: List<XformItem>) {
     /** Puppet Warp: recomputes the mesh from the pins. */
     fun applyPins() { puppetBase?.let { mesh = puppetMesh(it, pins) }; rev++ }
 
-    fun clearPins() { pins.clear(); applyPins() }
+    fun clearPins() { pins.clear(); pinSel = -1; applyPins() }
+
+    /** Puppet Warp: sets how far the selected pin reaches (document px, 0 = no limit); it is also the radius the next pins get. */
+    fun setPinRadius(r: Float) { pinRadius = r; pins.getOrNull(pinSel)?.r = r; applyPins() }
 
     /** Back to the untouched selection: no transform, no deformation, no pins. */
     fun resetAll() {
-        mat.reset(); pins.clear(); puppetBase = null
+        mat.reset(); pins.clear(); pinSel = -1; puppetBase = null
         mesh = when (mode) {
             1 -> meshOrGridNew(warpN)
             2 -> meshOrGridNew(PUPPET_CELLS).also { puppetBase = it.copy() }

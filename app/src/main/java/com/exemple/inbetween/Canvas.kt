@@ -195,6 +195,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     var vecXfHandle by remember { mutableIntStateOf(H_NONE) }                // selection tool on a vector layer: handle being dragged
     var vecXfBox by remember { mutableStateOf<List<Offset>>(emptyList()) }   // its box at drag start (document space)
     var vecXfD0 by remember { mutableStateOf(Offset.Zero) }
+    var vecXfOrig by remember { mutableStateOf<List<VectorStroke>?>(null) }  // Transform / Warp / Puppet session on real lines: the strokes when it began
+    var vecXfSc by remember { mutableStateOf<VecScope?>(null) }              // ... and the scope it works on
+    var vecXfPrev by remember { mutableStateOf<List<VectorStroke>?>(null) }  // session on the interpolation preview: the preview lines when it began
+    val vecXfCtx = remember { arrayOfNulls<Any>(2) }                         // frame and layer the session began on (it ends when either changes)
     var liveOn by remember { mutableStateOf(false) }                  // wand / fill preview overlay (st.bmp)
     var thr by remember { mutableIntStateOf(-1) }
     var bez by remember { mutableStateOf<Bez?>(null) }                   // Bezier curve: end points set, handles follow the pen until taps
@@ -401,6 +405,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (cut.playing) return -1
         if (ed.cutDraft != null) return 3
         if (ed.xform != null) return 0
+        if (ed.vecXf != null && ed.tool == 2) return 7 // vector Transform / Warp / Puppet session (box handles)
         if (cut.layer?.kind == 2 && cut.layer?.cam != null) return 1
         if (folderSel != null) return 2
         if (cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false) return 5
@@ -414,6 +419,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     fun gBox(ctx: Int): List<Offset>? = when (ctx) {
         0 -> ed.xform?.let { x -> rectBox(RectF(x.lift.left.toFloat(), x.lift.top.toFloat(), (x.lift.left + x.lift.bmp.width).toFloat(), (x.lift.top + x.lift.bmp.height).toFloat()), x.mat) }
             ?: selRect?.let { rectBox(it) }
+        7 -> ed.vecXf?.let { rectBox(it.rect, it.mat) }
         1 -> cut.layer?.cam?.let { camBox(it, cut, cut.time) }
         2 -> if (folderSel != null) folderBox(cut, folderSel, cut.time, folderRectNow(folderSel)) else null
         3 -> ed.cutDraft?.let { rectBox(RectF(0f, 0f, it.w.toFloat(), it.h.toFloat())) }
@@ -492,7 +498,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val handleSlop = if (ctx == 3) max(slop, 38f) else slop
         val h = hitHandle(box.map { toScr(it) }, sp, handleSlop, handleSlop + 60f)
         if (h == H_NONE) return false
-        if (h == H_MOVE && !(ctx == 0 || ctx == 5 || (ctx == 4 && allowMove) || (ctx == 2 && allowMove) || (ctx == 6 && allowMove))) return false // selection and Out of Peg move directly; Camera has its own nudge path
+        if (h == H_MOVE && !(ctx == 0 || ctx == 7 || ctx == 5 || (ctx == 4 && allowMove) || (ctx == 2 && allowMove) || (ctx == 6 && allowMove))) return false // selection and Out of Peg move directly; Camera has its own nudge path
         if (ctx == 3 && h != 2 && h != 5 && h != 6) return false // Cut is anchored at its top-left; resize from bottom-right, right edge or bottom edge only
         if (ctx == 0 && ed.xform == null) { beginTransform(ed, cut); if (ed.xform == null) return false }
         val b0 = gBox(ctx) ?: return false
@@ -501,6 +507,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         when (ctx) {
             3 -> ed.cutDraft?.let { gz.w0 = it.w; gz.h0 = it.h }
             0 -> gz.m0 = Matrix(ed.xform!!.mat)
+            7 -> gz.m0 = Matrix(ed.vecXf!!.mat)
             1 -> cut.layer?.cam?.let { c -> gz.x0 = c.x(t, cut.w); gz.y0 = c.y(t, cut.h); gz.s0 = c.sc(t); gz.r0 = c.rot(t); gz.w0 = c.w; gz.h0 = c.h; gz.snap = cut.snap() }
             2 -> folderSel?.let { f -> val tr = f.transformAt(t); gz.x0 = tr.x; gz.y0 = tr.y; gz.s0 = tr.scale; gz.r0 = tr.rotation; gz.folder = f; gz.snap = cut.snap() }
             4 -> cut.layer?.let { l -> gz.referenceCel = l.adjacentCel(cut.time, ed.outOfPegSide); gz.reference0 = ed.referencePose(gz.referenceCel) }
@@ -594,6 +601,17 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     val snapped = (angle / 30f).roundToInt() * 30f
                     val center = (gz.box0[0] + gz.box0[2]) / 2f
                     m.postRotate(snapped - angle, center.x, center.y)
+                }
+                x.mat.set(m); x.rev++
+            }
+            7 -> ed.vecXf?.let { x ->
+                val op = gizmoOp(gz.h, gz.box0, gz.d0, d, ed.xfLock)
+                val m = Matrix(gz.m0); m.postConcat(op.m)
+                if (gz.h == H_ROT && ed.rotationSnap) {
+                    val values = FloatArray(9); m.getValues(values)
+                    val angle = Math.toDegrees(atan2(values[Matrix.MSKEW_Y], values[Matrix.MSCALE_X]).toDouble()).toFloat()
+                    val center = (gz.box0[0] + gz.box0[2]) / 2f
+                    m.postRotate((angle / 30f).roundToInt() * 30f - angle, center.x, center.y)
                 }
                 x.mat.set(m); x.rev++
             }
@@ -860,9 +878,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     val dd = dx * dx + dy * dy
                     if (dd < bdist) { bdist = dd; bi = k }
                 }
-                hit = Pin(base.verts[bi * 2], base.verts[bi * 2 + 1], m.verts[bi * 2], m.verts[bi * 2 + 1])
+                hit = Pin(base.verts[bi * 2], base.verts[bi * 2 + 1], m.verts[bi * 2], m.verts[bi * 2 + 1], x.pinRadius)
                 x.pins.add(hit); st.wpNew = true; x.applyPins()
             }
+            x.pinSel = x.pins.indexOf(hit) // the touched pin is the selected one: the Radius control works on it
             st.wpPin = hit; st.wpD0 = pre; st.wpQ0 = Offset(hit.qx, hit.qy)
         }
     }
@@ -880,7 +899,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
 
     fun wpUp() {
         val x = ed.xform ?: return
-        if (x.mode == 2 && !st.wpNew && !st.moved) st.wpPin?.let { x.pins.remove(it); x.applyPins() } // tapping an existing pin removes it
+        if (x.mode == 2 && !st.wpNew && !st.moved) st.wpPin?.let { x.pins.remove(it); x.pinSel = -1; x.applyPins() } // tapping an existing pin removes it
         st.wpPin = null; st.wpStart = null
     }
 
@@ -1372,6 +1391,161 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         return layer.cels[i - 1] to layer.cels[i]
     }
 
+    // ----- Transform / Warp / Puppet Warp of vector lines (Selection tool): the vector counterpart of the raster transform -----
+    fun vToPre(x: VecXform, d: Offset): Offset { val inv = Matrix(); return if (x.mat.invert(inv)) inv.mapOf(d) else d }
+    fun vPreToScr(x: VecXform, p: Offset): Offset = toScr(x.mat.mapOf(p))
+
+    fun vecXfBeginNow() {
+        if (ed.vecXf != null) return
+        if (ed.vecMode == 3) { // the interpolation preview (the picked lines, else all of it)
+            val prev = vecPreviewRef[0] ?: return
+            val picked = ed.vecPreSel.filter { id -> prev.any { it.id == id } }.toSet()
+            val keys = HashSet<Long>()
+            for ((si, s0) in prev.withIndex()) if (picked.isEmpty() || s0.id in picked) for (pi in s0.points.indices) keys.add(vecKey(si, pi))
+            val b = VectorEdit.selectionBounds(prev, keys) ?: return
+            vecXfPrev = prev; vecXfOrig = null; vecXfSc = null
+            ed.vecXf = VecXform(RectF(b[0] - 4f, b[1] - 4f, b[2] + 4f, b[3] + 4f), keys, picked)
+        } else { // the selected lines / points of the layer(s)
+            val sc = vecEnsureScope() ?: return
+            val sel = ed.vecSel
+            if (sel.isEmpty() || !sc.sameCels(ed.vecSelCels)) return
+            val b = VectorEdit.selectionBounds(sc.strokes, sel) ?: return
+            vecXfSc = sc; vecXfOrig = sc.strokes; vecXfPrev = null
+            ed.vecXf = VecXform(RectF(b[0] - 4f, b[1] - 4f, b[2] + 4f, b[3] + 4f), sel, null)
+        }
+        vecXfCtx[0] = cut.time; vecXfCtx[1] = cut.layerId
+    }
+
+    /** Real lines: shows the session's result in the layer while it runs (the first change swaps in live cels, as a handle drag does). The preview is drawn from the session instead. */
+    fun vecXfRefresh() {
+        val vx = ed.vecXf ?: return
+        if (vx.onPreview) return
+        val sc = vecXfSc ?: return; val orig = vecXfOrig ?: return
+        if (vecLives == null) { if (vx.isIdentity) return; if (!vecBeginLive(sc)) return }
+        vecApplyAll(sc, vecDeform(orig, vx.sel, vx.frozen(), ed.vecLockWeight, false))
+    }
+
+    fun vecXfEnd() { ed.vecXf = null; vecXfOrig = null; vecXfSc = null; vecXfPrev = null; vecLives = null; vecBefore = null }
+
+    fun vecXfCancelNow() {
+        val vx = ed.vecXf ?: return
+        val sc = vecXfSc; val orig = vecXfOrig
+        if (!vx.onPreview && vecLives != null && sc != null && orig != null) { vecApplyAll(sc, orig); vecFinishLive() }
+        vecXfEnd()
+    }
+
+    fun vecXfApplyNow() {
+        val vx = ed.vecXf ?: return
+        val d = vx.frozen()
+        if (d.isIdentity) { vecXfCancelNow(); return }
+        if (vx.onPreview) {
+            // the step joins the preview's placement; the in-between is made with it (and it is undone with Reset on the bar)
+            ed.vecPlaceSteps = ed.vecPlaceSteps + PreviewWarp(vx.ids?.takeIf { it.isNotEmpty() }, d, ed.vecLockWeight)
+            vecXfEnd(); return
+        }
+        val sc = vecXfSc; val orig = vecXfOrig
+        if (sc == null || orig == null || (vecLives == null && !vecBeginLive(sc))) { vecXfCancelNow(); return }
+        val edited = vecDeform(orig, vx.sel, d, ed.vecLockWeight, true) // thinned with the curve-aware fitter
+        vecApplyAll(sc, edited)
+        vecFinishLive()
+        vecBefore?.let { cut.pushStruct(it) }
+        val keep = HashSet<Long>() // a line that got another number of points stays selected as a whole
+        for (si in vx.sel.map { vecKeyStroke(it) }.toSet()) {
+            if (orig.getOrNull(si)?.points?.size == edited.getOrNull(si)?.points?.size) vx.sel.filterTo(keep) { vecKeyStroke(it) == si }
+            else edited.getOrNull(si)?.points?.indices?.forEach { keep.add(vecKey(si, it)) }
+        }
+        ed.vecSel = keep
+        vecXfEnd()
+    }
+
+    fun vwpDown(x: VecXform, ev: MotionEvent, d: Offset) {
+        st.kind = 30; st.wpNode = -1; st.wpPin = null; st.wpNew = false; st.wpStart = null
+        val sp = Offset(ev.x, ev.y); val pre = vToPre(x, d)
+        val m = x.mesh ?: return
+        if (x.mode == 1) {
+            var best = -1; var bd = 36f
+            for (j in 0..m.rows) for (i in 0..m.cols) {
+                val o = m.idx(i, j)
+                val dd = (vPreToScr(x, Offset(m.verts[o], m.verts[o + 1])) - sp).getDistance()
+                if (dd < bd) { bd = dd; best = j * (m.cols + 1) + i }
+            }
+            if (best >= 0) { st.wpNode = best; st.wpStart = m.copy(); st.wpD0 = pre }
+        } else {
+            var hit: Pin? = null; var bd = 36f
+            for (p in x.pins) { val dd = (vPreToScr(x, Offset(p.qx, p.qy)) - sp).getDistance(); if (dd < bd) { bd = dd; hit = p } }
+            if (hit == null) { // a new pin sits on the nearest mesh point: its rest position is that point of the untouched mesh
+                val base = x.puppetBase ?: return
+                var bi = 0; var bdist = Float.MAX_VALUE
+                for (k in 0 until (m.verts.size / 2)) {
+                    val dx = m.verts[k * 2] - pre.x; val dy = m.verts[k * 2 + 1] - pre.y
+                    val dd = dx * dx + dy * dy
+                    if (dd < bdist) { bdist = dd; bi = k }
+                }
+                hit = Pin(base.verts[bi * 2], base.verts[bi * 2 + 1], m.verts[bi * 2], m.verts[bi * 2 + 1], x.pinRadius)
+                x.pins.add(hit); st.wpNew = true; x.applyPins()
+            }
+            x.pinSel = x.pins.indexOf(hit)
+            st.wpPin = hit; st.wpD0 = pre; st.wpQ0 = Offset(hit.qx, hit.qy)
+        }
+    }
+
+    fun vwpMove(d: Offset) {
+        val x = ed.vecXf ?: return
+        val pre = vToPre(x, d)
+        if (x.mode == 1) {
+            val ni = st.wpNode; val s0 = st.wpStart ?: return
+            if (ni < 0) return
+            val c1 = s0.cols + 1; val delta = pre - st.wpD0
+            x.mesh = nudgedMesh(s0, ni % c1, ni / c1, delta.x, delta.y, x.strength); x.rev++
+        } else st.wpPin?.let { p -> val q = st.wpQ0 + (pre - st.wpD0); p.qx = q.x; p.qy = q.y; x.applyPins() }
+    }
+
+    fun vwpUp() {
+        val x = ed.vecXf ?: return
+        if (x.mode == 2 && !st.wpNew && !st.moved) st.wpPin?.let { x.pins.remove(it); x.pinSel = -1; x.applyPins() } // tapping an existing pin removes it
+        st.wpPin = null; st.wpStart = null
+    }
+
+    /** Guide joints on the interpolation preview (Selection tool > Displace): tap a preview line to add a joint, tap a joint to select it, drag it to bend the line. */
+    fun vecJointDown(l: Layer, d: Offset) {
+        val pair = guideSourceFor(l) ?: return
+        val (source, target) = pair
+        val cfg = source.vecCfg ?: InterpolationConfig()
+        val mode = if (cfg.mode == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else cfg.mode
+        val selectedFrames = vecSelectedFrames(l, ed)
+        val chosen = if (selectedFrames.size == 3) vecSelectedLinesIn(ed, target)
+            else vecSelectedLineIndices(cut, ed, target).takeIf { it.isNotEmpty() }
+        val place = ed.inbetweenPlace()
+        val preview = VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode), ed.vecDragT, chosen, false, place)
+        // Joints are stored in the preview's own space (before its manual transform), so they stay attached to their line when the preview is moved, scaled or rotated
+        val base = vecJointBaseStrokes(source, target, cfg, mode, chosen)
+        fun shownAt(g: VectorGuideJoint): Offset = vecJointSpot(base, g).let { (place?.total(g.strokeId) ?: Aff.ID).map(it.x, it.y) }
+        val existing = cfg.guideJoints.indices.minByOrNull { i -> (shownAt(cfg.guideJoints[i]) - d).getDistance() }
+        val hitIndex = existing?.takeIf { (shownAt(cfg.guideJoints[it]) - d).getDistance() <= 24f / vecZoom() }
+        val hitShown = if (hitIndex != null) cfg.guideJoints[hitIndex] else nearestGuideJointPoint(preview, d, 24f / vecZoom())
+        if (hitShown != null) {
+            val toJoint = (place?.total(hitShown.strokeId) ?: Aff.ID).inverse() ?: Aff.ID
+            vecJointInv = toJoint
+            vecJointBaseRef[0] = base
+            // a new joint is stored as an offset from the unmoved line at its arc position, so it follows the line when the interpolation or the preview moves
+            val hit = if (hitIndex != null) hitShown else toJoint.map(hitShown.x, hitShown.y).let { back ->
+                val b = vecJointBaseAt(base, hitShown)
+                if (b != null) hitShown.copy(x = back.x - b.x, y = back.y - b.y, rel = true) else hitShown.copy(x = back.x, y = back.y)
+            }
+            vecBefore = cut.snap()
+            vecGuideChanged = false
+            vecJointDragged = false
+            vecJointTapDel = if (hitIndex != null && hitIndex == ed.vecGuideSelected) hitIndex else -1 // second tap on the selected joint deletes it (when the pen lifts without dragging)
+            if (hitIndex != null) ed.vecGuideSelected = hitIndex else {
+                val next = cfg.copy(mode = mode, guideJoints = cfg.guideJoints + hit)
+                source.vecCfg = next
+                ed.vecGuideSelected = next.guideJoints.lastIndex
+                vecGuideChanged = true
+            }
+            st.kind = 26
+        }
+    }
+
     fun penDown(ev: MotionEvent, tl: Int) {
         val d = toDoc(ev.x, ev.y); hover = Offset(ev.x, ev.y)
         st.kind = 0; st.tl = tl; st.start = d; st.last = d; st.moved = false; st.sx0 = ev.x; st.psum = 0f; st.pn = 0
@@ -1388,6 +1562,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         selModHeld = (ev.metaState and (android.view.KeyEvent.META_SHIFT_ON or android.view.KeyEvent.META_ALT_ON or android.view.KeyEvent.META_CTRL_ON)) != 0
         val xw = ed.xform
         if (xw != null && xw.mode != 0) { wpDown(xw, ev, d); return } // Warp / Puppet Warp: grid points or pins instead of the box handles
+        val vxw = ed.vecXf
+        if (vxw != null && vxw.mode != 0) { vwpDown(vxw, ev, d); return } // the same on vector lines
         if (gDown(Offset(ev.x, ev.y), 26f, true)) {
             st.kind = 11
             // a pen-down in the handle zone but outside every image still counts as a tap on empty space
@@ -1395,7 +1571,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             return
         }
         cut.layer?.let { rl -> if (rl.kind == 5 && rl.visible && !rl.locked && !cut.playing) { st.kind = 14; return } } // pen on empty space of a reference layer: a tap ends the edit
-        if (ed.xform != null) { st.kind = 5; return }
+        if (ed.xform != null || ed.vecXf != null) { st.kind = 5; return }
         val bz = bez
         if (bz != null) { st.kind = 23; bez = bezSet(bz, d); return }
         val pe = pend
@@ -1414,55 +1590,20 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             if (tl != 0 && tl != 1 && tl != 2 && tl != 3 && tl != 4) { android.widget.Toast.makeText(vecCtx, "Vector layers: Brush (draw, edit points, cut), Eraser, Fill, Selection and Line / shapes", android.widget.Toast.LENGTH_SHORT).show(); return }
             if (l.locked || !l.visible) return
             if (tl == 2) { // Selection tool: Points on = pick / drag single points (and the point brushes), off = select whole lines
+                if (ed.vecMode == 3) { // the interpolation preview is up: the Selection tool works on the PREVIEW lines
+                    if (ed.vecDisplace) vecJointDown(l, d) else { st.kind = 29; preSel = listOf(d) } // Displace: joints on the preview; otherwise tap a line / drag a rectangle to pick
+                    return
+                }
                 if (ed.vecDisplace) { vecDisplaceDown(l, d); return } // Displace: tap a selected line to add a joint, drag a joint to warp the selection
                 if (ed.vecPoints) { if (ed.vecBrush != 0) vecBrushDown(d) else vecEditDown(l, d) } else vecSelectDown(l, ev, d)
                 return
             }
             if (tl == 1) { st.kind = 25; vecCutPath = listOf(d); return } // eraser: deletes a line up to its crossings when the pen lifts
             if (tl == 0) {
-                if ((ed.vecMode == 3 || ed.vecMode == 4) && ed.vecShiftOn) { vecPlaceDown(ev, d); return } // Shift: handles move / scale / rotate the preview (or the picked lines)
-                if ((ed.vecMode == 3 || ed.vecMode == 4) && ed.vecPreSelOn) { st.kind = 29; preSel = listOf(d); return } // Select: tap a preview line, or drag a rectangle over several
                 when (ed.vecMode) {
                     2 -> { st.kind = 17; vecCutPath = listOf(d) }
                     3 -> { st.kind = 22; vecDragX0 = ev.x; vecDragT0 = ed.dragTShown() }
-                    4 -> {
-                        val pair = guideSourceFor(l) ?: return
-                        val (source, target) = pair
-                        val cfg = source.vecCfg ?: InterpolationConfig()
-                        val mode = if (cfg.mode == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else cfg.mode
-                        val selectedFrames = vecSelectedFrames(l, ed)
-                        val chosen = if (selectedFrames.size == 3) vecSelectedLinesIn(ed, target)
-                            else vecSelectedLineIndices(cut, ed, target).takeIf { it.isNotEmpty() }
-                        val place = ed.inbetweenPlace()
-                        val preview = VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode), ed.vecDragT, chosen, false, place)
-                        // Joints are stored in the preview's own space (before its manual transform), so they stay attached to their line when the preview is moved, scaled or rotated
-                        val base = vecJointBaseStrokes(source, target, cfg, mode, chosen)
-                        fun shownAt(g: VectorGuideJoint): Offset = vecJointSpot(base, g).let { (place?.total(g.strokeId) ?: Aff.ID).map(it.x, it.y) }
-                        val existing = cfg.guideJoints.indices.minByOrNull { i -> (shownAt(cfg.guideJoints[i]) - d).getDistance() }
-                        val hitIndex = existing?.takeIf { (shownAt(cfg.guideJoints[it]) - d).getDistance() <= 24f / vecZoom() }
-                        val hitShown = if (hitIndex != null) cfg.guideJoints[hitIndex] else nearestGuideJointPoint(preview, d, 24f / vecZoom())
-                        if (hitShown != null) {
-                            val toJoint = (place?.total(hitShown.strokeId) ?: Aff.ID).inverse() ?: Aff.ID
-                            vecJointInv = toJoint
-                            vecJointBaseRef[0] = base
-                            // a new joint is stored as an offset from the unmoved line at its arc position, so it follows the line when the interpolation or the preview moves
-                            val hit = if (hitIndex != null) hitShown else toJoint.map(hitShown.x, hitShown.y).let { back ->
-                                val b = vecJointBaseAt(base, hitShown)
-                                if (b != null) hitShown.copy(x = back.x - b.x, y = back.y - b.y, rel = true) else hitShown.copy(x = back.x, y = back.y)
-                            }
-                            vecBefore = cut.snap()
-                            vecGuideChanged = false
-                            vecJointDragged = false
-                            vecJointTapDel = if (hitIndex != null && hitIndex == ed.vecGuideSelected) hitIndex else -1 // second tap on the selected joint deletes it (when the pen lifts without dragging)
-                            if (hitIndex != null) ed.vecGuideSelected = hitIndex else {
-                                val next = cfg.copy(mode = mode, guideJoints = cfg.guideJoints + hit)
-                                source.vecCfg = next
-                                ed.vecGuideSelected = next.guideJoints.lastIndex
-                                vecGuideChanged = true
-                            }
-                            st.kind = 26
-                        }
-                    }
+                    4 -> vecJointDown(l, d)
                     else -> { materialize(l); cut.ensureCelUniform(l); st.kind = 15; vecPts.clear(); vecMergeLen[0] = 0f; vecMergeStart = null; vecMergeEnd = null; vecMergeLines[0] = if (ed.vecMerge) (l.celAt(cut.time)?.vectorStrokes() ?: emptyList()) else emptyList(); vecPen = VecPen(ed.brushes[ed.brushIdx]); vecSample(d.x, d.y, ev.pressure, ev.eventTime) }
                 }
                 return
@@ -1606,7 +1747,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 val delta = screenDeltaToDoc(ev.x - st.last.x, ev.y - st.last.y)
                 l.mediaX += delta.x; l.mediaY += delta.y; st.last = Offset(ev.x, ev.y)
             }
-            5 -> ed.xform?.let { x -> val t = d - st.last; x.mat.postTranslate(t.x, t.y); x.rev++; st.last = d }
+            5 -> { ed.xform?.let { x -> val t = d - st.last; x.mat.postTranslate(t.x, t.y); x.rev++; st.last = d }; ed.vecXf?.let { x -> val t = d - st.last; x.mat.postTranslate(t.x, t.y); x.rev++; st.last = d } }
+            30 -> vwpMove(d)
             6 -> pend?.let { pend = minorFrom(it, d) }
             23 -> bez = bez?.let { bezSet(it, d) }
             9 -> { cut.layer?.cam?.let { camNudge(ed, cut, it, cut.time, d.x - st.last.x, d.y - st.last.y, 1f, 0f) }; st.last = d }
@@ -1721,6 +1863,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
             14 -> if (!st.farScr) exitReference()
             13 -> wpUp()
+            30 -> vwpUp()
             12 -> if (st.moved) st.snap?.let { cut.pushStruct(it) }
             10 -> cut.layer?.persp?.let { p ->
                 if (!st.moved) {
@@ -1744,7 +1887,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val vecShowStrokes = remember(vecLayerNow, cut.time, ed.refAll, cut.layers.size, tick, ed.vecSel, ed.vecSelCels) { if (vecLayerNow == null) emptyList<VectorStroke>() else vecScope(cut, ed.refAll)?.strokes ?: emptyList<VectorStroke>() }
 
     // interpolation drag: the in-between of the previous and the current keyframe at the dragged position
-    val vecPrevLayer = cut.layer?.takeIf { it.vector && it.visible && (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0 && !cut.playing }
+    // (the Selection tool keeps the preview up: it picks, transforms, warps and displaces the preview lines)
+    val vecPrevLayer = cut.layer?.takeIf { it.vector && it.visible && ed.vecMode == 3 && (ed.tool == 0 || ed.tool == 2) && !cut.playing }
+    val vecJointsOn = vecPrevLayer != null && ed.tool == 2 && ed.vecDisplace // Displace on the preview: guide joints are shown and edited
+    ed.vecXfBegin = { vecXfBeginNow() }; ed.vecXfApply = { vecXfApplyNow() }; ed.vecXfCancel = { vecXfCancelNow() }
+    val vxNow = ed.vecXf
+    LaunchedEffect(vxNow) { if (vxNow != null) snapshotFlow { vxNow.rev }.collect { vecXfRefresh() } }
+    LaunchedEffect(cut.time, ed.tool, cut.layerId, vxNow) { if (vxNow != null && (ed.tool != 2 || vecXfCtx[0] != cut.time || vecXfCtx[1] != cut.layerId)) vecXfCancelNow() }
     val vecPreviewCfg = vecPrevLayer?.let { layer -> guideSourceFor(layer)?.first?.vecCfg }
     /** The interpolation preview of [pl] at the dragged position. [joints] = false leaves the guide joints out and [place] = what to place it with (the unmoved line a relative joint is measured from). */
     fun previewStrokes(pl: Layer, joints: Boolean, place: InbetweenPlace?): List<VectorStroke> {
@@ -1764,7 +1913,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
         }
     }
-    val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
+    val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecPlaceSteps, vecJointsOn, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
     val vecPreview = remember(*vecPreviewKeys) {
         val pl = vecPrevLayer
         if (pl == null) emptyList<VectorStroke>() else previewStrokes(pl, true, ed.inbetweenPlace())
@@ -1772,7 +1921,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     // the unmoved interpolation (no joints, no manual transform): relative joints are measured from it, to be drawn where they are
     val vecPreviewBase = remember(*vecPreviewKeys) {
         val pl = vecPrevLayer
-        if (pl == null || ed.vecMode != 4 || vecPreviewCfg?.guideJoints?.any { it.rel } != true) emptyList<VectorStroke>() else {
+        if (pl == null || !vecJointsOn || vecPreviewCfg?.guideJoints?.any { it.rel } != true) emptyList<VectorStroke>() else {
             val p = ed.inbetweenPlace()
             previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines) })
         }
@@ -2266,7 +2415,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     drawCircle(Color(0xFF1E3A8A), 7f * px1, o, style = Stroke(1.5f * px1))
                 }
             }
-            if (vecPreview.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreview) { val picked = vs.id in ed.vecPreSel; VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = (if (picked) 0xFFFF9800.toInt() else purple.toArgb()) or (0xFF shl 24), opacity = (vs.opacity * (if (picked) 0.7f else 0.4f)).coerceIn(0.05f, 1f)), pt) } }
+            val vxp = ed.vecXf?.takeIf { it.onPreview }
+            val vecPreviewDraw = if (vxp != null && vxp.rev >= 0) vecDeform(vecXfPrev ?: vecPreview, vxp.sel, vxp.frozen(), ed.vecLockWeight, false) else vecPreview // a running session shows its result on the preview
+            if (vecPreviewDraw.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreviewDraw) { val picked = vs.id in ed.vecPreSel; VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = (if (picked) 0xFFFF9800.toInt() else purple.toArgb()) or (0xFF shl 24), opacity = (vs.opacity * (if (picked) 0.7f else 0.4f)).coerceIn(0.05f, 1f)), pt) } }
             if (vecDisplaceShow.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecDisplaceShow) VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = 0xFFFF9800.toInt() or (0xFF shl 24), opacity = (vs.opacity * 0.55f).coerceIn(0.2f, 1f)), pt) }
             if (ed.tool == 2 && ed.vecDisplace) ed.vecDisplaceJoints.forEachIndexed { i, g ->
                 val p = Offset(g.x, g.y)
@@ -2275,7 +2426,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 drawCircle(Color.Black.copy(alpha = 0.8f), 9f * px1, p, style = Stroke(1.2f * px1))
             }
             val placeNow = ed.inbetweenPlace()
-            if (ed.vecMode == 4 && ed.tool == 0) vecGuideSourceCel?.vecCfg?.guideJoints?.forEachIndexed { i, g ->
+            if (vecJointsOn) vecGuideSourceCel?.vecCfg?.guideJoints?.forEachIndexed { i, g ->
                 val p = vecJointSpot(vecPreviewBase, g).let { (placeNow?.total(g.strokeId) ?: Aff.ID).map(it.x, it.y) } // a joint lives in the preview's own space (an offset from the unmoved line); draw it where the preview is
                 drawCircle(Color.White, 9f * px1, p)
                 drawCircle(if (i == ed.vecGuideSelected) Color(0xFFFF9800) else Color(0xFF00BCD4), 6f * px1, p)
@@ -2405,13 +2556,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
         }
         // vector selection box: corners scale, sides stretch, outside the corners rotates, inside moves
-        if (vecLayerNow != null && ed.tool == 2) vecSelBox()?.let { drawGizmo(it.map { p -> toScr(p) }, Color(0xFFFF9800)) }
-        // interpolation drag, Shift: handles around the preview (or around the picked preview lines)
-        if (vecPrevLayer != null && ed.vecShiftOn) vecPreBox(vecPreTargets())?.let { drawGizmo(it.map { p -> toScr(p) }, Color(0xFF8E7CFF)) }
+        if (vecLayerNow != null && ed.tool == 2 && vecPrevLayer == null && ed.vecXf == null) vecSelBox()?.let { drawGizmo(it.map { p -> toScr(p) }, Color(0xFFFF9800)) }
+        // picked preview lines (Selection tool on the interpolation preview) are drawn orange with the preview; the session's handles come from the transform handles below
         // transform handles (corners scale, sides stretch, outside the corners rotates)
         gCtx().let { c ->
             val box = if (c >= 0) gBox(c) else null
-            if (box != null && !(c == 0 && (ed.xform?.mode ?: 0) != 0)) drawGizmo(box.map { toScr(it) }, when (c) { 1 -> Color(0xFFFFC107); 2 -> Color(0xFF8E7CFF); 3 -> Color(0xFF26C6DA); 4 -> Color(0xFFB56CFF); 6 -> Color(0xFF26C6DA); else -> Color(0xFF3B82F6) }, tint = c == 2)
+            if (box != null && !((c == 0 && (ed.xform?.mode ?: 0) != 0) || (c == 7 && (ed.vecXf?.mode ?: 0) != 0))) drawGizmo(box.map { toScr(it) }, when (c) { 7 -> Color(0xFFFF9800); 1 -> Color(0xFFFFC107); 2 -> Color(0xFF8E7CFF); 3 -> Color(0xFF26C6DA); 4 -> Color(0xFFB56CFF); 6 -> Color(0xFF26C6DA); else -> Color(0xFF3B82F6) }, tint = c == 2)
         }
         // Warp: the grid points; Puppet Warp: the pins (document space before the transform matrix -> screen)
         ed.xform?.takeIf { it.mode != 0 && !cut.playing }?.let { xw ->
@@ -2428,7 +2578,32 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 } else {
                     val bb = m.bounds(); val c4 = rectBox(bb, xw.mat).map { toScr(it) }
                     drawPoly(c4, true, Color(0x88FFFFFF), 1.5f)
-                    for (p in xw.pins) { val q = preToScr(xw, Offset(p.qx, p.qy)); drawCircle(Color.White, 14f, q); drawCircle(Color(0xFFE91E63), 10f, q); drawCircle(Color.White, 3.5f, q) }
+                    xw.pins.forEachIndexed { pi, p ->
+                        val q = preToScr(xw, Offset(p.qx, p.qy))
+                        if (p.r > 0f && pi == xw.pinSel) { val rr = (preToScr(xw, Offset(p.qx + p.r, p.qy)) - q).getDistance(); drawCircle(Color(0x33E91E63), rr, q); drawCircle(Color(0xFFE91E63), rr, q, style = Stroke(2f)) } // reach of the selected pin
+                        drawCircle(Color.White, 14f, q); drawCircle(Color(0xFFE91E63), 10f, q); drawCircle(if (pi == xw.pinSel) Color(0xFFFFC107) else Color.White, 3.5f, q)
+                    }
+                }
+            }
+        }
+        // vector Warp: the grid points; vector Puppet Warp: the pins (with the selected pin's reach)
+        ed.vecXf?.takeIf { it.mode != 0 && !cut.playing }?.let { xv ->
+            val m = xv.mesh
+            if (m != null && xv.rev >= 0) {
+                if (xv.mode == 1) {
+                    val pts = Array(m.rows + 1) { j -> Array(m.cols + 1) { i -> val o = m.idx(i, j); vPreToScr(xv, Offset(m.verts[o], m.verts[o + 1])) } }
+                    for (j in 0..m.rows) for (i in 0..m.cols) {
+                        if (i < m.cols) { drawLine(Color.White, pts[j][i], pts[j][i + 1], strokeWidth = 3f); drawLine(Color(0xFF8E7CFF), pts[j][i], pts[j][i + 1], strokeWidth = 1.5f) }
+                        if (j < m.rows) { drawLine(Color.White, pts[j][i], pts[j + 1][i], strokeWidth = 3f); drawLine(Color(0xFF8E7CFF), pts[j][i], pts[j + 1][i], strokeWidth = 1.5f) }
+                    }
+                    for (j in 0..m.rows) for (i in 0..m.cols) { drawCircle(Color.White, 8f, pts[j][i]); drawCircle(Color(0xFF8E7CFF), 5.5f, pts[j][i]) }
+                } else {
+                    drawPoly(rectBox(xv.rect, xv.mat).map { toScr(it) }, true, Color(0x88FFFFFF), 1.5f)
+                    xv.pins.forEachIndexed { pi, p ->
+                        val q = vPreToScr(xv, Offset(p.qx, p.qy))
+                        if (p.r > 0f && pi == xv.pinSel) { val rr = (vPreToScr(xv, Offset(p.qx + p.r, p.qy)) - q).getDistance(); drawCircle(Color(0x33E91E63), rr, q); drawCircle(Color(0xFFE91E63), rr, q, style = Stroke(2f)) }
+                        drawCircle(Color.White, 14f, q); drawCircle(Color(0xFFE91E63), 10f, q); drawCircle(if (pi == xv.pinSel) Color(0xFFFFC107) else Color.White, 3.5f, q)
+                    }
                 }
             }
         }

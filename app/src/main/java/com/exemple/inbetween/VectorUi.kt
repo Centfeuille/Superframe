@@ -60,6 +60,9 @@ import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Grid4x4
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -110,8 +113,9 @@ private fun BarChip(label: String, on: Boolean, enabled: Boolean = true, onClick
 fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARAMETER") targets: List<Cel>) {
     if (cut.layer?.vector != true) return
     // Drawing and point selection live on the regular Brush and Selection tools (their vector options are in the widget bar at the bottom of the canvas).
-    IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Its bar also has Fixed (keep the position), Shift (move the preview) and Joints (guide joints). Tap again to go back to drawing") {
-        val on = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 3; ed.vecGuideSelected = -1; ed.vecShiftOn = false; ed.vecPreSelOn = false
+    IconBtn(Icons.Filled.SwapHoriz, size = buttonSize, on = ed.vecMode == 3, tip = "Interpolation drag: drag to place an in-between of the previous and the current keyframe. Its bar has Fixed, Smooth and the create button. Switch to the Selection tool to pick, transform, warp or displace the preview lines. Tap again to go back to drawing") {
+        val here = ed.vecMode == 3 && ed.tool == 0 // from the Selection tool this returns to the drag tool instead of ending the mode
+        ed.vecXfCancel(); ed.tool = 0; ed.vecMode = if (here) 0 else 3; ed.vecGuideSelected = -1
     }
     IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes: lines, curve, bake") { ed.vecInterpOpen = true }
     IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
@@ -129,8 +133,10 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
 fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val layer = cut.layer?.takeIf { it.vector && it.visible } ?: return
     val pointBar = ed.tool == 2
-    val pointsMode = pointBar && ed.vecPoints // Selection tool, Points on: single points (the old Point edit); off: whole lines
-    val dragBar = (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0 // Interpolation drag, with or without its guide joints
+    val pointsMode = pointBar && ed.vecPoints && ed.vecMode != 3 // Selection tool, Points on: single points (the old Point edit); off: whole lines
+    val dragBar = ed.vecMode == 3 && ed.tool == 0 // Interpolation drag
+    val prevBar = pointBar && ed.vecMode == 3 // Selection tool while the interpolation preview is up: it picks and edits the PREVIEW lines
+    val sess = pointBar && ed.vecXf != null // a Transform / Warp / Puppet Warp session is running
     val drawBar = ed.vecMode == 0 && ed.tool == 0
     val lineBar = ed.tool == 4 // Line / shapes tool
     if (!pointBar && !dragBar && !drawBar && !lineBar) return
@@ -199,7 +205,22 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
             Text("${(shownValue * 100).roundToInt()}%  ·  no points added", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
         }
-        if (pointBar && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
+        if (sess) VecXformRows(ed)
+        if (prevBar && !sess && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
+            // Displace on the preview: guide joints on the in-between's lines (stored with the first keyframe's interpolation, so they are kept when it is made)
+            val pFrames = vecSelectedFrames(layer, ed)
+            val jointSource = if (pFrames.size == 3) pFrames[0] else layer.cels.getOrNull(idx - 1)
+            val jointCfg = jointSource?.vecCfg
+            val jointCount = jointCfg?.guideJoints?.size ?: 0
+            Text(if (jointCount == 0) "Displace · tap a preview line to add a joint, then drag it" else "Displace · $jointCount joint${if (jointCount == 1) "" else "s"} (tap a selected joint again to delete it)", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            IconBtn(Icons.Filled.Delete, on = jointCount > 0, tip = "Delete the guide joints of the picked preview lines (of every line when none is picked)") {
+                if (jointSource != null && jointCfg != null && jointCfg.guideJoints.isNotEmpty()) {
+                    val picked = ed.vecPreSel
+                    cut.record { jointSource.vecCfg = jointCfg.copy(guideJoints = if (picked.isEmpty()) emptyList() else jointCfg.guideJoints.filter { it.strokeId !in picked }); ed.vecGuideSelected = -1 }
+                }
+            }
+        }
+        if (pointBar && !sess && !prevBar && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(if (!has) "Displace · select lines (or points) first" else if (ed.vecDisplaceJoints.isEmpty()) "Displace · tap a selected line to add a joint, then drag it" else "Displace · ${ed.vecDisplaceJoints.size} joint${if (ed.vecDisplaceJoints.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
             IconBtn(Icons.Filled.Delete, on = ed.vecDisplaceJoints.isNotEmpty(), tip = "Delete all joints of the selected lines (tap a selected joint a second time to delete just that one)") {
                 val pickedIds = if (sc != null) sel.map { vecKeyStroke(it) }.toSet().mapNotNull { sc.strokes.getOrNull(it)?.id }.toSet() else emptySet()
@@ -217,20 +238,22 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 }
             }
         }
-        if (pointBar) Row(verticalAlignment = Alignment.CenterVertically) {
-            // the regular selection widgets (as in SelectionBar), working on the vector selection
+        if (pointBar && !sess) Row(verticalAlignment = Alignment.CenterVertically) {
+            // the regular selection widgets (as in SelectionBar), working on the vector selection (or, while the interpolation preview is up, on the preview lines)
             IconBtn(Icons.Filled.Add, ed.selOp == 1, tip = "Add to the selection (or hold Shift)") { ed.selOp = if (ed.selOp == 1) 0 else 1 }
             IconBtn(Icons.Filled.Remove, ed.selOp == 2, tip = "Erase from the selection (or hold Alt / Ctrl)") { ed.selOp = if (ed.selOp == 2) 0 else 2 }
-            IconBtn(Icons.Filled.InvertColors, tip = "Invert the selection") {
+            if (!prevBar) IconBtn(Icons.Filled.InvertColors, tip = "Invert the selection") {
                 if (sc != null) { ed.vecSelCels = sc.cels; ed.vecSel = VectorEdit.allPoints(sc.strokes) - (if (has) sel else emptySet()) }
             }
-            IconBtn(Icons.Filled.ContentCopy, tip = "Copy the selected lines (in Points mode the selected stretches), then paste them on this or any other vector layer or frame") { toastMessage(ctx, SelectionClipboard.copy(cut, ed)) }
-            IconBtn(Icons.Filled.ContentPaste, SelectionClipboard.item != null, tip = "Paste the copied selection onto this layer and keyframe") { toastMessage(ctx, SelectionClipboard.paste(cut, ed)) }
+            if (!prevBar) IconBtn(Icons.Filled.ContentCopy, tip = "Copy the selected lines (in Points mode the selected stretches), then paste them on this or any other vector layer or frame") { toastMessage(ctx, SelectionClipboard.copy(cut, ed)) }
+            if (!prevBar) IconBtn(Icons.Filled.ContentPaste, SelectionClipboard.item != null, tip = "Paste the copied selection onto this layer and keyframe") { toastMessage(ctx, SelectionClipboard.paste(cut, ed)) }
             IconBtn(if (ed.xfLock) Icons.Filled.Lock else Icons.Filled.LockOpen, ed.xfLock, tip = "Lock aspect ratio of the transform handles") { ed.xfLock = !ed.xfLock }
             MagnetBtn(ed)
-            IconBtn(Icons.Filled.Check, tip = "Done: clear the selection") { ed.vecSel = emptySet() }
+            if (!prevBar) IconBtn(Icons.Filled.OpenWith, tip = "Transform the selected lines (or points): box handles, Warp and Puppet Warp, then Apply") { ed.vecXfBegin() }
+            if (prevBar) IconBtn(Icons.Filled.OpenWith, tip = "Transform the preview (or the picked preview lines): box handles, Warp and Puppet Warp, then Apply") { ed.vecXfBegin() }
+            IconBtn(Icons.Filled.Check, tip = if (prevBar) "Done: pick nothing (the whole preview)" else "Done: clear the selection") { if (prevBar) ed.vecPreSel = emptySet() else ed.vecSel = emptySet() }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (!sess) Row(verticalAlignment = Alignment.CenterVertically) {
             if (drawBar || lineBar) {
                 VIconBtn(Icons.Filled.MergeType, on = ed.vecMerge, tip = if (ed.vecMerge) "Merge: on. Lines you draw join other lines within the Merge radius (tap to turn off)" else "Merge: off. Tap to join lines you draw to other lines within the Merge radius") { ed.vecMerge = !ed.vecMerge }
                 VIconBtn(Icons.Filled.Anchor, on = ed.vecAutoAnchor, tip = if (ed.vecAutoAnchor) "Auto anchors: on. A new line gets numbered anchors at its ends and curve tips, and keeps them up to date when lines merge (tap to turn off)" else "Auto anchors: off. Tap to give new lines anchors at their ends and curve tips") { ed.vecAutoAnchor = !ed.vecAutoAnchor }
@@ -241,6 +264,12 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     VIconBtn(Icons.Filled.NavigateNext, tip = "Next ghost line. The ghost stays on a line after you draw it, so a line can be drawn in several strokes; skip when it is done. Traced lines stay on the ghost in yellow-orange (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), 1) } }
                 }
                 VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
+            } else if (prevBar) {
+                // Selection tool on the interpolation preview: the preview lines are picked with the pen (tap a line, or drag a rectangle over several)
+                Text(if (ed.vecPreSel.isEmpty()) "Preview · all lines (tap or drag over lines to pick some)" else "Preview · ${ed.vecPreSel.size} line${if (ed.vecPreSel.size == 1) "" else "s"} picked", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; ed.vecGuideSelected = -1 }
+                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
+                IconBtn(Icons.Filled.Refresh, tip = "Undo every transform / warp made on the preview and pick nothing") { ed.vecPlaceAll = Aff.ID; ed.vecPlaceLines = emptyMap(); ed.vecPlaceSteps = emptyList(); ed.vecPreSel = emptySet() }
             } else if (pointBar) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
@@ -312,31 +341,20 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 Text(
                     if (three) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → middle frame" + linesNote + (if (layer.celAt(cut.time) !== frames[1]) " (go to it to preview)" else "")
                     else if (badFrames) "Select exactly three frames (two ends and the one between), or none"
-                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty() && (ed.vecShiftOn || ed.vecPreSelOn)) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
+                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
                 IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
-                BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
-                BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
-                if (ed.vecShiftOn) MagnetBtn(ed, size = 32.dp) // rotation magnet: snap the preview's rotation to 30-degree steps, or turn it off for freeform rotation
-                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Moving, scaling and rotating the preview keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
+                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming the preview (Selection tool) keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
-                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
-                    // Reset: the picked lines go back to what the interpolation makes (position and smoothness); with nothing picked, the whole preview does
+                if (!ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecPlaceSteps.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
+                    // Reset: the picked lines go back to what the interpolation makes (position, smoothness, transforms and warps); with nothing picked, the whole preview does
                     BarChip("Reset", false) {
                         val picked = ed.vecPreSel
-                        if (picked.isEmpty()) ed.resetPlace() else { ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked; ed.vecDragTLines = ed.vecDragTLines - picked }
-                    }
-                }
-                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1 }
-                if (ed.vecMode == 4) {
-                    Slider(value = ed.dragTShown(), onValueChange = { ed.setDragT(it) }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
-                    val jointSource = if (three) frames[0] else layer.cels.getOrNull(idx - 1)
-                    val jointCfg = jointSource?.vecCfg
-                    IconBtn(Icons.Filled.Delete, on = jointCfg != null && jointCfg.guideJoints.isNotEmpty(), tip = "Delete all guide joints of the picked preview lines (of every line when none is picked). Tap a selected joint a second time to delete just that one") {
-                        if (jointSource != null && jointCfg != null && jointCfg.guideJoints.isNotEmpty()) {
-                            val picked = ed.vecPreSel
-                            cut.record { jointSource.vecCfg = jointCfg.copy(guideJoints = if (picked.isEmpty()) emptyList() else jointCfg.guideJoints.filter { it.strokeId !in picked }); ed.vecGuideSelected = -1 }
+                        if (picked.isEmpty()) ed.resetPlace()
+                        else {
+                            ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked; ed.vecDragTLines = ed.vecDragTLines - picked
+                            ed.vecPlaceSteps = ed.vecPlaceSteps.filter { st -> st.ids?.none { it in picked } ?: true }
                         }
                     }
                 }
@@ -844,6 +862,45 @@ fun VecGapShimmer(gaps: FloatArray, base: DrawTransform.() -> Unit, px: Float, m
                 drawCircle(Color.White.copy(alpha = 0.35f + 0.5f * pulse), 3.2f * px, c)
                 drawCircle(Color(0xFFFFB300).copy(alpha = 0.9f), 3.2f * px, c, style = Stroke(1.2f * px))
             }
+        }
+    }
+}
+
+
+/**
+ * The Transform / Warp / Puppet Warp session bar of the Selection tool on a vector layer (real lines, or the interpolation preview): the same buttons as the
+ * raster [SelectionBar]. Apply / Cancel are implemented by the canvas (Editor.vecXfApply / vecXfCancel).
+ */
+@Composable
+fun VecXformRows(ed: Editor) {
+    val x = ed.vecXf ?: return
+    var radiusOpen by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconBtn(Icons.Filled.Close, tip = "Cancel the transform") { ed.vecXfCancel() }
+        IconBtn(if (ed.xfLock) Icons.Filled.Lock else Icons.Filled.LockOpen, ed.xfLock, tip = "Lock aspect ratio of the transform handles") { ed.xfLock = !ed.xfLock }
+        MagnetBtn(ed)
+        IconBtn(Icons.Filled.Grid4x4, x.mode == 1, tip = "Warp: divide the lines' box into a grid and nudge it piece by piece") { x.switchMode(if (x.mode == 1) 0 else 1) }
+        GlyphBtn(x.mode == 2, "Puppet Warp: pin the lines and bend them around the pins", { x.switchMode(if (x.mode == 2) 0 else 2) }) { pinGlyph(it) }
+        VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. The transform keeps the line weight" else "Lock weight: off. Scaling also scales the line weight") { ed.vecLockWeight = !ed.vecLockWeight }
+        IconBtn(Icons.Filled.Refresh, tip = "Reset the transform") { x.resetAll() }
+        IconBtn(Icons.Filled.Check, tip = if (x.onPreview) "Apply to the preview (the in-between is made with it)" else "Apply (one undo step)") { ed.vecXfApply() }
+    }
+    if (x.mode == 1) {
+        SliderRow("Increments", x.warpN.toFloat(), 2f..16f, x.warpN.toString()) { v -> if (v.roundToInt() != x.warpN) x.setIncrements(v.roundToInt()) }
+        SliderRow("Strength", x.strength, 0f..1f, "${(x.strength * 100f).roundToInt()}%") { v -> x.strength = v }
+        Text("Drag a grid point. Strength sets how far the neighbouring points follow.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(300.dp).padding(4.dp))
+    }
+    if (x.mode == 2) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Tap to place a pin, drag a pin to bend, tap a pin to remove it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(180.dp).padding(4.dp))
+            PinRadiusBtn(radiusOpen, (x.pins.getOrNull(x.pinSel)?.r ?: 0f) > 0f || x.pinRadius > 0f) { radiusOpen = !radiusOpen }
+            TextButton({ x.clearPins() }) { Text("Clear", fontSize = 12.sp) }
+        }
+        if (radiusOpen) {
+            val pin = x.pins.getOrNull(x.pinSel)
+            val shown = pin?.r ?: x.pinRadius
+            SliderRow(if (pin != null) "Radius (pin ${x.pinSel + 1})" else "Radius (new pins)", shown, 0f..PIN_RADIUS_MAX, if (shown < 1f) "Off" else "${shown.roundToInt()} px") { v -> x.setPinRadius((v / 5f).roundToInt() * 5f) }
+            Text("How far the selected pin reaches: the bend fades out that far from it (Off = every line follows). Tap a pin to select it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(300.dp).padding(4.dp))
         }
     }
 }

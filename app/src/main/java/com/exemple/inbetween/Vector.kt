@@ -1197,7 +1197,9 @@ data class Aff(val sx: Float = 1f, val kx: Float = 0f, val tx: Float = 0f, val k
  * Both are applied AFTER the guide joints, so the joints stay attached to their line when the preview is moved, scaled or rotated. [lockWeight] keeps the line weight when scaling.
  */
 data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: Map<String, Aff> = emptyMap(), val lockWeight: Boolean = false,
-                          val smoothAll: Float = 0f, val smoothLines: Map<String, Float> = emptyMap(), val tLines: Map<String, Float> = emptyMap()) {
+                          val smoothAll: Float = 0f, val smoothLines: Map<String, Float> = emptyMap(), val tLines: Map<String, Float> = emptyMap(),
+                          /** Transform / Warp / Puppet Warp steps made with the Selection tool on the preview, applied in order after [all] and [lines]. */
+                          val steps: List<PreviewWarp> = emptyList()) {
     /** The interpolation position of line [id]: its own (dragged with the line picked), else the whole preview's [t]. */
     fun tOf(id: String, t: Float): Float = tLines[id] ?: t
     /** Smoothness 0..1 of line [id] (see [relaxStroke]): its own value, else the whole preview's. */
@@ -1207,6 +1209,12 @@ data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: 
     fun total(id: String): Aff = lines[id]?.let { all.then(it) } ?: all
 
     fun applyTo(s: VectorStroke): VectorStroke {
+        var r = affOnly(s)
+        for (step in steps) r = step.applyTo(r)
+        return r
+    }
+
+    private fun affOnly(s: VectorStroke): VectorStroke {
         val l = lines[s.id]
         if (all.isIdentity && l == null) return s
         val area = if (lockWeight) 1f else (all.area * (l?.area ?: 1f)).coerceIn(0.02f, 50f)

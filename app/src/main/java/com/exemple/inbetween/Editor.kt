@@ -989,11 +989,14 @@ class Editor : ViewModel() {
     var vecMergeRadius by mutableFloatStateOf(14f)      // Merge reach, screen px: how close the start / end of a line must come to another line (or to its own other end) to join it
     var vecDragT by mutableFloatStateOf(0.5f)           // interpolation preview position between the previous and current keyframe
     var vecDragFixed by mutableStateOf(false)           // interpolation drag: the in-between keeps the first keyframe's overall position (its points still interpolate relative to each other)
-    var vecShiftOn by mutableStateOf(false)             // interpolation drag "Shift": transform handles on the preview (inside moves, corners / sides scale, outside the corners rotates)
     var vecPlaceAll by mutableStateOf(Aff.ID)           // the preview's manual transform (document plane); session only
     var vecPlaceLines by mutableStateOf<Map<String, Aff>>(emptyMap()) // extra transform of single preview lines (key = line id), applied after vecPlaceAll
-    var vecPreSelOn by mutableStateOf(false)            // interpolation drag "Select": tap a preview line, or drag a rectangle over several
-    var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the picked preview lines (ids); empty = the whole preview
+    var vecPlaceSteps by mutableStateOf<List<PreviewWarp>>(emptyList()) // Transform / Warp / Puppet Warp steps made on the preview with the Selection tool, in order; session only
+    var vecXfBegin: () -> Unit = {}                      // start / apply / cancel the vector transform session: set by DrawingCanvas (they need its live-edit state)
+    var vecXfApply: () -> Unit = {}
+    var vecXfCancel: () -> Unit = {}
+    var vecXf by mutableStateOf<VecXform?>(null)        // Selection tool on a vector layer: the live Transform / Warp / Puppet Warp session (real lines or the interpolation preview)
+    var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the preview lines picked with the Selection tool (ids); empty = the whole preview
     var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (points are not added, see relaxStroke); session only
     var vecSmoothLines by mutableStateOf<Map<String, Float>>(emptyMap()) // smoothness of single preview lines (key = line id), overriding vecSmoothAll
     var vecDragTLines by mutableStateOf<Map<String, Float>>(emptyMap()) // interpolation position of single picked preview lines (key = line id); the others follow vecDragT
@@ -1004,9 +1007,9 @@ class Editor : ViewModel() {
         val picked = vecPreSel
         if (picked.isEmpty()) { vecDragT = v; vecDragTLines = emptyMap() } else vecDragTLines = vecDragTLines + picked.associateWith { v }
     }
-    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
-    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
-        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines) else null
+    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
+    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecPlaceSteps.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
+        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps) else null
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)

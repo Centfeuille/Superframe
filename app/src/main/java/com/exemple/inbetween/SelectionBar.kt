@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
@@ -29,6 +30,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +63,7 @@ import kotlin.math.roundToInt
 fun SelectionBar(ed: Editor, cut: Cut, anchor: () -> List<Offset>?) {
     val x = ed.xform
     val ctx = LocalContext.current
+    var radiusOpen by remember { mutableStateOf(false) } // Puppet Warp: the pin radius slider is shown
     Box(
         Modifier.zIndex(5f).layout { m, c ->
             val p = m.measure(c.copy(minWidth = 0, minHeight = 0))
@@ -104,8 +110,15 @@ fun SelectionBar(ed: Editor, cut: Cut, anchor: () -> List<Offset>?) {
             }
             if (x != null && x.mode == 2) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Tap to place a pin, drag a pin to bend, tap a pin to remove it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(220.dp).padding(4.dp))
+                    Text("Tap to place a pin, drag a pin to bend, tap a pin to remove it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(180.dp).padding(4.dp))
+                    PinRadiusBtn(radiusOpen, x.pinSel >= 0 && (x.pins.getOrNull(x.pinSel)?.r ?: 0f) > 0f || x.pinRadius > 0f) { radiusOpen = !radiusOpen }
                     TextButton({ x.clearPins() }) { Text("Clear", fontSize = 12.sp) }
+                }
+                if (radiusOpen) {
+                    val pin = x.pins.getOrNull(x.pinSel)
+                    val shown = pin?.r ?: x.pinRadius
+                    SliderRow(if (pin != null) "Radius (pin ${x.pinSel + 1})" else "Radius (new pins)", shown, 0f..PIN_RADIUS_MAX, if (shown < 1f) "Off" else "${shown.roundToInt()} px") { v -> x.setPinRadius((v / 5f).roundToInt() * 5f) }
+                    Text("How far the selected pin reaches: the bend fades out that far from it (Off = the whole drawing follows). Tap a pin to select it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(300.dp).padding(4.dp))
                 }
             }
         }
@@ -113,7 +126,7 @@ fun SelectionBar(ed: Editor, cut: Cut, anchor: () -> List<Offset>?) {
 }
 
 @Composable
-private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRange<Float>, shown: String, onChange: (Float) -> Unit) {
+internal fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRange<Float>, shown: String, onChange: (Float) -> Unit) {
     Row(Modifier.width(300.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 12.sp, modifier = Modifier.width(78.dp).padding(4.dp))
         Slider(value, onChange, Modifier.weight(1f), valueRange = range)
@@ -121,9 +134,18 @@ private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRan
     }
 }
 
+/** Largest Puppet Warp pin radius the slider offers (document px). */
+const val PIN_RADIUS_MAX = 600f
+
+/** The Puppet Warp button that shows / hides the pin radius slider. */
+@Composable
+fun PinRadiusBtn(open: Boolean, limited: Boolean, onClick: () -> Unit) {
+    IconBtn(Icons.Filled.Adjust, open || limited, tip = "Pin radius: how far the selected pin reaches (the bend fades out that far from it)") { onClick() }
+}
+
 /** An [IconBtn] with a drawn glyph instead of a vector icon. */
 @Composable
-private fun GlyphBtn(on: Boolean, tip: String, onClick: () -> Unit, draw: DrawScope.(Color) -> Unit) {
+internal fun GlyphBtn(on: Boolean, tip: String, onClick: () -> Unit, draw: DrawScope.(Color) -> Unit) {
     Tip(tip) {
         Box(
             Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(if (on) MaterialTheme.colorScheme.primary else Color.Transparent).clickable(onClick = onClick),
@@ -132,7 +154,7 @@ private fun GlyphBtn(on: Boolean, tip: String, onClick: () -> Unit, draw: DrawSc
     }
 }
 
-private fun DrawScope.pinGlyph(c: Color) {
+internal fun DrawScope.pinGlyph(c: Color) {
     val s = size.minDimension
     drawLine(c, Offset(s * 0.5f, s * 0.45f), Offset(s * 0.5f, s * 0.95f), strokeWidth = s * 0.1f, cap = StrokeCap.Round)
     drawCircle(c, s * 0.26f, Offset(s * 0.5f, s * 0.3f))

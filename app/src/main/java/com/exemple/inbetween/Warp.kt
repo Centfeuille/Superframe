@@ -14,8 +14,20 @@ import kotlin.math.min
  * stored as an ink of kind 4 (the selection runs + [cols, rows, vertices...]) and replayed by TileSet.drawMeshTiles.
  */
 
-/** A Puppet Warp pin: [px], [py] where it was placed, [qx], [qy] where it is now (document space, before the transform matrix). */
-class Pin(var px: Float, var py: Float, var qx: Float, var qy: Float)
+/**
+ * A Puppet Warp pin: [px], [py] where it was placed, [qx], [qy] where it is now (document space, before the transform matrix).
+ * [r] is the radius of the pin's reach in document px: the deformation fades out smoothly that far from where the pin was placed; 0 = no limit (the whole picture follows).
+ */
+class Pin(var px: Float, var py: Float, var qx: Float, var qy: Float, var r: Float = 0f)
+
+/** How much of its deformation a point at [d] px from a pin of radius [r] gets: 1 at the pin, a smooth fade to 0 at [r]; no radius = 1 everywhere. */
+fun pinReach(d: Float, r: Float): Float {
+    if (r <= 0f) return 1f
+    val t = d / r
+    if (t >= 1f) return 0f
+    val u = 1f - t
+    return u * u * (3f - 2f * u)
+}
 
 class WarpMesh(val cols: Int, val rows: Int, val verts: FloatArray) {
     fun copy() = WarpMesh(cols, rows, verts.copyOf())
@@ -124,8 +136,14 @@ fun puppetMesh(base: WarpMesh, pins: List<Pin>): WarpMesh {
         }
         val mag = hypot(sr, si)
         val rx = vx - psx; val ry = vy - psy
-        if (mag < 1e-6f) { out.verts[k] = qsx + rx; out.verts[k + 1] = qsy + ry } // one pin (or symmetric pins): plain translation
-        else { sr /= mag; si /= mag; out.verts[k] = qsx + sr * rx - si * ry; out.verts[k + 1] = qsy + sr * ry + si * rx }
+        var ox: Float; var oy: Float
+        if (mag < 1e-6f) { ox = qsx + rx; oy = qsy + ry } // one pin (or symmetric pins): plain translation
+        else { sr /= mag; si /= mag; ox = qsx + sr * rx - si * ry; oy = qsy + sr * ry + si * rx }
+        // pin radius: the deformation fades out with the distance to the nearest pin's rest position (a pin without a radius reaches everywhere)
+        var reach = 0f
+        for (i in 0 until n) { reach = max(reach, pinReach(hypot(vx - pins[i].px, vy - pins[i].py), pins[i].r)); if (reach >= 1f) break }
+        if (reach < 1f) { ox = vx + (ox - vx) * reach; oy = vy + (oy - vy) * reach }
+        out.verts[k] = ox; out.verts[k + 1] = oy
         k += 2
     }
     return out

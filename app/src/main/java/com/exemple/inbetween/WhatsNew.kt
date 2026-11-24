@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            84, "2026-11-24", "Vector transform like the raster one, Puppet Warp radius, interpolation preview edited with the Selection tool",
+            listOf(
+                "Selection tool on a vector layer: the new Transform button starts a session with box handles, Warp (grid), Puppet Warp (pins), Lock aspect, Magnet, Lock weight, Reset, Cancel and Apply, as on a raster selection. Apply is one undo step.",
+                "Puppet Warp has a Radius button (raster and vector): the selected pin only bends the picture that far from it, and the bend fades out smoothly. Off = the whole picture follows, as before.",
+                "Interpolation drag: Select, Shift and Joints are gone from its bar. Switch to the Selection tool while the preview is up: tap or drag to pick preview lines, Transform / Warp / Puppet Warp them, or turn Displace on to add guide joints.",
+                "Tap the Interpolation drag button on the timeline strip to go back to the drag tool from the Selection tool; the check button there makes the in-between with everything you did to the preview."
+            )
+        ),
+        ReleaseNote(
             83, "2026-11-24", "Interpolation drag on three frames works again with a leftover selection",
             listOf(
                 "With three frames selected, a line selection left over from the Selection tool (lines that are not in the last of the three frames) no longer blocks the preview and the check button: when none of the selected lines is found in the last frame, all lines are interpolated, as with two frames. Not compiled or tested on a device yet."
