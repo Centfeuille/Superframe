@@ -996,9 +996,17 @@ class Editor : ViewModel() {
     var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the picked preview lines (ids); empty = the whole preview
     var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (points are not added, see relaxStroke); session only
     var vecSmoothLines by mutableStateOf<Map<String, Float>>(emptyMap()) // smoothness of single preview lines (key = line id), overriding vecSmoothAll
-    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecSmoothAll = 0f; vecSmoothLines = emptyMap() }
-    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty())
-        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines) else null
+    var vecDragTLines by mutableStateOf<Map<String, Float>>(emptyMap()) // interpolation position of single picked preview lines (key = line id); the others follow vecDragT
+    /** The position the drag shows: the first picked line's own, else the whole preview's. */
+    fun dragTShown(): Float = vecPreSel.firstOrNull()?.let { vecDragTLines[it] } ?: vecDragT
+    /** Dragging the position works on the picked preview lines only; with none picked it moves the whole preview (and drops the lines' own positions). */
+    fun setDragT(v: Float) {
+        val picked = vecPreSel
+        if (picked.isEmpty()) { vecDragT = v; vecDragTLines = emptyMap() } else vecDragTLines = vecDragTLines + picked.associateWith { v }
+    }
+    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
+    fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
+        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines) else null
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)

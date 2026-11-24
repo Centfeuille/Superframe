@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            80, "2026-11-23", "Interpolation drag: picked lines only; guide joints follow the line",
+            listOf(
+                "Dragging the interpolation position (on the canvas or with the slider) now changes only the picked preview lines when some are picked (Select button); every other line keeps its own position. With nothing picked it moves the whole preview as before. Reset puts the picked lines back to the whole preview's position.",
+                "New guide joints are stored as an offset from the unmoved line instead of a fixed spot on the canvas. They now follow the line when you drag the interpolation position, use Fixed, or move / scale / rotate the preview, so the line is no longer pulled out of shape. Joints from older files keep their old absolute behaviour.",
+                "The Joints button no longer switches Shift and Select off, so the preview can be transformed and its lines picked while Joints is on (turn Shift off to add or drag joints).",
+                "Files with joints are now saved as format V28 (older versions of the app cannot open them). Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             79, "2026-11-23", "Ghost lines show in the bleed area",
             listOf(
                 "The ghost lines (and the anchors of the shimmering one) are now drawn over the bleed area too, outside the page, instead of being cut off at the page edge.",

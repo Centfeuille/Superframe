@@ -176,6 +176,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     var vecPlBaseLines by remember { mutableStateOf<Map<String, Aff>>(emptyMap()) }
     var vecPlIds by remember { mutableStateOf<Set<String>>(emptySet()) }     // lines the drag acts on (empty = the whole preview)
     var vecJointInv by remember { mutableStateOf(Aff.ID) }                   // guide joint drag: canvas -> joint space (undoes the preview's manual transform)
+    val vecJointBaseRef = remember { arrayOfNulls<List<VectorStroke>>(1) }    // guide joint drag: the unmoved interpolation the joint's offset is measured from
     val vecPreviewRef = remember { arrayOfNulls<List<VectorStroke>>(1) }      // the interpolation preview as drawn (set while composing, read by gestures)
     val vecDisplaceRef = remember { arrayOfNulls<List<Warped>>(1) }           // Displace: the warped selected lines as drawn, with their arc positions
     var vecDragX0 by remember { mutableFloatStateOf(0f) }                    // interpolation drag: pen x and in-between position at the start
@@ -1288,6 +1289,23 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         st.kind = 28
     }
 
+    /** The interpolation as it is before any guide joint moves it (Fixed offset, smoothness and per-line positions applied, no manual transform): what a relative joint is measured from. */
+    fun vecJointBaseStrokes(source: Cel, target: Cel, cfg: InterpolationConfig, mode: InterpolationMode, chosen: Set<Int>?): List<VectorStroke> {
+        val p = ed.inbetweenPlace()
+        val basePlace = p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines) }
+        return VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode, guideJoints = emptyList()), ed.vecDragT, chosen, false, basePlace)
+    }
+
+    /** Where the unmoved line [base] is at the arc position of joint [g]. */
+    fun vecJointBaseAt(base: List<VectorStroke>?, g: VectorGuideJoint): Offset? {
+        val s = base?.firstOrNull { it.id == g.strokeId } ?: return null
+        return polylinePointAt(s.points, s.isClosed, g.u)
+    }
+
+    /** The spot of joint [g] in the preview's own space (before its manual transform). */
+    fun vecJointSpot(base: List<VectorStroke>?, g: VectorGuideJoint): Offset =
+        if (g.rel) vecJointBaseAt(base, g)?.let { Offset(it.x + g.x, it.y + g.y) } ?: Offset(g.x, g.y) else Offset(g.x, g.y)
+
     /** Interpolation drag: the lines Shift / Select work on: the picked preview lines, else the whole preview. */
     fun vecPreTargets(): List<VectorStroke> {
         val prev = vecPreviewRef[0] ?: return emptyList()
@@ -1402,7 +1420,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if ((ed.vecMode == 3 || ed.vecMode == 4) && ed.vecPreSelOn) { st.kind = 29; preSel = listOf(d); return } // Select: tap a preview line, or drag a rectangle over several
                 when (ed.vecMode) {
                     2 -> { st.kind = 17; vecCutPath = listOf(d) }
-                    3 -> { st.kind = 22; vecDragX0 = ev.x; vecDragT0 = ed.vecDragT }
+                    3 -> { st.kind = 22; vecDragX0 = ev.x; vecDragT0 = ed.dragTShown() }
                     4 -> {
                         val pair = guideSourceFor(l) ?: return
                         val (source, target) = pair
@@ -1414,14 +1432,20 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         val place = ed.inbetweenPlace()
                         val preview = VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode), ed.vecDragT, chosen, false, place)
                         // Joints are stored in the preview's own space (before its manual transform), so they stay attached to their line when the preview is moved, scaled or rotated
-                        fun shownAt(g: VectorGuideJoint): Offset = (place?.total(g.strokeId) ?: Aff.ID).map(g.x, g.y)
+                        val base = vecJointBaseStrokes(source, target, cfg, mode, chosen)
+                        fun shownAt(g: VectorGuideJoint): Offset = vecJointSpot(base, g).let { (place?.total(g.strokeId) ?: Aff.ID).map(it.x, it.y) }
                         val existing = cfg.guideJoints.indices.minByOrNull { i -> (shownAt(cfg.guideJoints[i]) - d).getDistance() }
                         val hitIndex = existing?.takeIf { (shownAt(cfg.guideJoints[it]) - d).getDistance() <= 24f / vecZoom() }
                         val hitShown = if (hitIndex != null) cfg.guideJoints[hitIndex] else nearestGuideJointPoint(preview, d, 24f / vecZoom())
                         if (hitShown != null) {
                             val toJoint = (place?.total(hitShown.strokeId) ?: Aff.ID).inverse() ?: Aff.ID
                             vecJointInv = toJoint
-                            val hit = if (hitIndex != null) hitShown else toJoint.map(hitShown.x, hitShown.y).let { hitShown.copy(x = it.x, y = it.y) }
+                            vecJointBaseRef[0] = base
+                            // a new joint is stored as an offset from the unmoved line at its arc position, so it follows the line when the interpolation or the preview moves
+                            val hit = if (hitIndex != null) hitShown else toJoint.map(hitShown.x, hitShown.y).let { back ->
+                                val b = vecJointBaseAt(base, hitShown)
+                                if (b != null) hitShown.copy(x = back.x - b.x, y = back.y - b.y, rel = true) else hitShown.copy(x = back.x, y = back.y)
+                            }
                             vecBefore = cut.snap()
                             vecGuideChanged = false
                             if (hitIndex != null) ed.vecGuideSelected = hitIndex else {
@@ -1538,7 +1562,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             25 -> vecCutPath = vecCutPath + d
             17 -> vecCutPath = vecCutPath + d
             18 -> vecXfMove(d)
-            22 -> ed.vecDragT = (vecDragT0 + (ev.x - vecDragX0) / (260f * vecCtx.resources.displayMetrics.density)).coerceIn(0f, 1f)
+            22 -> ed.setDragT((vecDragT0 + (ev.x - vecDragX0) / (260f * vecCtx.resources.displayMetrics.density)).coerceIn(0f, 1f)) // only the picked preview lines when there are any
             27 -> vecPlaceMove(d)
             29 -> preSel = listOf(st.start, Offset(d.x, st.start.y), d, Offset(st.start.x, d.y))
             28 -> { val j = ed.vecDisplaceJoints; val at = ed.vecDisplaceSelected; if (at in j.indices) ed.vecDisplaceJoints = j.toMutableList().also { it[at] = it[at].copy(x = d.x, y = d.y) } }
@@ -1548,8 +1572,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if (cfg != null && at in cfg.guideJoints.indices) {
                     val old = cfg.guideJoints[at]
                     val q = vecJointInv.map(d.x, d.y) // the pen is on the canvas; the joint lives in the preview's own space
-                    if (old.x != q.x || old.y != q.y) {
-                        source.vecCfg = cfg.copy(guideJoints = cfg.guideJoints.toMutableList().also { it[at] = old.copy(x = q.x, y = q.y) })
+                    val moved = if (old.rel) vecJointBaseAt(vecJointBaseRef[0], old)?.let { b -> old.copy(x = q.x - b.x, y = q.y - b.y) } ?: old else old.copy(x = q.x, y = q.y)
+                    if (moved != old) {
+                        source.vecCfg = cfg.copy(guideJoints = cfg.guideJoints.toMutableList().also { it[at] = moved })
                         vecGuideChanged = true
                     }
                 }
@@ -1695,23 +1720,35 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     // interpolation drag: the in-between of the previous and the current keyframe at the dragged position
     val vecPrevLayer = cut.layer?.takeIf { it.vector && it.visible && (ed.vecMode == 3 || ed.vecMode == 4) && ed.tool == 0 && !cut.playing }
     val vecPreviewCfg = vecPrevLayer?.let { layer -> guideSourceFor(layer)?.first?.vecCfg }
-    val vecPreview = remember(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList()) {
-        val pl = vecPrevLayer
-        if (pl == null) emptyList<VectorStroke>() else {
-            val fs = vecSelectedFrames(pl, ed)
-            if (fs.size == 3) { // three frames selected: the two outer frames are the references, the result lands on the middle one (shown while the playhead is on it)
-                if (pl.celAt(cut.time) !== fs[1]) emptyList<VectorStroke>() else {
-                    val pm = (fs[0].vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-                    VectorInterpolation.interpolateConfigured(fs[0].vectorStrokes(), fs[2].vectorStrokes(), (fs[0].vecCfg ?: InterpolationConfig()).copy(mode = pm), ed.vecDragT, vecSelectedLinesIn(ed, fs[2]), false, ed.inbetweenPlace())
-                }
-            } else if (fs.size == 2 || fs.size > 3) emptyList<VectorStroke>() else {
-                val pi = pl.indexAt(cut.time)
-                if (pi < 1) emptyList<VectorStroke>() else {
-                    val pc = pl.cels[pi - 1]; val cc = pl.cels[pi]
-                    val pm = (pc.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-                    VectorInterpolation.interpolateConfigured(pc.vectorStrokes(), cc.vectorStrokes(), (pc.vecCfg ?: InterpolationConfig()).copy(mode = pm), ed.vecDragT, vecSelectedLineIndices(cut, ed, cc).takeIf { it.isNotEmpty() }, false, ed.inbetweenPlace()) // only the selected lines when there is a selection
-                }
+    /** The interpolation preview of [pl] at the dragged position. [joints] = false leaves the guide joints out and [place] = what to place it with (the unmoved line a relative joint is measured from). */
+    fun previewStrokes(pl: Layer, joints: Boolean, place: InbetweenPlace?): List<VectorStroke> {
+        val fs = vecSelectedFrames(pl, ed)
+        fun cfgOf(c: InterpolationConfig?, pm: InterpolationMode): InterpolationConfig = (c ?: InterpolationConfig()).copy(mode = pm).let { if (joints) it else it.copy(guideJoints = emptyList()) }
+        return if (fs.size == 3) { // three frames selected: the two outer frames are the references, the result lands on the middle one (shown while the playhead is on it)
+            if (pl.celAt(cut.time) !== fs[1]) emptyList<VectorStroke>() else {
+                val pm = (fs[0].vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
+                VectorInterpolation.interpolateConfigured(fs[0].vectorStrokes(), fs[2].vectorStrokes(), cfgOf(fs[0].vecCfg, pm), ed.vecDragT, vecSelectedLinesIn(ed, fs[2]), false, place)
             }
+        } else if (fs.size == 2 || fs.size > 3) emptyList<VectorStroke>() else {
+            val pi = pl.indexAt(cut.time)
+            if (pi < 1) emptyList<VectorStroke>() else {
+                val pc = pl.cels[pi - 1]; val cc = pl.cels[pi]
+                val pm = (pc.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
+                VectorInterpolation.interpolateConfigured(pc.vectorStrokes(), cc.vectorStrokes(), cfgOf(pc.vecCfg, pm), ed.vecDragT, vecSelectedLineIndices(cut, ed, cc).takeIf { it.isNotEmpty() }, false, place) // only the selected lines when there is a selection
+            }
+        }
+    }
+    val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
+    val vecPreview = remember(*vecPreviewKeys) {
+        val pl = vecPrevLayer
+        if (pl == null) emptyList<VectorStroke>() else previewStrokes(pl, true, ed.inbetweenPlace())
+    }
+    // the unmoved interpolation (no joints, no manual transform): relative joints are measured from it, to be drawn where they are
+    val vecPreviewBase = remember(*vecPreviewKeys) {
+        val pl = vecPrevLayer
+        if (pl == null || ed.vecMode != 4 || vecPreviewCfg?.guideJoints?.any { it.rel } != true) emptyList<VectorStroke>() else {
+            val p = ed.inbetweenPlace()
+            previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines) })
         }
     }
 
@@ -2213,7 +2250,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
             val placeNow = ed.inbetweenPlace()
             if (ed.vecMode == 4 && ed.tool == 0) vecGuideSourceCel?.vecCfg?.guideJoints?.forEachIndexed { i, g ->
-                val p = (placeNow?.total(g.strokeId) ?: Aff.ID).map(g.x, g.y) // joints live in the preview's own space; draw them where the preview is
+                val p = vecJointSpot(vecPreviewBase, g).let { (placeNow?.total(g.strokeId) ?: Aff.ID).map(it.x, it.y) } // a joint lives in the preview's own space (an offset from the unmoved line); draw it where the preview is
                 drawCircle(Color.White, 9f * px1, p)
                 drawCircle(if (i == ed.vecGuideSelected) Color(0xFFFF9800) else Color(0xFF00BCD4), 6f * px1, p)
                 drawCircle(Color.Black.copy(alpha = 0.8f), 9f * px1, p, style = Stroke(1.2f * px1))

@@ -1,3 +1,16 @@
+## 2026-11-23 — Interpolation drag on picked lines only; guide joints relative to the line (V28)
+- AI model: Claude
+- Category: Changed / Fixed (source code, file format V28)
+- Request: dragging the interpolation should only affect the selected lines; joints should be more permissive for transformation and relative (to the line / each other), not a fixed canvas position, which distorts the line while dragging the interpolation.
+- Picked lines only: `InbetweenPlace.tLines` (+ `tOf(id, t)`), `Editor.vecDragTLines`, `dragTShown()`, `setDragT(v)`. `VectorInterpolation.interpolate / interpolateChosen / interpolateIntoMiddle` blend (and fade) each line at `tOf(its id, t)`. The canvas drag (gesture kind 22) and the position slider call `setDragT`: with preview lines picked (Select) only they move, otherwise the whole preview moves and the lines' own positions are dropped. Reset (picked lines) and `resetPlace()` clear them; the preview and `createDraggedInbetween` / `interpolateIntoFrame` use them through `inbetweenPlace()`.
+- Cause of the distortion (code reading): a joint stored the ABSOLUTE spot it pulls the line to, so while the position T (or Fixed / the manual transform) moved the interpolated line the joint stayed on the canvas and the offset field dragged the line out of shape. 
+- Relative joints: `VectorGuideJoint.rel`. A relative joint holds the OFFSET from where the unmoved line is at its arc position (`polylinePointAt`); `warpStroke` uses the offset as the joint's displacement and pins `base point + offset`. New joints from the Joints mode are relative (`Canvas.kt`: `vecJointBaseStrokes` = the interpolation without joints and without the manual transform, `vecJointBaseAt`, `vecJointSpot`; while dragging, the offset is measured from the base captured at pen-down, `vecJointBaseRef`). Joint handles are drawn at base + offset through the preview's manual transform (`vecPreviewBase`; `previewStrokes` now builds both previews). Absolute joints (old files, Displace) behave as before.
+- Format: V28 (`Store.kt`): every guide joint record gets a `rel` byte; files with joints are written as V28, V27 files (absolute joints) are still read. Files without joints are unchanged (V25 / V26). Older app versions cannot open V28 files.
+- Joints "more permissive": the Joints button no longer switches Shift and Select off. Shift keeps precedence over joint editing while it is on.
+- Files: `Vector.kt`, `Store.kt`, `Editor.kt`, `Canvas.kt`, `VectorUi.kt`, `WhatsNew.kt` (note 80).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: pick two lines, drag the position (only they move); add joints, then drag the position / use Fixed / Shift (the line must keep its shape relative to the joints); drag a joint after changing the position; save and reopen (V28) and open an older V27 file; Displace unchanged.
+- Known limits: a relative joint's arc position `u` is taken on the displayed (warped) line when it is created, so with several joints close together it can sit a little off the tapped spot; the offset field itself is unchanged (it fades over a quarter of the line).
+
 ## 2026-11-23 — Ghost lines in the bleed area
 - AI model: Claude
 - Category: Fixed (source code)

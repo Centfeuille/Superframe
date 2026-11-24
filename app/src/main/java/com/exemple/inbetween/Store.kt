@@ -11,7 +11,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Cuts are compact binary (.inb). V27 adds non-destructive interpolation guide joints; V26 adds Uniform timing flags (folder + attached layers); V25 adds vector point reference anchors; V24 adds vector layers (a layer flag, ink kind 5 strokes and per-keyframe interpolation settings); V23 adds the vanishing-point-vs-guide-line magnetism mode; V22 stores physical focal length directly; V21 adds adjustable curvilinear ray density; V20 adds per-guide 30-degree rotation snapping and camera FOV; V19 adds per-guide curvilinear strength; V18 adds independent perspective-guide controls; V17 adds selection-clipped strokes and warp meshes; V16 adds brush flow / cap, tip shape, texture controls and wet pressure, and embeds imported brush assets.
+ * Cuts are compact binary (.inb). V28 adds a "relative" flag to guide joints (offset from the unmoved line); V27 adds non-destructive interpolation guide joints; V26 adds Uniform timing flags (folder + attached layers); V25 adds vector point reference anchors; V24 adds vector layers (a layer flag, ink kind 5 strokes and per-keyframe interpolation settings); V23 adds the vanishing-point-vs-guide-line magnetism mode; V22 stores physical focal length directly; V21 adds adjustable curvilinear ray density; V20 adds per-guide 30-degree rotation snapping and camera FOV; V19 adds per-guide curvilinear strength; V18 adds independent perspective-guide controls; V17 adds selection-clipped strokes and warp meshes; V16 adds brush flow / cap, tip shape, texture controls and wet pressure, and embeds imported brush assets.
  * v2 (per-layer timing) and v1 (shared frames) are still read and converted.
  */
 object Store {
@@ -38,6 +38,7 @@ object Store {
     private const val V25 = 0x494E4249 // V25: vector point reference anchors
     private const val V26 = 0x494E424A // V26: Uniform timing flags
     private const val V27 = 0x494E424B // V27: non-destructive interpolation guide joints
+    private const val V28 = 0x494E424C // V28: guide joints carry a "relative" flag (offset from the unmoved line instead of an absolute spot)
     private const val V17 = 0x494E4241 // V17: strokes drawn inside a selection store its runs; region warps (ink kind 4: runs + mesh vertices)
     private const val V16 = 0x494E4240 // V16: stroke flow / cap, tip shape, texture controls, wet pressure, and the imported stamps / textures the strokes use
     private const val V15 = 0x494E423F // V15: per-cel persistent-canvas flag and inbetween label
@@ -221,7 +222,7 @@ object Store {
         val o = DataOutputStream(BufferedOutputStream(out))
         val usesUniform = c.layers.any { it.uniformTiming || it.uniformAttached }
         val usesGuides = c.layers.any { l -> l.vector && l.cels.any { !it.vecCfg?.guideJoints.isNullOrEmpty() } }
-        o.writeInt(if (usesGuides) V27 else if (usesUniform) V26 else V25); o.writeLong(c.id); o.writeUTF(c.name) // use V27 only when guide joints are present; otherwise retain the older compatible version
+        o.writeInt(if (usesGuides) V28 else if (usesUniform) V26 else V25); o.writeLong(c.id); o.writeUTF(c.name) // use V27 only when guide joints are present; otherwise retain the older compatible version
         o.writeInt(c.fps); o.writeInt(c.w); o.writeInt(c.h); o.writeInt(c.dpi)
         o.writeInt(c.layers.size)
         for (l in c.layers) {
@@ -267,7 +268,7 @@ object Store {
                         if (bz != null && bz.size >= 4) for (q in 0..3) o.writeFloat(bz[q])
                         if (usesGuides) {
                             o.writeInt(cfg.guideJoints.size)
-                            for (g in cfg.guideJoints) { o.writeUTF(g.strokeId); o.writeFloat(g.u); o.writeFloat(g.x); o.writeFloat(g.y) }
+                            for (g in cfg.guideJoints) { o.writeUTF(g.strokeId); o.writeFloat(g.u); o.writeFloat(g.x); o.writeFloat(g.y); o.writeBoolean(g.rel) }
                         }
                     }
                 }
@@ -295,7 +296,7 @@ object Store {
 
     fun read(input: InputStream, newId: Long? = null, mediaRoot: File? = null, context: Context? = null): Cut {
         val i = DataInputStream(BufferedInputStream(input))
-        val v = when (i.readInt()) { V1 -> 1; V2 -> 2; V3 -> 3; V4 -> 4; V5 -> 5; V6 -> 6; V7 -> 7; V8 -> 8; V9 -> 9; V10 -> 10; V11 -> 11; V12 -> 12; V13 -> 13; V14 -> 14; V15 -> 15; V16 -> 16; V17 -> 17; V18 -> 18; V19 -> 19; V20 -> 20; V21 -> 21; V22 -> 22; V23 -> 23; V24 -> 24; V25 -> 25; V26 -> 26; V27 -> 27; else -> throw IllegalArgumentException("Not an Inbetween cut") }
+        val v = when (i.readInt()) { V1 -> 1; V2 -> 2; V3 -> 3; V4 -> 4; V5 -> 5; V6 -> 6; V7 -> 7; V8 -> 8; V9 -> 9; V10 -> 10; V11 -> 11; V12 -> 12; V13 -> 13; V14 -> 14; V15 -> 15; V16 -> 16; V17 -> 17; V18 -> 18; V19 -> 19; V20 -> 20; V21 -> 21; V22 -> 22; V23 -> 23; V24 -> 24; V25 -> 25; V26 -> 26; V27 -> 27; V28 -> 28; else -> throw IllegalArgumentException("Not an Inbetween cut") }
         val id = i.readLong()
         val c = Cut(i.readUTF(), i.readInt(), i.readInt(), i.readInt(), i.readInt(), newId ?: id)
         c.layers.clear()
@@ -389,7 +390,7 @@ object Store {
                         val mode = InterpolationMode.values().getOrElse(i.readUnsignedByte()) { InterpolationMode.SAME_STROKE }
                         val curve = i.readUnsignedByte().coerceIn(0, 4); val ease = i.readFloat().coerceIn(0f, 1f); val step = i.readInt().coerceIn(1, 240)
                         val bz = if (i.readBoolean()) FloatArray(4) { i.readFloat() } else null
-                        val guides = if (v >= 27) List(i.readInt().coerceIn(0, 10000)) { VectorGuideJoint(i.readUTF(), i.readFloat().coerceIn(0f, 1f), i.readFloat(), i.readFloat()) } else emptyList()
+                        val guides = if (v >= 27) List(i.readInt().coerceIn(0, 10000)) { VectorGuideJoint(i.readUTF(), i.readFloat().coerceIn(0f, 1f), i.readFloat(), i.readFloat(), v >= 28 && i.readBoolean()) } else emptyList()
                         vcfg = InterpolationConfig(mode, curve, ease, bz, step, guides)
                     }
                     val link = if (v >= 12) i.readInt() else -1

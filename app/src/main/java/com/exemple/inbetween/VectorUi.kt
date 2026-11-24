@@ -310,25 +310,25 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 val selLines = if (three) (lineSel?.size ?: 0) else if (ready) vecSelectedLineIndices(cut, ed, cel).size else 0
                 val linesNote = if (selLines > 0) " · $selLines selected line${if (selLines == 1) "" else "s"}" else if (three && lineSel != null) " · selected line not found in the last frame" else ""
                 Text(
-                    if (three) "In-between ${(ed.vecDragT * 100).roundToInt()}% → middle frame" + linesNote + (if (layer.celAt(cut.time) !== frames[1]) " (go to it to preview)" else "")
+                    if (three) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → middle frame" + linesNote + (if (layer.celAt(cut.time) !== frames[1]) " (go to it to preview)" else "")
                     else if (badFrames) "Select exactly three frames (two ends and the one between), or none"
-                    else if (ready) "In-between ${(ed.vecDragT * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty() && (ed.vecShiftOn || ed.vecPreSelOn)) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
+                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty() && (ed.vecShiftOn || ed.vecPreSelOn)) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
                 IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
                 BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
                 BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
                 BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
-                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) {
+                if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
                     // Reset: the picked lines go back to what the interpolation makes (position and smoothness); with nothing picked, the whole preview does
                     BarChip("Reset", false) {
                         val picked = ed.vecPreSel
-                        if (picked.isEmpty()) ed.resetPlace() else { ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked }
+                        if (picked.isEmpty()) ed.resetPlace() else { ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked; ed.vecDragTLines = ed.vecDragTLines - picked }
                     }
                 }
-                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1; ed.vecShiftOn = false; ed.vecPreSelOn = false }
+                BarChip("Joints", ed.vecMode == 4) { ed.vecMode = if (ed.vecMode == 4) 3 else 4; ed.vecGuideSelected = -1 }
                 if (ed.vecMode == 4) {
-                    Slider(value = ed.vecDragT, onValueChange = { ed.vecDragT = it }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
+                    Slider(value = ed.dragTShown(), onValueChange = { ed.setDragT(it) }, valueRange = 0f..1f, modifier = Modifier.width(110.dp).height(30.dp))
                     val jointSource = if (three) frames[0] else layer.cels.getOrNull(idx - 1)
                     val jointCfg = jointSource?.vecCfg
                     IconBtn(Icons.Filled.Delete, on = jointCfg != null && ed.vecGuideSelected in jointCfg.guideJoints.indices, tip = "Delete the selected guide joint") {
