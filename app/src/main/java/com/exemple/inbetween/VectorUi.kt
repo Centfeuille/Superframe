@@ -899,7 +899,7 @@ fun VecXformRows(ed: Editor) {
         if (radiusOpen) {
             val pin = x.pins.getOrNull(x.pinSel)
             val shown = pin?.r ?: x.pinRadius
-            SliderRow(if (pin != null) "Radius (pin ${x.pinSel + 1})" else "Radius (new pins)", shown, 0f..PIN_RADIUS_MAX, if (shown < 1f) "Off" else "${shown.roundToInt()} px") { v -> x.setPinRadius((v / 5f).roundToInt() * 5f) }
+            SliderRow(if (pin != null) "Radius (pin ${x.pinSel + 1})" else "Radius (new pins)", shown, 0f..PIN_RADIUS_MAX, if (shown < 1f) "Off" else "${shown.roundToInt()} px") { v -> x.applyPinRadius((v / 5f).roundToInt() * 5f) }
             Text("How far the selected pin reaches: the bend fades out that far from it (Off = every line follows). Tap a pin to select it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(300.dp).padding(4.dp))
         }
     }

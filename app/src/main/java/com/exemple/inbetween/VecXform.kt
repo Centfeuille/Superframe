@@ -95,7 +95,7 @@ class VecXform(rect: RectF, val sel: Set<Long>, val ids: Set<String>?) {
 
     fun applyPins() { puppetBase?.let { mesh = puppetMesh(it, pins) }; rev++ }
     fun clearPins() { pins.clear(); pinSel = -1; applyPins() }
-    fun setPinRadius(r: Float) { pinRadius = r; pins.getOrNull(pinSel)?.r = r; applyPins() }
+    fun applyPinRadius(r: Float) { pinRadius = r; pins.getOrNull(pinSel)?.r = r; applyPins() }
 
     /** Back to the untouched lines: no transform, no deformation, no pins. */
     fun resetAll() {

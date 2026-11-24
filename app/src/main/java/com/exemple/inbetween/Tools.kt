@@ -208,7 +208,7 @@ class Xform(val items: List<XformItem>) {
     fun clearPins() { pins.clear(); pinSel = -1; applyPins() }
 
     /** Puppet Warp: sets how far the selected pin reaches (document px, 0 = no limit); it is also the radius the next pins get. */
-    fun setPinRadius(r: Float) { pinRadius = r; pins.getOrNull(pinSel)?.r = r; applyPins() }
+    fun applyPinRadius(r: Float) { pinRadius = r; pins.getOrNull(pinSel)?.r = r; applyPins() }
 
     /** Back to the untouched selection: no transform, no deformation, no pins. */
     fun resetAll() {
