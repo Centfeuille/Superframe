@@ -790,27 +790,22 @@ object LineGhost {
         return null
     }
 
-    private fun endDist(a: VectorStroke, b: VectorStroke): Float {
-        val a0 = a.points.first(); val a1 = a.points.last(); val b0 = b.points.first(); val b1 = b.points.last()
-        if (a.isClosed || b.isClosed) {
-            val ax = a.points.sumOf { it.x.toDouble() } / a.points.size; val ay = a.points.sumOf { it.y.toDouble() } / a.points.size
-            val bx = b.points.sumOf { it.x.toDouble() } / b.points.size; val by = b.points.sumOf { it.y.toDouble() } / b.points.size
-            return hypot(ax - bx, ay - by).toFloat()
-        }
-        val f = (hypot(a0.x - b0.x, a0.y - b0.y) + hypot(a1.x - b1.x, a1.y - b1.y)) / 2f
-        val r = (hypot(a0.x - b1.x, a0.y - b1.y) + hypot(a1.x - b0.x, a1.y - b0.y)) / 2f
-        return min(f, r)
+    /**
+     * Whether a line of the current keyframe has TAKEN the first or last anchor number of the ghost line [r] ([nums] = every number used in the current keyframe). Only the ends count
+     * (anchor numbers and the end aliases a merge leaves on them): not the distance or shape of the lines, and not the numbers of the bends in between. A closed ghost line has no ends,
+     * so any of its numbers counts.
+     */
+    fun isClaimed(r: VectorStroke, nums: Set<Int>): Boolean {
+        if (r.points.isEmpty()) return false
+        if (r.isClosed) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
+        return listOf(r.points.first(), r.points.last()).any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
     }
 
-    /** Lines of [ref] nobody has traced yet: a line of [current] claims one when they share an anchor number or when its ends lie on that line's ends. [px] = document pixels per screen pixel. */
+    /** Lines of [ref] nobody has traced yet (see [isClaimed]); the traced ones stay on the ghost, drawn in another colour, and can still be referred to. [px] is kept for the callers. */
+    @Suppress("UNUSED_PARAMETER")
     fun unclaimed(ref: List<VectorStroke>, current: List<VectorStroke>, px: Float): List<VectorStroke> {
-        val cur = current.filter { it.fill == 0 && it.points.size >= 2 }
-        val nums = AutoAnchors.usedNumbers(cur)
-        return ref.filter { r ->
-            val byNumber = r.points.any { it.anchor > 0 && it.anchor in nums }
-            val byShape = cur.any { c -> endDist(c, r) <= 0.25f * max(AutoAnchors.bboxDiag(c.points), AutoAnchors.bboxDiag(r.points)) + 6f * px }
-            !(byNumber || byShape)
-        }
+        val nums = AutoAnchors.usedNumbers(current.filter { it.fill == 0 && it.points.size >= 2 })
+        return ref.filter { !isClaimed(it, nums) }
     }
 
     fun key(layer: Layer, idx: Int): Long = layer.id.toLong() * 1_000_000L + idx
@@ -825,21 +820,20 @@ object LineGhost {
         return open.firstOrNull()
     }
 
-    /** Skip to the next ([dir] = 1) or previous (-1) untraced line of the reference keyframe, counting round. Lines already traced are passed over. */
+    /**
+     * Skip to the next ([dir] = 1) or previous (-1) line of the reference keyframe in drawing order, counting round. Lines already traced are included: they stay on the ghost
+     * (drawn in yellow-orange) so a line can be gone back to and extended; the line that is pinned shimmers and is the one a new stroke follows.
+     */
     fun skip(ed: Editor, layer: Layer, idx: Int, dir: Int) {
         val cur = layer.cels.getOrNull(idx) ?: return
         val ref = reference(layer, idx, ed.vecGhostNext) ?: return
         val all = lines(ref)
         if (all.isEmpty()) return
         val open = unclaimed(all, cur.vectorStrokes(), 1f / ed.vecDocZoom.coerceAtLeast(0.0001f))
-        if (open.isEmpty()) return
         val pk = key(layer, idx)
         val now = shown(all, open, ed, pk)
         val start = all.indexOfFirst { it.id == now?.id }.let { if (it < 0) 0 else it }
-        val openIds = open.map { it.id }.toSet()
-        for (k in 1..all.size) {
-            val j = (((start + dir * k) % all.size) + all.size) % all.size
-            if (all[j].id in openIds) { ed.vecGhostPin = all[j].id; ed.vecGhostPinKey = pk; return }
-        }
+        val j = (((start + dir) % all.size) + all.size) % all.size
+        ed.vecGhostPin = all[j].id; ed.vecGhostPinKey = pk
     }
 }

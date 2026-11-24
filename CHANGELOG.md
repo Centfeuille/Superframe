@@ -1,3 +1,25 @@
+## 2026-11-23 — Ghost lines in the bleed area
+- AI model: Claude
+- Category: Fixed (source code)
+- Request: the ghost line must also display in the bleed area.
+- Cause (code reading, not reproduced): the ghost was drawn inside the same `withTransform` block as the page overlays, which clips to the page rectangle (`clipRect(0, 0, dw, dh)`) whenever Bleed is off, GL layers are composed and no visible reference-image layer exists. Everything drawn in it, the ghost included, stopped at the page edge.
+- Fix (`Canvas.kt`): the `ghostData` drawing moved unchanged to the start of the next block (`withTransform({ base() })`, "overlays that may extend beyond the page"), which has no page clip. Nothing else about the ghost changed; it is now drawn after the selection / live-stroke overlays instead of before them.
+- Files: `Canvas.kt`, `WhatsNew.kt` (note 79).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: Bleed off, ghost line partly outside the page (it must continue past the page edge); Bleed on; a document with a reference-image layer; shimmering ghost with its anchors on top of the drawing.
+- Not verified: if the ghost was already unclipped in your case (Bleed on, or a reference-image layer visible), the cause is elsewhere; tell me which Bleed state the screenshots were in.
+
+## 2026-11-23 — Ghost lines are never removed; traced ones are yellow-orange; claiming by end anchors
+- AI model: Claude
+- Category: Changed / Fixed (source code)
+- Report: ghost lines can get lost (toe lines missing in screenshots). Requested: lines must not be claimed and disappear; a claimed line is shown in yellow-orange and can still be referred to (e.g. to extend it); claiming is based on the beginning and end anchor points.
+- Cause of the loss (code reading, not reproduced): `LineGhost.unclaimed` also claimed a ghost line by shape (ends within `0.25 * max(size) + 6 px` of a current line's ends), so a long outline hid short lines. A first fix limiting that tolerance was replaced by the change below.
+- Change (`AutoAnchors.kt`, `LineGhost`): `isClaimed(r, nums)`: a ghost line is claimed only when the current keyframe holds the number of its FIRST or LAST anchor (anchor number or end alias); a closed ghost line, having no ends, is claimed by any of its numbers. No distance or shape test (`endDist` removed); the bends in between do not claim. `unclaimed` keeps its signature. `skip` now steps through EVERY ghost line in drawing order, traced ones included (it used to pass over traced ones and do nothing when all were traced), pinning the target line.
+- Change (`Canvas.kt`): `ghostData` is a new `GhostView(shown, open, claimed, shownClaimed)`; all lines of the reference keyframe are drawn: untraced others teal (0.14), traced others yellow-orange (0xFFFFA726, 0.24), the pinned / first untraced line shimmers in teal, or in orange when it is traced. The anchor dots and the cropped-ghost inset work for any shown line, also a traced one. `vecAnchorNew` is unchanged: a stroke follows the shown line; when that line's end numbers are already in the keyframe it is left unanchored for merging (extension), as before.
+- `VectorUi.kt`: tooltips of the ghost skip buttons.
+- Files: `AutoAnchors.kt`, `Canvas.kt`, `VectorUi.kt`, `WhatsNew.kt` (note 78).
+- Validation: code reading and bracket balance only. Not compiled, not run on a device. Next: a keyframe whose ghost has many short lines near long ones (all stay visible); trace a line (it turns orange once its end numbers are in the frame, the shimmer moves on or stays on the pin as before); previous / next over traced lines; extending a traced line with Merge while the ghost is on it; a ghost with no anchors yet (nothing is claimed).
+- Behaviour to know: a line drawn without the ghost has its own fresh numbers, so it no longer hides any ghost line; the ghost line stays teal until a line takes its end numbers.
+
 ## 2026-11-23 — Ghost tracing across open / closed: open a ring ghost, close an open ghost
 - AI model: Claude
 - Category: Added / Fixed (source code)

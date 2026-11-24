@@ -1746,7 +1746,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val all = LineGhost.lines(ref)
             val open = LineGhost.unclaimed(all, cur.vectorStrokes(), 1f / vecZoom())
             val shown = LineGhost.shown(all, open, ed, LineGhost.key(gl, idx))
-            if (shown == null) null else Pair(shown, open.filter { it.id != shown.id })
+            val openIds = open.map { it.id }.toSet()
+            // every line of the reference keyframe stays on the ghost: untraced ones in teal, traced ones in yellow-orange
+            if (all.isEmpty()) null else GhostView(shown, open.filter { it.id != shown?.id }, all.filter { it.id !in openIds && it.id != shown?.id }, shown != null && shown.id !in openIds)
         }
     }
 
@@ -2217,21 +2219,6 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 drawCircle(Color.Black.copy(alpha = 0.8f), 9f * px1, p, style = Stroke(1.2f * px1))
             }
             // The stroke being drawn with the vector brush, rendered like the committed line (ribbon with pressure width, curve and opacity), so lifting the pen does not change how it looks.
-            ghostData?.let { (shown, others) ->
-                val pulse = 0.5f + 0.5f * kotlin.math.sin(ghostStep / 8f * 2f * Math.PI.toFloat())
-                drawIntoCanvas { cv ->
-                    val gp = android.graphics.Paint()
-                    for (o in others) VectorTessellator.draw(cv.nativeCanvas, o.copy(color = 0xFF22D3EE.toInt(), opacity = 0.14f), gp)
-                    VectorTessellator.draw(cv.nativeCanvas, shown.copy(color = 0xFF22D3EE.toInt(), opacity = 0.28f + 0.42f * pulse), gp)
-                }
-                val gc = shown.points.maxOfOrNull { it.anchor } ?: 0
-                val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * px1; typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
-                for (vp in shown.points) if (vp.anchor > 0) {
-                    drawCircle(Color.White.copy(alpha = 0.9f), 6f * px1, Offset(vp.x, vp.y))
-                    drawCircle(Color(anchorColor(vp.anchor, gc)).copy(alpha = 0.55f + 0.45f * pulse), 4.5f * px1, Offset(vp.x, vp.y))
-                    drawIntoCanvas { cv -> cv.nativeCanvas.drawText(vp.anchor.toString(), vp.x + 7f * px1, vp.y - 7f * px1, np) }
-                }
-            }
             if (vecLive >= 0 && st.kind == 15 && vecPts.isNotEmpty()) {
                 val lb = ed.brushes[ed.brushIdx]
                 val liveStroke = VectorStroke("live", vecPts.toList(), ed.color.toArgb() or (0xFF shl 24), lb.size, "", false, lb.opacity.coerceIn(0.05f, 1f), lb.aa).withBrush(lb)
@@ -2282,6 +2269,25 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
         // overlays that may extend beyond the page: camera frame and perspective guides
         withTransform({ base() }) {
+            // The line ghost is drawn here, outside the page clip above: with Bleed off the page rectangle clips the drawing overlay, but the ghost must also show in the bleed area
+            ghostData?.let { gv ->
+                val shown = gv.shown
+                val pulse = 0.5f + 0.5f * kotlin.math.sin(ghostStep / 8f * 2f * Math.PI.toFloat())
+                drawIntoCanvas { cv ->
+                    val gp = android.graphics.Paint()
+                    for (o in gv.open) VectorTessellator.draw(cv.nativeCanvas, o.copy(color = 0xFF22D3EE.toInt(), opacity = 0.14f), gp)
+                    for (o in gv.claimed) VectorTessellator.draw(cv.nativeCanvas, o.copy(color = 0xFFFFA726.toInt(), opacity = 0.24f), gp) // already traced: still shown, in yellow-orange
+                    if (shown != null) VectorTessellator.draw(cv.nativeCanvas, shown.copy(color = (if (gv.shownClaimed) 0xFFFFA726 else 0xFF22D3EE).toInt(), opacity = 0.28f + 0.42f * pulse), gp)
+                }
+                if (shown == null) return@let
+                val gc = shown.points.maxOfOrNull { it.anchor } ?: 0
+                val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * px1; typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
+                for (vp in shown.points) if (vp.anchor > 0) {
+                    drawCircle(Color.White.copy(alpha = 0.9f), 6f * px1, Offset(vp.x, vp.y))
+                    drawCircle(Color(anchorColor(vp.anchor, gc)).copy(alpha = 0.55f + 0.45f * pulse), 4.5f * px1, Offset(vp.x, vp.y))
+                    drawIntoCanvas { cv -> cv.nativeCanvas.drawText(vp.anchor.toString(), vp.x + 7f * px1, vp.y - 7f * px1, np) }
+                }
+            }
             val sel = cut.layer
             // The camera's animation is seen across all layers while playing; on the camera layer itself the frame is also the canvas frame (only the outside is shaded).
             val camLayer = if (sel != null && sel.kind == 2) sel else if (cut.playing) cut.layers.firstOrNull { it.kind == 2 && it.visible && it.cam != null } else null
@@ -2450,7 +2456,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
         // Ghost inset: while the ghost line is partly or fully outside the visible canvas (zoom / pan), a small window in the
         // upper left frames the whole ghost line (same orientation as the canvas) with its anchors and the visible area.
-        ghostData?.first?.takeIf { box.width > 0 && box.height > 0 }?.let { ghostLine ->
+        ghostData?.shown?.takeIf { box.width > 0 && box.height > 0 }?.let { ghostLine ->
             val gScr = ghostLine.points.map { toScr(Offset(it.x, it.y)) }
             val edge = 3f
             val cropped = gScr.any { it.x < edge || it.y < edge || it.x > box.width - edge || it.y > box.height - edge }
@@ -2588,3 +2594,6 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/** What the line ghost shows: the pinned (or first untraced) line [shown] that shimmers, the other untraced lines [open], and the traced ones [claimed]; [shownClaimed] = the shimmering line is already traced. */
+class GhostView(val shown: VectorStroke?, val open: List<VectorStroke>, val claimed: List<VectorStroke>, val shownClaimed: Boolean)

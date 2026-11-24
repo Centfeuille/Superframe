@@ -38,6 +38,22 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            79, "2026-11-23", "Ghost lines show in the bleed area",
+            listOf(
+                "The ghost lines (and the anchors of the shimmering one) are now drawn over the bleed area too, outside the page, instead of being cut off at the page edge.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
+            78, "2026-11-23", "Ghost lines never disappear; traced ones turn yellow-orange",
+            listOf(
+                "Every line of the ghost keyframe now stays on screen. Lines you have not traced are teal as before; a line that has been traced turns yellow-orange instead of vanishing, so you can still refer to it.",
+                "A ghost line counts as traced only when a line of the current frame has taken its first or last anchor number (a closed ghost line: any of its numbers). Distance and shape of the lines no longer decide, so long outlines can no longer hide short ghost lines such as toes.",
+                "The ghost's previous / next buttons now go through every ghost line in drawing order, traced ones included, so you can go back to a line to extend it. The line the ghost is on shimmers (teal, or orange if it is already traced) and is the one a new stroke follows.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             77, "2026-11-23", "Ghost tracing: open a closed ghost line, close an open one",
             listOf(
                 "Tracing a closed (ring) ghost line with an open line now keeps the ghost's anchor numbers: the line starts at the ghost's lowest number and ends at its highest, and the numbers in between are paired with your bends in order. The ring is opened where its numbers wrap, so where you draw and how far you are from the ghost do not matter.",
