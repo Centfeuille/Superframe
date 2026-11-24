@@ -31,6 +31,7 @@ class VecDeform(rect: RectF, val mesh: WarpMesh?, val mat: Aff) {
     val rect = RectF(rect)
     private val rw = max(this.rect.width(), 1e-3f)
     private val rh = max(this.rect.height(), 1e-3f)
+    private val margin = max(rw, rh) * 0.25f
 
     val isIdentity: Boolean get() {
         if (!mat.isIdentity) return false
@@ -45,8 +46,12 @@ class VecDeform(rect: RectF, val mesh: WarpMesh?, val mat: Aff) {
         var px = x; var py = y
         val m = mesh
         if (m != null) {
-            m.sample(((x - rect.left) / rw).coerceIn(0f, 1f), ((y - rect.top) / rh).coerceIn(0f, 1f), out)
-            px = out[0]; py = out[1]
+            // Inside the box: the mesh. Outside it (the interpolation preview moves when it is dragged after a warp was applied): the displacement at the nearest
+            // point of the box, fading out over a margin, so lines leaving the box are neither squashed onto its edge nor jumped.
+            val cx = x.coerceIn(rect.left, rect.right); val cy = y.coerceIn(rect.top, rect.bottom)
+            m.sample(((cx - rect.left) / rw).coerceIn(0f, 1f), ((cy - rect.top) / rh).coerceIn(0f, 1f), out)
+            val f = if (cx == x && cy == y) 1f else pinReach(hypot(x - cx, y - cy), margin)
+            px = x + (out[0] - cx) * f; py = y + (out[1] - cy) * f
         }
         val o = mat.map(px, py)
         out[0] = o.x; out[1] = o.y

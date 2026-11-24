@@ -1,3 +1,13 @@
+## 2026-11-25 — Interpolation drag after a Warp / Puppet step on the preview
+- AI model: Claude
+- Category: Fixed (source code, no format change)
+- Report: after warping the preview with the Selection tool, dragging the interpolation (Fixed or not) messed the lines up.
+- Cause (from the code): a `PreviewWarp` step is a mesh over the box the lines occupied when it was applied. Dragging moves the lines, and `VecDeform.map` clamped every point outside the box to the box edge, so shapes were squashed onto the edge.
+- Fix (`VecXform.kt`, `VecDeform.map`): outside the box a point gets the displacement of the nearest box point, faded out over 25% of the box size (`pinReach`), so it is continuous and local. Inside the box nothing changed; real-line sessions are unaffected (their points are always inside).
+- Known: the warp stays where it was applied in the document; it does not follow the lines when the drag moves them far.
+- Files: `VecXform.kt`, `CHANGELOG.md`.
+- Validation: code reading only; not built. Next: warp the preview, then drag the interpolation (Fixed on and off) and check the create button.
+
 ## 2026-11-24 (4) — Vector transform session (Transform / Warp / Puppet Warp), Puppet pin radius, interpolation preview edited by the Selection tool
 - AI model: Claude
 - Category: Changed / Added (source code, no format change)
