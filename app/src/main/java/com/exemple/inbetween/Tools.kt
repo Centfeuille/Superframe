@@ -336,6 +336,8 @@ const val NEW_FRAME_PULL = 168f
 const val RESET_PINCH_DP = 112f
 /** A pen / finger tap on a reference layer may wander this many screen pixels (S Pen jitter) and still count as a tap. */
 const val TAP_SLOP_PX = 40f
+/** Tap slop (screen px) of a guide-joint / Displace-joint gesture: a tap on the selected joint deletes it, a movement beyond this drags it (finer than [TAP_SLOP_PX] so a joint can be nudged a little). */
+const val JOINT_TAP_SLOP_PX = 12f
 /** Largest gap-closing radius (px) reachable with the horizontal drag. */
 const val MAX_GAP_FILL = 60
 

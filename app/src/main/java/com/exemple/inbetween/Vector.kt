@@ -2012,8 +2012,8 @@ fun interpolateIntoFrame(cut: Cut, ed: Editor, layer: Layer, a: Cel, m: Cel, b: 
 
 /**
  * Three-frame mode: the lines of [b] (the last selected frame) that the point selection stands for, wherever it was made (the selection keeps its own frames in
- * [Editor.vecSelCels], so moving the playhead does not lose it). On [b] itself by index, on another frame by line id. Null = nothing is selected (all lines);
- * an empty set = something is selected but no line of [b] matches (then nothing is interpolated).
+ * [Editor.vecSelCels], so moving the playhead does not lose it). On [b] itself by index, on another frame by line id. Null = nothing is selected, or no selected
+ * line has a match in [b] (a leftover selection, or lines drawn separately that do not share an id): all lines are interpolated, as with two frames.
  */
 fun vecSelectedLinesIn(ed: Editor, b: Cel): Set<Int>? {
     if (ed.vecSel.isEmpty() || ed.vecSelCels.isEmpty()) return null
@@ -2025,7 +2025,7 @@ fun vecSelectedLinesIn(ed: Editor, b: Cel): Set<Int>? {
         val st = sc.perCel[c].getOrNull(si) ?: continue
         if (sc.cels[c] === b) out.add(si) else bs.indexOfFirst { it.id == st.id }.takeIf { it >= 0 }?.let { out.add(it) }
     }
-    return out
+    return out.takeIf { it.isNotEmpty() }
 }
 
 /** Indices (into [cel]'s strokes) of the lines that have a selected point, for the current vector selection; empty when nothing is selected on that keyframe. */

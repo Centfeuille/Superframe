@@ -38,6 +38,20 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            83, "2026-11-24", "Interpolation drag on three frames works again with a leftover selection",
+            listOf(
+                "With three frames selected, a line selection left over from the Selection tool (lines that are not in the last of the three frames) no longer blocks the preview and the check button: when none of the selected lines is found in the last frame, all lines are interpolated, as with two frames. Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
+            82, "2026-11-24", "Lock weight is back; finer joint taps",
+            listOf(
+                "The Lock weight button is back in the Selection tool and now also in the Interpolation drag bar (it keeps the line weight when you move, scale or rotate the preview).",
+                "Tapping a selected joint to delete it now only counts as a tap within about 12 px of movement (before, nearly 40 px), so joints can be nudged a little without being deleted or stuck.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             81, "2026-11-24", "Freer joints, rotation magnet in Interpolation drag, tap a joint again to delete it",
             listOf(
                 "Joints (Interpolation drag and Displace) now bend the line locally: how far a joint pulls the line along grows with how far you drag it, so a small move no longer drags a long stretch of the line with it and the line between joints is less stiff.",

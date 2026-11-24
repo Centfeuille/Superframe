@@ -1,3 +1,24 @@
+## 2026-11-24 (3) — Three-frame interpolation drag: a selection with no match in the last frame no longer blocks it
+- AI model: Claude
+- Category: Fixed (source code, no format change)
+- Report: with three frames selected the drag neither previews nor applies. The screenshot's bar read "In-between 50% -> middle frame · selected line not found in the last frame".
+- Cause (from that text and the code, matching the guess in the entry above): `vecSelectedLinesIn` returned an EMPTY set when lines were selected (`ed.vecSel`, e.g. left over from the Selection tool) but none of them could be matched in the last selected frame (matching is by line id, so lines that were drawn separately in that frame, or a selection on other frames, never match). An empty set made `interpolateChosen` / `interpolateIntoMiddle` pair nothing, so the preview was empty and the check changed nothing.
+- Fix (`Vector.kt`): `vecSelectedLinesIn` returns null when nothing matches, which every caller (`Canvas.kt` gesture and preview, `VectorUi.kt` bar and check) already treats as "all lines", the same as the two-frame mode. A selection that does match still limits the interpolation to those lines. The "selected line not found" note no longer appears.
+- Not changed: matching is still by line id, so a deliberate selection of lines that were drawn independently in the last frame cannot limit the interpolation; they would need anchor-based matching (like `pairSelected`).
+- Files: `Vector.kt`, `WhatsNew.kt` (note 83), `CHANGELOG.md`.
+- Validation: code reading only. Not compiled, not run on a device. Next: three frames selected with and without a leftover line selection (preview and check both work), with a matching line selection (only those lines).
+
+## 2026-11-24 (2) — Lock weight restored (Selection and Interpolation drag); joint tap slop; three-frame drag report open
+- AI model: Claude
+- Category: Fixed / Changed (source code, no format change)
+- Request: put the Lock weight button back in the Selection tool and also add it to the Interpolation drag bar (I had removed it in the entry above by misreading the request); Interpolation drag between three selected frames "doesn't work anymore".
+- Lock weight: `VectorUi.kt` has the `VIconBtn(LineWeight)` again after the Displace chip (Selection tool, unchanged from before) and a new one in the Interpolation drag bar after the Shift chip / rotation magnet. Both toggle `Editor.vecLockWeight`, which `inbetweenPlace()` already passes to `InbetweenPlace.lockWeight` (keeps the line weight when the preview is scaled). The `LineWeight` import is back. Supersedes the "Lock weight removed" bullet of the 2026-11-24 entry.
+- Joint tap slop: my second-tap delete used the general tap slop (`TAP_SLOP_PX` = 40 screen px), so a selected joint did not move until the pen had travelled 40 px and a small drag ended as a delete. Joint gestures now use `JOINT_TAP_SLOP_PX` = 12 (Tools.kt) through `jointDragNow(ev)` / `vecJointDragged` (`Canvas.kt`, gestures 26 and 28).
+- Three-frame drag: NOT fixed. Read the whole path (`vecSelectedFrames`, `guideSourceFor`, `previewStrokes`, `interpolateIntoFrame`, `interpolateIntoMiddle`, pen-down routing for gestures 22 / 26 / 27 / 29, `vecSelectedLinesIn`) and found nothing in it that my 2026-11-24 changes touch (they change the joint field `guideOffset`, the two joint-gesture branches, the Delete buttons and the magnet / Lock weight buttons). The screenshot from before those changes shows the mode working (preview and "In-between 100% -> middle frame"). One known way it shows nothing is a stale line selection: `vecSelectedLinesIn` returns an empty set when lines are selected whose ids are not in the last frame, and then nothing is interpolated (the bar says "selected line not found in the last frame"). Waiting for the exact symptom (no preview / drag does nothing / Check does nothing / crash) before changing anything.
+- Files: `VectorUi.kt`, `Canvas.kt`, `Tools.kt`, `WhatsNew.kt` (note 82), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched.
+- Validation: code reading, diff review and bracket balance only. Not compiled, not run on a device.
+
 ## 2026-11-24 — Freer guide joints, rotation magnet in Interpolation drag, second tap deletes a joint
 - AI model: Claude
 - Category: Changed (source code, no format change)

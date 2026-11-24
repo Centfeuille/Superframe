@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -244,6 +245,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
                 BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; if (ed.vecDisplace) ed.vecBrush = 0 }
+                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 if (pointsMode) {
                     VIconBtn(Icons.Filled.PanTool, on = brushMode == 1, tip = "Shift brush: push points along with the pen") { ed.vecBrush = if (brushMode == 1) 0 else 1 }
                     VIconBtn(Icons.Filled.Gesture, on = brushMode == 2, tip = "Smoothen brush: smooth the points under the pen") { ed.vecBrush = if (brushMode == 2) 0 else 2 }
@@ -317,6 +319,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 BarChip("Select", ed.vecPreSelOn) { ed.vecPreSelOn = !ed.vecPreSelOn; if (ed.vecPreSelOn) ed.vecShiftOn = false }
                 BarChip("Shift", ed.vecShiftOn) { ed.vecShiftOn = !ed.vecShiftOn; if (ed.vecShiftOn) ed.vecPreSelOn = false }
                 if (ed.vecShiftOn) MagnetBtn(ed, size = 32.dp) // rotation magnet: snap the preview's rotation to 30-degree steps, or turn it off for freeform rotation
+                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Moving, scaling and rotating the preview keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
                 if (ed.vecShiftOn || ed.vecPreSelOn || !ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
                     // Reset: the picked lines go back to what the interpolation makes (position and smoothness); with nothing picked, the whole preview does
