@@ -2704,36 +2704,83 @@ object VectorEraser {
         return clean
     }
 
+    private fun plen(pts: List<VectorPoint>): Float { var len = 0f; for (i in 1 until pts.size) len += hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y); return len }
+
+    private fun noAnchor(p: VectorPoint) = p.copy(anchor = 0, auto = false, endpoint = false, endpointAliases = emptyList())
+
     /**
-     * Erases POINTS only: every point of every line within [radius] (plus half the line width) of (x, y) is deleted, and the line is CUT there: the stretches of
-     * points that are left on either side become lines of their own (the first keeps the id, the others get new ones; the ends of a closed line join into one stretch).
-     * A stretch of fewer than two points disappears. Null when no point is within reach. The new ends get their anchors afterwards (Canvas.vecRefreshAnchors).
+     * The anchor of the far end of an open line that was cut in pieces ([pieces], in line order, each of at least two points): the piece that still has the line's
+     * START takes the line's END anchor (number, automatic / structural flags) on its new end, and the piece that had it lets go of it (its end is anchor-free, so it gets a
+     * number of its own afterwards, as every other new end does). Only when both pieces exist, are different, the end of the first is a new, anchor-free point, and the
+     * original end had an anchor; otherwise nothing moves.
      */
-    fun erasePointsAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float): List<VectorStroke>? {
+    private fun carryEnd(s: VectorStroke, pieces: List<List<VectorPoint>>): List<List<VectorPoint>> {
+        if (s.isClosed || pieces.size < 2 || s.points.size < 2) return pieces
+        val f = s.points.first(); val l = s.points.last()
+        if (l.anchor <= 0) return pieces
+        val si = pieces.indexOfFirst { it.first() === f }
+        val ei = pieces.indexOfLast { it.last() === l }
+        if (si < 0 || ei < 0 || si == ei) return pieces
+        val sp = pieces[si]
+        if (sp.last().anchor > 0) return pieces
+        val out = pieces.toMutableList()
+        out[si] = sp.dropLast(1) + sp.last().copy(anchor = l.anchor, auto = l.auto, endpoint = l.endpoint, endpointAliases = l.endpointAliases)
+        out[ei] = pieces[ei].dropLast(1) + noAnchor(pieces[ei].last())
+        return out
+    }
+
+    /**
+     * Erases POINTS only, exactly where the pen is: the part of every line within [radius] (plus half the line width) of (x, y) is removed, and the line is CUT there.
+     * A line that has no point under the pen (a long straight stretch) gets new points where the pen's circle meets it, so the cut is as accurate as the pen and not as
+     * coarse as the point spacing; the points inside the circle are deleted. The stretches left on either side become lines of their own (the first keeps the id, the others get
+     * new ones; the two ends of a closed line join into one stretch). A stretch shorter than half a pixel or of one point disappears. Null when the pen touches no line.
+     * With [inheritEnd] the piece that keeps the start of the line also takes its end anchor (see [carryEnd]); the other new ends get anchors afterwards (Canvas.vecRefreshAnchors).
+     */
+    fun erasePointsAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float, inheritEnd: Boolean = false): List<VectorStroke>? {
         var any = false
         val out = ArrayList<VectorStroke>(strokes.size)
         for (s in strokes) {
-            val n = s.points.size
             val reach = radius + s.baseWidth * 0.5f
-            val gone = BooleanArray(n) { hypot(s.points[it].x - x, s.points[it].y - y) <= reach }
-            if (gone.none { it }) { out.add(s); continue }
-            any = true
+            val closed = s.isClosed && s.points.size >= 3
+            if (s.points.size == 1) { if (hypot(s.points[0].x - x, s.points[0].y - y) <= reach) any = true else out.add(s); continue }
+            val src = if (closed) s.points + s.points.first() else s.points
             val runs = ArrayList<List<VectorPoint>>()
             var cur = ArrayList<VectorPoint>()
-            for (i in 0 until n) { if (gone[i]) { if (cur.isNotEmpty()) { runs.add(cur); cur = ArrayList() } } else cur.add(s.points[i]) }
-            if (cur.isNotEmpty()) runs.add(cur)
-            if (s.isClosed && n >= 3 && !gone[0] && !gone[n - 1] && runs.size >= 2) { val last = runs.removeAt(runs.size - 1); val first = runs.removeAt(0); runs.add(0, last + first) } // the ring is cut open: its two ends were one stretch
-            var first = true
-            for (r in runs) {
-                if (r.size < 2) continue
-                out.add(s.copy(id = if (first) s.id else newStrokeId(), points = r, isClosed = false)); first = false
+            var cut = false
+            if (hypot(src[0].x - x, src[0].y - y) > reach) cur.add(src[0])
+            for (i in 0 until src.size - 1) {
+                val a = src[i]; val b = src[i + 1]
+                val dx = b.x - a.x; val dy = b.y - a.y
+                val f = dx * dx + dy * dy
+                var t0 = 0f; var t1 = -1f
+                if (f > 1e-9f) {
+                    val ex = a.x - x; val ey = a.y - y
+                    val g = 2f * (dx * ex + dy * ey); val h = ex * ex + ey * ey - reach * reach
+                    val disc = g * g - 4f * f * h
+                    if (disc > 0f) { val sq = kotlin.math.sqrt(disc); t0 = ((-g - sq) / (2f * f)).coerceAtLeast(0f); t1 = ((-g + sq) / (2f * f)).coerceAtMost(1f) }
+                }
+                if (t1 - t0 <= 1e-4f) { if (hypot(b.x - x, b.y - y) > reach) cur.add(b); continue } // the pen's circle does not cut this segment
+                cut = true
+                fun at(t: Float) = VectorPoint(a.x + dx * t, a.y + dy * t, a.pressure + (b.pressure - a.pressure) * t, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, 0, a.hidden && b.hidden)
+                if (t0 > 1e-4f) cur.add(at(t0)) // the new end where the circle is entered
+                if (cur.isNotEmpty()) runs.add(cur)
+                cur = ArrayList()
+                if (t1 < 1f - 1e-4f) { cur.add(at(t1)); cur.add(b) } // the new start where the circle is left
             }
+            if (cur.isNotEmpty()) runs.add(cur)
+            if (!cut) { out.add(s); continue }
+            any = true
+            if (closed && runs.size >= 2 && runs.first().first() === src[0] && runs.last().last() === src.last()) { val last = runs.removeAt(runs.size - 1); val first = runs.removeAt(0); runs.add(0, last + first.drop(1)) } // the ring is cut open: its two ends were one stretch
+            var kept: List<List<VectorPoint>> = runs.filter { it.size >= 2 && plen(it) >= 0.5f }
+            if (inheritEnd && !closed) kept = carryEnd(s, kept)
+            var first = true
+            for (r in kept) { out.add(s.copy(id = if (first) s.id else newStrokeId(), points = r, isClosed = false)); first = false }
         }
         return if (any) out else null
     }
 
     /** Erases at (x, y); null when no line is within [radius] of that spot. */
-    fun eraseAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float): List<VectorStroke>? {
+    fun eraseAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float, inheritEnd: Boolean = false): List<VectorStroke>? {
         var best = Float.MAX_VALUE; var bs = -1; var bpos = 0f
         for ((si, s) in strokes.withIndex()) {
             val src = ring(s)
@@ -2787,12 +2834,9 @@ object VectorEraser {
         }
         val res = ArrayList<VectorStroke>()
         var first = true
-        for (pts in pieces) {
-            if (pts.size < 2) continue
-            var len = 0f; for (i in 1 until pts.size) len += hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-            if (len < 0.5f) continue
-            res.add(s.copy(id = if (first) s.id else newStrokeId(), points = pts, isClosed = false)); first = false
-        }
+        var kept: List<List<VectorPoint>> = pieces.filter { it.size >= 2 && plen(it) >= 0.5f }
+        if (inheritEnd && !closed) kept = carryEnd(s, kept)
+        for (pts in kept) { res.add(s.copy(id = if (first) s.id else newStrokeId(), points = pts, isClosed = false)); first = false }
         out.removeAt(bs); out.addAll(bs, res)
         return out
     }

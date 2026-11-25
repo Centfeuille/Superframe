@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            87, "2026-11-25", "Erase points cuts exactly under the pen; split lines pass the end anchor on",
+            listOf(
+                "Erase points: where a line has no point under the pen, the cut is made exactly where the pen's circle meets the line (new points are added there), so it is as accurate as the pen and not as coarse as the point spacing.",
+                "A line split by either vector eraser: the piece that keeps the line's start also gets the line's end anchor on its new end, and the other piece gets new anchors on its ends (Auto anchors on)."
+            )
+        ),
+        ReleaseNote(
             86, "2026-11-25", "Erase points cuts the line, flip around the screen centre, Cut handles from every point",
             listOf(
                 "Erase points: the line is cut where a point is erased; the stretches that are left become separate lines with anchors on their new ends.",

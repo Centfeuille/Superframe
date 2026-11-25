@@ -1166,7 +1166,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val cel = tl.cels.getOrNull(tl.indexAt(cut.time)) ?: continue
             var strokes = cel.vectorStrokes()
             var any = false
-            for (q in samples) (if (ed.vecErasePoints) VectorEraser.erasePointsAt(strokes, q.x, q.y, radius) else VectorEraser.eraseAt(strokes, q.x, q.y, radius))?.let { strokes = it; any = true }
+            for (q in samples) (if (ed.vecErasePoints) VectorEraser.erasePointsAt(strokes, q.x, q.y, radius, ed.vecAutoAnchor) else VectorEraser.eraseAt(strokes, q.x, q.y, radius, ed.vecAutoAnchor))?.let { strokes = it; any = true }
             // the lines that were cut get anchors on their new ends, and keep the ones they had on the ends that stayed
             if (any) changes.add(Triple(tl, cel, vecRefreshAnchors(tl, tl.indexAt(cut.time), strokes)))
         }
