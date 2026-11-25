@@ -749,3 +749,9 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - `guideOffset(js, closed, p, total)` (Vector.kt) now uses a per-joint reach `guideReach` (2.5 x pull / line length, 3 %..25 %) with a continuous cross-fade between the smoothstep blend and the per-joint falloffs; this SUPERSEDES the fixed `reach = 0.25` described in the 2026-11-22 "Guide joints warp" note. Used by `warpStroke` and `displaceStrokeWarped`. No `.inb` change.
 - Interpolation drag bar: rotation magnet (`MagnetBtn`) while Shift is on. Lock weight (`Editor.vecLockWeight`, session) has a button in the Selection tool bar AND in the Interpolation drag bar (feeds `InbetweenPlace.lockWeight`). Joint gestures 26 (Interpolation drag) and 28 (Displace): pen down on the already selected joint + lift within the tap slop deletes it (`vecJointTapDel`, `vecDispTapDel`; tap slop `JOINT_TAP_SLOP_PX` = 12 screen px via `jointDragNow`, not the general `TAP_SLOP_PX`). Delete buttons remove all joints of the picked / selected lines.
 - Unverified: not compiled, not run on a device.
+
+## 2026-11-25 — Cut resize, self-merge ends, dragged in-betweens
+- Cut settings: `CutDraft.ox / oy` = left / top edge pull; `apply()` -> `stretchCutContent` (Stretch) or `shiftCutContent` (`CutStretch.kt`), then `Cut.clearHistory()`. Both need the OLD Cut size and run before it is replaced. Right / bottom-only resizes touch no content.
+- Self-merge keeps both end points (`VectorMerge.closeOntoOwnStart`). `AutoAnchors.seamEnds` = closed line with end anchors on its first and last point; the anchor code handles it as an open line and re-closes it. Old collapsed rings still use the ring plans.
+- `nameAsInbetween` (`Editor.kt`) names in-betweens (3a, 3b); used by the interpolation drag and "Set inbetweens".
+

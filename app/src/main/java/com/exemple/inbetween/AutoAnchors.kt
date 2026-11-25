@@ -28,6 +28,18 @@ object AutoAnchors {
     /** Hard safety ceiling for the number of tips on one line. */
     const val MAX_AUTO_TIPS = 24
 
+    /**
+     * A closed line that KEPT both of its end points: a line whose end came back to its own start and was closed by Merge ([VectorMerge]) no longer collapses the two ends into one
+     * point or moves them; its first and last point stay where they were drawn, close to each other, still carrying their end anchors. Such a line is numbered, traced and followed
+     * exactly like an open line whose ends happen to meet: [layout], [selfPlan] and [ghostPlan] work on an open copy of it and close it again.
+     */
+    fun seamEnds(s: VectorStroke): Boolean {
+        if (!s.isClosed || s.fill != 0 || s.points.size < 3) return false
+        val a = s.points.first(); val b = s.points.last()
+        return a.endpoint && b.endpoint && a.anchor in 1..ANCHOR_MAX && b.anchor in 1..ANCHOR_MAX
+    }
+    private fun asOpen(s: VectorStroke): VectorStroke = if (seamEnds(s)) s.copy(isClosed = false) else s
+
     fun bboxDiag(pts: List<VectorPoint>): Float {
         if (pts.isEmpty()) return 0f
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
@@ -329,6 +341,11 @@ object AutoAnchors {
     private fun layout(s: VectorStroke, plan: Plan, sens: Float, taken: MutableSet<Int>): VectorStroke {
         val n = s.points.size
         if (s.fill != 0 || n < 2) return s
+        if (seamEnds(s)) { // a closed line that kept its two ends: numbered as the open line it is, then closed again (the same object comes back when nothing changed)
+            val open = s.copy(isClosed = false)
+            val r = layout(open, plan, sens, taken)
+            return if (r === open) s else r.copy(isClosed = true)
+        }
         val ring = s.isClosed && n >= 3
         val base = ArrayList<VectorPoint>(n)
         for (p in s.points) base.add(
@@ -445,6 +462,7 @@ object AutoAnchors {
 
     /** The plan of a line that keeps its own numbers: its ends and tips as they are now (used after a merge or a deletion, and for a line with no ghost). */
     private fun selfPlan(s: VectorStroke, avoid: Set<Int>): Plan {
+        if (seamEnds(s)) return selfPlan(s.copy(isClosed = false), avoid)
         val pts = s.points
         val n = pts.size
         val ring = s.isClosed && n >= 3
@@ -507,7 +525,8 @@ object AutoAnchors {
      * The direction of [s] along the open ghost line [g] when [s] lies over it (a whole trace or a piece of one) and covers a clear stretch of it: true = the same way
      * as the ghost. Null when [s] is elsewhere or the stretch is too short to tell; the start of the line decides then.
      */
-    private fun orientationOverGhost(s: VectorStroke, g: VectorStroke): Boolean? {
+    private fun orientationOverGhost(s0: VectorStroke, g0: VectorStroke): Boolean? {
+        val s = asOpen(s0); val g = asOpen(g0)
         if (g.isClosed || s.isClosed || s.points.size < 2 || g.points.size < 2) return null
         val gd = denseOf(g.points, false) ?: return null
         val tmp = FloatArray(2)
@@ -589,7 +608,8 @@ object AutoAnchors {
      * when it is null) and the ghost's in-between anchors become the tips to pair the apexes with. Closed: all of the ghost's anchors are tips, read in the direction
      * of the outline. Numbers in [blocked] are left out. Null when the ghost cannot be followed (open / closed mismatch, or no anchors).
      */
-    private fun ghostPlan(s: VectorStroke, g: VectorStroke, forward: Boolean?, blocked: Set<Int>): Plan? {
+    private fun ghostPlan(s0: VectorStroke, g0: VectorStroke, forward: Boolean?, blocked: Set<Int>): Plan? {
+        val s = asOpen(s0); val g = asOpen(g0) // a closed line that kept its two ends (see [seamEnds]) is an open line here: its end numbers go to the ends of the trace
         val sn = s.points.size; val gn = g.points.size
         if (sn < 2 || gn < 2 || g.fill != 0) return null
         val sRing = s.isClosed && sn >= 3
@@ -711,7 +731,7 @@ object AutoAnchors {
     private fun ghostFor(s: VectorStroke, refs: List<VectorStroke>): VectorStroke? {
         for (g in refs) {
             if (g.fill != 0 || g.points.size < 2) continue
-            val nums = if (g.isClosed) g.points.map { it.anchor }.filter { it > 0 } else listOf(g.points.first().anchor, g.points.last().anchor).filter { it > 0 }
+            val nums = if (g.isClosed && !seamEnds(g)) g.points.map { it.anchor }.filter { it > 0 } else listOf(g.points.first().anchor, g.points.last().anchor).filter { it > 0 }
             if (nums.isEmpty()) continue
             if (s.points.any { it.anchor in nums || it.endpointAliases.any { r -> r in nums } }) return g
         }
@@ -746,7 +766,7 @@ object AutoAnchors {
             var plan: Plan? = null
             val g = ghostFor(s, refs)
             if (g != null) {
-                val hint: Boolean? = if (g.isClosed) null else {
+                val hint: Boolean? = if (g.isClosed && !seamEnds(g)) null else {
                     val f = s.points.first(); val l = s.points.last()
                     val ga = g.points.first().anchor; val gb = g.points.last().anchor
                     // where the line lies on the ghost is the surest direction; otherwise the numbers its ends carry say which end started where
@@ -797,7 +817,7 @@ object LineGhost {
      */
     fun isClaimed(r: VectorStroke, nums: Set<Int>): Boolean {
         if (r.points.isEmpty()) return false
-        if (r.isClosed) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
+        if (r.isClosed && !seamEnds(r)) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } } // a closed line that kept its two ends counts by its ends, like an open one
         return listOf(r.points.first(), r.points.last()).any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
     }
 

@@ -2002,6 +2002,7 @@ fun createDraggedInbetween(cut: Cut, layer: Layer, time: Int, t: Float, keepLeng
         if (p.dur > 1) p.dur -= 1
         else if (keepLength && c.dur > 1) c.dur -= 1
         layer.cels.add(i, cel)
+        nameAsInbetween(layer, i) // the frame the drag creates is an in-between of the drawing before it (shown as 3a, 3b ... on the timeline), part of the same undo step
     }
     return true
 }
@@ -2037,6 +2038,7 @@ fun interpolateIntoFrame(cut: Cut, ed: Editor, layer: Layer, a: Cel, m: Cel, b: 
         TileCache.get(f.strokes)
         f.persistent = m.persistent; f.inbetweenName = m.inbetweenName; f.vecCfg = m.vecCfg
         layer.cels[mi] = f
+        if (f.inbetweenName.isBlank()) nameAsInbetween(layer, mi) // the middle frame now holds a generated in-between: marked as one on the timeline (a name it already has is kept)
         fresh = f
     }
     val f = fresh ?: return false
@@ -2302,6 +2304,14 @@ object VectorMerge {
         )
     }
     private fun length(p: List<VectorPoint>): Float { var l = 0f; for (i in 1 until p.size) l += d(p[i - 1], p[i]); return l }
+
+    /**
+     * An open line whose end comes back to its own start (self-merge) becomes a closed line that KEEPS both end points: nothing is moved, merged or dropped, so the first and last
+     * point stay where they were, near each other, with their end anchors (see AutoAnchors.seamEnds); the short piece between them closes the outline. Only when the two ends lie
+     * on one spot (no closing piece would be left) the last point is dropped instead, as a closed outline cannot repeat its first point.
+     */
+    private fun closeOntoOwnStart(s: VectorStroke): VectorStroke =
+        if (d(s.points.first(), s.points.last()) < 0.05f) s.copy(points = s.points.dropLast(1), isClosed = true) else s.copy(isClosed = true)
     private fun join(a: List<VectorPoint>, b: List<VectorPoint>): List<VectorPoint> = a.dropLast(1) + mid(a.last(), b.first()) + b.drop(1)
 
     /**
@@ -2436,8 +2446,7 @@ object VectorMerge {
         fun find(id: String): Int { var k = id; while (alias.containsKey(k)) k = alias.getValue(k); return st.indexOfFirst { it.id == k } }
         fun closeRing(si: Int) {
             val s = st[si]; if (s.isClosed || s.points.size < 3) return
-            val pts = s.points.toMutableList(); pts[0] = mid(pts.first(), pts.last()); pts.removeAt(pts.size - 1)
-            st[si] = s.copy(points = pts, isClosed = true, joinSharp = max(s.joinSharp, sharp))
+            st[si] = closeOntoOwnStart(s).copy(joinSharp = max(s.joinSharp, sharp))
         }
         for (j in joins) {
             val ia = find(j.aId); val ib = find(j.bId)
@@ -2498,7 +2507,7 @@ object VectorMerge {
             changed = true; joined = true
         }
         // a line whose end comes back to its own start closes into a ring (also when it joined nothing else); a short scribble does not count
-        if (cur.points.size >= 4 && d(cur.points.first(), cur.points.last()) <= tol && length(cur.points) > 4f * tol) { cur = cur.copy(points = cur.points.dropLast(1), isClosed = true); changed = true; joined = true }
+        if (cur.points.size >= 4 && d(cur.points.first(), cur.points.last()) <= tol && length(cur.points) > 4f * tol) { cur = closeOntoOwnStart(cur); changed = true; joined = true }
         // T junctions: an end that lies on the body of another line snaps onto it and the line gets the same vertex
         if (!cur.isClosed) {
             for (end in 0..1) {

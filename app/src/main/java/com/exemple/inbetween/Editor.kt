@@ -340,6 +340,8 @@ class Cut(name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = Syste
         invalidateStructureCaches()
         layerId = s.layerId; time = s.time.coerceIn(0, total() - 1); selAll = -1
     }
+    /** Forgets every undo / redo step: after a Cut resize that moved or scaled the content, the old steps no longer fit the drawing. */
+    fun clearHistory() { undoStack.clear(); redoStack.clear(); edits++ }
     fun pushStruct(before: Snap) { syncUniformTiming(before); undoStack.addLast(StructAct(before, snap())); redoStack.clear(); edits++; invalidateStructureCaches() }
     inline fun <T> record(block: () -> T): T { val b = snap(); invalidateStructureCaches(); val r = block(); pushStruct(b); return r }
 
@@ -753,6 +755,12 @@ class CutDraft(val cut: Cut) {
     var h by mutableIntStateOf(cut.h)
     var dpi by mutableIntStateOf(cut.dpi)
     var fps by mutableIntStateOf(cut.fps)
+    /** How far the page's left / top edge has been pulled outwards (px; negative = pushed inwards). The page origin stays at (0, 0) on screen until Confirm, so the pending frame is drawn from (-ox, -oy). */
+    var ox by mutableIntStateOf(0)
+    var oy by mutableIntStateOf(0)
+    /** On: Confirm scales the whole drawing to the new size ([stretchCutContent]) instead of cropping / extending it. The left / top offsets are then not used. */
+    var stretch by mutableStateOf(false)
+    fun setStretching(on: Boolean) { stretch = on; if (on) { ox = 0; oy = 0 } }
     val aspect get() = w / h.toFloat()
     private var lockedRatio = cut.aspect
     fun changeW(v: Int) { val n = v.coerceIn(16, 8192); if (cut.lockW) return; if (cut.lockA) { if (cut.lockH) return; w = n; h = (n / lockedRatio).roundToInt().coerceIn(16, 8192) } else w = n }
@@ -760,9 +768,20 @@ class CutDraft(val cut: Cut) {
     fun changeAspect(a: Float) { if (cut.lockA || a < 0.1f || (cut.lockW && cut.lockH)) return; if (cut.lockW) h = (w / a).roundToInt().coerceIn(16, 8192) else w = (h * a).roundToInt().coerceIn(16, 8192) }
     fun changeDpi(v: Int) { if (!cut.lockDpi) dpi = v.coerceIn(1, 1200) }
     fun changeFps(v: Int) { if (!cut.lockFps) fps = v.coerceIn(1, 120) }
-    fun reset() { if (!cut.lockW) w = cut.orig[0]; if (!cut.lockH) h = cut.orig[1]; if (!cut.lockDpi) dpi = cut.orig[2]; if (!cut.lockFps) fps = cut.orig[3] }
-    /** Writes the pending values to the Cut. */
-    fun apply() { cut.w = w; cut.h = h; cut.dpi = dpi; cut.fps = fps; cut.aspect = w / h.toFloat() }
+    fun reset() { if (!cut.lockW) { w = cut.orig[0]; ox = 0 }; if (!cut.lockH) { h = cut.orig[1]; oy = 0 }; if (!cut.lockDpi) dpi = cut.orig[2]; if (!cut.lockFps) fps = cut.orig[3] }
+    /** True when Confirm will move or scale the drawing (and therefore clears Undo): Stretch with a changed size, or a left / top edge that was pulled. */
+    val changesContent: Boolean get() = if (stretch) (w != cut.w || h != cut.h) else (ox != 0 || oy != 0)
+    /**
+     * Writes the pending values to the Cut. Stretch scales every layer to the new size; otherwise a moved left / top edge shifts every layer by (ox, oy)
+     * so the picture stays where it is relative to the handle. Both need the OLD Cut size, so they run before the size is replaced.
+     */
+    fun apply() {
+        val ow = cut.w; val oh = cut.h
+        val moves = changesContent
+        if (moves) { if (stretch) stretchCutContent(cut, ow, oh, w, h) else shiftCutContent(cut, ox, oy, ow, oh, w, h) }
+        cut.w = w; cut.h = h; cut.dpi = dpi; cut.fps = fps; cut.aspect = w / h.toFloat()
+        if (moves) cut.clearHistory()
+    }
 }
 
 /** A named, saveable set of colors (palettes.json in the app files directory). */
@@ -1098,6 +1117,8 @@ class Editor : ViewModel() {
         recoveryPending = runCatching { Recovery.pending(dir) }.getOrDefault(emptyList())
         CrashDiagnostics.log("INFO", "Startup load: brushes/palettes ${t1 - t0} ms, ${cuts.size} cut(s) read ${t2 - t1} ms, thumbnails started (background) ${t3 - t2} ms, recovery check ${android.os.SystemClock.elapsedRealtime() - t3} ms")
     }
+    /** Drops a pending selection transform, the selection and the vector point selection (their pixels / masks / points are in the old document coordinates). */
+    fun dropPendingTransform() { xform?.let { it.entry.count = Int.MAX_VALUE; it.entry.pinned = false }; xform = null; sel = null; vecSel = emptySet(); vecSelCels = emptyList() }
     fun saveAll(dir: File) { cuts.forEach { Store.save(dir, it); Recovery.afterSave(dir, it) }; persistBrushes() }
     fun close(dir: File) {
         clearMulti(); cutDraft = null; miniTl = false; miniLayers = false
@@ -1123,6 +1144,29 @@ fun drawingNumber(layer: Layer, index: Int): Int {
         if (s === target) return n
     }
     return n
+}
+
+/** Bijective base-26 letters for an in-between: 1 -> a ... 26 -> z, 27 -> aa. */
+private fun inbetweenLetters(n: Int): String { var q = n; var s = ""; while (q > 0) { q--; s = ('a'.code + q % 26).toChar() + s; q /= 26 }; return s }
+
+/**
+ * Names the frame at [idx] an in-between of the drawing before it (3a, 3b, ...). The number is that of the nearest earlier frame that is not itself an in-between
+ * (frames for which [skip] is true are stepped over too, for several frames named together); the letter is the first one after those already used before this frame
+ * that no other frame of the layer carries. This is the naming of the timeline's "Set inbetweens" button; the frames the interpolation drag makes use it as well.
+ * Call it inside the undoable step that creates / changes the frame ([Cut.record]), so the name is part of the same undo snapshot.
+ */
+fun nameAsInbetween(layer: Layer, idx: Int, skip: (Cel) -> Boolean = { false }) {
+    val cels = layer.cels
+    if (idx !in cels.indices) return
+    var base = idx - 1
+    while (base >= 0 && (skip(cels[base]) || cels[base].inbetweenName.isNotBlank())) base--
+    val baseNumber = if (base < 0) 1 else drawingNumber(layer, base)
+    val mine = Regex("$baseNumber[a-z]+")
+    val used = HashSet<String>()
+    for ((i, c) in cels.withIndex()) if (i != idx && c.inbetweenName.isNotBlank()) used.add(c.inbetweenName)
+    var n = cels.take(idx).count { mine.matches(it.inbetweenName) } + 1
+    while ("$baseNumber${inbetweenLetters(n)}" in used) n++
+    cels[idx].inbetweenName = "$baseNumber${inbetweenLetters(n)}"
 }
 
 /** The timeline label of the frame at [index]: its own name (an inbetween such as 3a) or its [drawingNumber]. */

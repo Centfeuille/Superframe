@@ -423,7 +423,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         7 -> ed.vecXf?.let { rectBox(it.rect, it.mat) }
         1 -> cut.layer?.cam?.let { camBox(it, cut, cut.time) }
         2 -> if (folderSel != null) folderBox(cut, folderSel, cut.time, folderRectNow(folderSel)) else null
-        3 -> ed.cutDraft?.let { rectBox(RectF(0f, 0f, it.w.toFloat(), it.h.toFloat())) }
+        3 -> ed.cutDraft?.let { rectBox(RectF(-it.ox.toFloat(), -it.oy.toFloat(), (it.w - it.ox).toFloat(), (it.h - it.oy).toFloat())) } // the pending frame; a pulled left / top edge sits left of / above the page origin
         6 -> run {
             val layer = cut.layer ?: return@run null
             val tr = cut.transformFor(layer, cut.time)
@@ -506,7 +506,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         gz.ctx = ctx; gz.h = h; gz.d0 = toDoc(sp.x, sp.y, applyLayerGroup = ctx != 3); gz.box0 = b0; gz.snap = null
         val t = cut.time
         when (ctx) {
-            3 -> ed.cutDraft?.let { gz.w0 = it.w; gz.h0 = it.h }
+            3 -> ed.cutDraft?.let { gz.w0 = it.w; gz.h0 = it.h; gz.ox0 = it.ox; gz.oy0 = it.oy }
             0 -> gz.m0 = Matrix(ed.xform!!.mat)
             7 -> gz.m0 = Matrix(ed.vecXf!!.mat)
             1 -> cut.layer?.cam?.let { c -> gz.x0 = c.x(t, cut.w); gz.y0 = c.y(t, cut.h); gz.s0 = c.sc(t); gz.r0 = c.rot(t); gz.w0 = c.w; gz.h0 = c.h; gz.snap = cut.snap() }
@@ -539,8 +539,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 val mx = (bx[0].x + bx[2].x) / 2f; val my = (bx[0].y + bx[2].y) / 2f
                 val sideX = if (hp.x > mx + 1f) 1 else if (hp.x < mx - 1f) -1 else 0
                 val sideY = if (hp.y > my + 1f) 1 else if (hp.y < my - 1f) -1 else 0
-                // Dragging a handle outwards makes the Cut bigger whichever side it is on. The page origin is fixed at (0,0), so the size changes at the right / bottom
-                // (a left / top handle changes the width / height by the same amount).
+                // Dragging a handle outwards makes the Cut bigger whichever side it is on. A left / top handle also moves the page's own left / top edge (dr.ox / dr.oy),
+                // so the content is shifted by that amount when the settings are confirmed; the right / bottom edge stays where it was.
                 val dx = (d.x - gz.d0.x) * sideX; val dy = (d.y - gz.d0.y) * sideY
                 val resizeX = sideX != 0
                 val resizeY = sideY != 0
@@ -554,6 +554,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 } else {
                     if (resizeX) dr.changeW(gz.w0 + dx.roundToInt())
                     if (resizeY) dr.changeH(gz.h0 + dy.roundToInt())
+                }
+                // The edge that moved is the one the handle sits on: the offset follows the size that was actually applied (locks and limits may have refused part of the drag).
+                // With Stretch on the whole drawing is scaled instead, so nothing is offset.
+                if (!dr.stretch) {
+                    if (sideX < 0) dr.ox = gz.ox0 + (dr.w - gz.w0)
+                    if (sideY < 0) dr.oy = gz.oy0 + (dr.h - gz.h0)
                 }
             }
             6 -> {
@@ -699,22 +705,27 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()), ed.vecTipSens)
     }
     /** After [VectorMerge.attach]: the part of the new stroke that stayed a line of its own (crossing / T junction) gets its anchors now; a stroke that joined a line gets none, so the line keeps its own numbers. */
-    fun vecFreshAfterMerge(l: Layer, merged: List<VectorStroke>, newId: String): List<VectorStroke> {
+    fun vecFreshAfterMerge(l: Layer, merged: List<VectorStroke>, newId: String, wasClosed: Boolean = true): List<VectorStroke> {
         if (!ed.vecAutoAnchor) return merged
         val idx = l.indexAt(cut.time)
         val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx)
         return merged.map { s ->
             if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) {
-                // A trace that Merge closed into a ring (it self-merged) follows a closed ghost line like any other trace; it could not before, while it was still open
+                // [wasClosed] false and now closed: the new line closed onto its own start (self-merge). It keeps both end points where they were drawn, so it is numbered and traced as the
+                // open line it was (ends first, then tips) and closed again; a ring that was a closed shape from the start still goes through the ring rules.
+                val selfClosed = s.isClosed && !wasClosed
+                val base = if (selfClosed) s.copy(isClosed = false) else s
+                // A trace that Merge closed into a ring follows a closed ghost line like any other trace
                 val gh = anchorGhostRef[0]
-                val ringTrace = if (s.isClosed && gh != null) { // a closed ghost, or an open one that the trace closes
+                val ringTrace = if (base.isClosed && gh != null) { // a closed ghost, or an open one that the trace closes
                     val blocked = AutoAnchors.usedNumbers(merged.filter { it.id != newId })
                     val gp = gh.first
-                    val ghostNums = if (gp.isClosed) gp.points.map { it.anchor }.filter { it > 0 } else listOf(gp.points.first().anchor, gp.points.last().anchor).filter { it > 0 }
-                    if (ghostNums.isNotEmpty() && ghostNums.none { it in blocked }) AutoAnchors.inherit(s, gp, blocked, ed.vecTipSens) else null
+                    val ghostNums = if (gp.isClosed && !AutoAnchors.seamEnds(gp)) gp.points.map { it.anchor }.filter { it > 0 } else listOf(gp.points.first().anchor, gp.points.last().anchor).filter { it > 0 }
+                    if (ghostNums.isNotEmpty() && ghostNums.none { it in blocked }) AutoAnchors.inherit(base, gp, blocked, ed.vecTipSens) else null
                 } else null
-                if (ringTrace != null) { anchorGhostTrace[0] = true; ed.vecGhostPin = gh!!.first.id; ed.vecGhostPinKey = gh.second; ringTrace }
-                else AutoAnchors.assignFresh(s, used, ed.vecTipSens)
+                val numbered = if (ringTrace != null) { anchorGhostTrace[0] = true; ed.vecGhostPin = gh!!.first.id; ed.vecGhostPinKey = gh.second; ringTrace }
+                    else AutoAnchors.assignFresh(base, used, ed.vecTipSens)
+                if (selfClosed) numbered.copy(isClosed = true) else numbered
             } else s
         }
     }
@@ -744,7 +755,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     val anchored = AutoAnchors.completeGhost(ghost, gTaken, ed.vecTipSens)
                     if (anchored !== ghost && ri >= 0) { val gid = ghost.id; replaceVectorCel(cut, l, ri, refStrokes.map { if (it.id == gid) anchored else it }); ghost = anchored }
                     anchorGhostRef[0] = ghost to gKey
-                    val gPts = ghost.points; val gClosed = ghost.isClosed
+                    val gPts = ghost.points; val gClosed = ghost.isClosed && !AutoAnchors.seamEnds(ghost) // a closed line that kept its two ends counts by its ends, like an open one
                     val ghostNums = gPts.withIndex().filter { it.value.anchor > 0 && (gClosed || it.index == 0 || it.index == gPts.lastIndex) }.map { it.value.anchor } // the ghost's end numbers (a closed ghost: all its numbers)
                     if (ghostNums.isNotEmpty() && ghostNums.any { it in blocked }) {
                         anchorGhostTrace[0] = true
@@ -811,7 +822,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 val cel = l.cels.getOrNull(idx)
                 if (cel != null) {
                     val merged = VectorMerge.attach(cel.vectorStrokes(), shape, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                    if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, shape.id))); return }
+                    if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, shape.id, shape.isClosed))); return }
                 }
             }
             shape = when { anchorGhostTrace[0] -> shape; shapeDeferred -> vecFreshAnchors(l, shape); else -> vecWithEnds(l, shape) } // a ghost trace keeps its reference correspondence even when it remains a separate stroke
@@ -1016,7 +1027,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             val cel = l.cels.getOrNull(idx)
             if (cel != null) {
                 val merged = VectorMerge.attach(cel.vectorStrokes(), stroke, max(ed.vecMergeRadius / vecZoom(), br.size * 0.5f), ed.vecMergeSharp)
-                if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, stroke.id))); return }
+                if (merged != null) { replaceVectorCel(cut, l, idx, vecRefreshAnchors(l, idx, vecFreshAfterMerge(l, merged, stroke.id, stroke.isClosed))); return }
             }
         }
         stroke = when { anchorGhostTrace[0] -> stroke; strokeDeferred -> vecFreshAnchors(l, stroke); else -> vecWithEnds(l, stroke) } // a ghost trace keeps its reference correspondence even when it remains a separate stroke

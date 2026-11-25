@@ -934,14 +934,17 @@ fun CutSettingsPanel(ed: Editor, cut: Cut, draft: CutDraft, modifier: Modifier =
             ResRow("Aspect (w / h)", "%.3f".format(draft.aspect), cut.lockA, { cut.lockA = !cut.lockA; if (cut.lockA) cut.aspect = draft.aspect }) { v -> v.toFloatOrNull()?.let { draft.changeAspect(it) } }
             ResRow("DPI", draft.dpi.toString(), cut.lockDpi, { cut.lockDpi = !cut.lockDpi }) { v -> v.toFloatOrNull()?.let { draft.changeDpi(it.roundToInt()) } }
             ResRow("Images per second", draft.fps.toString(), cut.lockFps, { cut.lockFps = !cut.lockFps }) { v -> v.toFloatOrNull()?.let { draft.changeFps(it.roundToInt()) } }
-            Text("Tap a value to type it on the keypad (it also adds, subtracts, multiplies and divides), or drag the cyan handles on the canvas (right, bottom, corner). A locked value is not changed by edits or by Reset. Nothing is applied until you confirm.", fontSize = 11.sp)
+            FilterChip(draft.stretch, { draft.setStretching(!draft.stretch) }, { Text("Stretch image") }, Modifier.fillMaxWidth())
+            Text(if (draft.stretch) "Stretch is on: Confirm scales the whole drawing (every layer, camera, reference image and folder) so the old frame fills the new size. This clears Undo."
+                else "Stretch is off: the drawing keeps its size. A bigger Cut shows more space, a smaller one crops. Pulling a left or top handle moves that edge of the page and shifts the drawing with it (this clears Undo).", fontSize = 11.sp, color = Color.LightGray)
+            Text("Tap a value to type it on the keypad (it also adds, subtracts, multiplies and divides), or drag the cyan handles on the canvas (any corner or edge). A locked value is not changed by edits or by Reset. Nothing is applied until you confirm.", fontSize = 11.sp)
             FilterChip(GpuLayers.enabled, { GpuLayers.enabled = !GpuLayers.enabled }, { Text("GPU layer compositor") }, Modifier.fillMaxWidth())
             Text(if (GpuLayers.failed) "Unavailable on this device: using the standard renderer." else "Draws the layers below the active layer (and all layers during playback) with OpenGL. Turn off to use the standard renderer.", fontSize = 12.sp, color = Color.LightGray)
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton({ draft.reset() }) { Text("Reset") }
             Spacer(Modifier.weight(1f))
-            Button({ draft.apply(); ed.cutDraft = null }) { Text("Confirm") }
+            Button({ if (draft.changesContent) ed.dropPendingTransform(); draft.apply(); ed.cutDraft = null }) { Text("Confirm") }
         }
     }
 }
@@ -1526,16 +1529,7 @@ private fun TimelineToolbarContent(
             cut.record {
             cut.layers.filter { !it.isGroup && it.kind == 0 }.forEach { layer ->
                 val indices = layer.cels.indices.filter { layer.cels[it] in selected }
-                for (idx in indices) {
-                    var base = idx - 1
-                    while (base >= 0 && layer.cels[base] in selected) base--
-                    val baseNumber = if (base < 0) 1 else drawingNumber(layer, base)
-                    val prior = layer.cels.take(idx).count { it.inbetweenName.startsWith("$baseNumber") }
-                    val n = prior + 1
-                    var q = n; var suffix = ""
-                    while (q > 0) { q--; suffix = ('a'.code + q % 26).toChar() + suffix; q /= 26 }
-                    layer.cels[idx].inbetweenName = "$baseNumber$suffix"
-                }
+                for (idx in indices) nameAsInbetween(layer, idx) { it in selected }
             }
             }
         }, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 0.dp)) { Text("Set inbetweens", fontSize = 11.sp) }

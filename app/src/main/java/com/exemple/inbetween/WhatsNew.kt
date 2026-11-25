@@ -38,6 +38,16 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            88, "2026-11-25", "Cut handles work on every side, Stretch image, self-merge keeps its ends, dragged in-betweens on the timeline",
+            listOf(
+                "Cut settings: the left and top handles now move that edge of the page. Pulling outwards adds space on that side and the drawing keeps its place; pushing inwards crops. Confirming such a resize clears Undo.",
+                "Cut settings: new Stretch image switch. When on, Confirm scales the whole drawing (every layer, camera, reference image, folder) to the new size instead of cropping or adding space. This also clears Undo.",
+                "Merge: a line whose end comes back to its own start is closed without moving or merging its two end points; they stay where you drew them, close to each other, and keep their end anchors.",
+                "Ghost line: tracing a self-merged line with an open line gives the new line the same two end anchors on its ends.",
+                "Interpolation drag: the frames it creates (or fills, in three-frame mode) are now in-betweens on the timeline (3a, 3b ...), like Set inbetweens."
+            )
+        ),
+        ReleaseNote(
             87, "2026-11-25", "Erase points cuts exactly under the pen; split lines pass the end anchor on",
             listOf(
                 "Erase points: where a line has no point under the pen, the cut is made exactly where the pen's circle meets the line (new points are added there), so it is as accurate as the pen and not as coarse as the point spacing.",

@@ -32,7 +32,8 @@ class GzState {
     var box0: List<Offset> = emptyList()
     var m0: Matrix? = null                       // selection: matrix at drag start
     var x0 = 0f; var y0 = 0f; var s0 = 1f; var r0 = 0f // camera / folder values at drag start
-    var w0 = 0; var h0 = 0                       // camera frame size at drag start
+    var w0 = 0; var h0 = 0                       // camera frame size at drag start (Cut settings: pending Cut size)
+    var ox0 = 0; var oy0 = 0                     // Cut settings: how far the page's left / top edge had been moved at drag start
     var snap: Snap? = null                       // undo snapshot (camera / folder)
     var folder: Layer? = null
     var reference0: ReferencePose = ReferencePose()
