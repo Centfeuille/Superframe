@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            85, "2026-11-25", "Interpolation drag ends are exact, vector eraser keeps end anchors, Erase points",
+            listOf(
+                "Interpolation drag: at 0 % the in-between is exactly the previous frame's line and at 100 % exactly the next frame's (same points, anchors, hidden points, look), so the frame you create matches the preview.",
+                "Vector eraser: a line cut by the eraser keeps the anchors on the ends that stayed, and each new end gets an anchor of its own (with Auto anchors on) instead of copying a neighbouring point's number.",
+                "Eraser on a vector layer: the new Erase points button on its bar makes the eraser delete only the points under the pen. The line stays in one piece (the neighbours of a deleted point are joined) and the new ends get their anchors."
+            )
+        ),
+        ReleaseNote(
             84, "2026-11-24", "Vector transform like the raster one, Puppet Warp radius, interpolation preview edited with the Selection tool",
             listOf(
                 "Selection tool on a vector layer: the new Transform button starts a session with box handles, Warp (grid), Puppet Warp (pins), Lock aspect, Magnet, Lock weight, Reset, Cancel and Apply, as on a raster selection. Apply is one undo step.",

@@ -1023,6 +1023,7 @@ class Editor : ViewModel() {
     var vecLockWeight by mutableStateOf(false)          // Selection tool on a vector layer: transforming the selection keeps the line weight (session only)
     var vecMergeSharp by mutableFloatStateOf(0.7f)      // Merge corner sharpness 0..1 stamped on the lines it joins (0 = the usual rounded turns)
     var vecDocZoom = 1f                                 // screen px per document px of the vector canvas, kept up to date by the canvas (for the selection-tool Merge button)
+    var vecErasePoints by mutableStateOf(false)         // vector eraser: erase only the points under the pen (the line stays joined) instead of the part up to the next crossings
     var vecMerge by mutableStateOf(false)               // vector draw: a new line whose end touches an existing line becomes attached to it (one stroke)
     var vecAutoAnchor by mutableStateOf(true)           // vector draw: a new line gets anchors at its ends and curve tips; merged lines keep theirs up to date
     var vecTipSens by mutableFloatStateOf(0.5f)         // how gentle a turn counts as a curve tip, 0..1

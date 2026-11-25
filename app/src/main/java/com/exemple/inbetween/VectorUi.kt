@@ -139,7 +139,8 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val sess = pointBar && ed.vecXf != null // a Transform / Warp / Puppet Warp session is running
     val drawBar = ed.vecMode == 0 && ed.tool == 0
     val lineBar = ed.tool == 4 // Line / shapes tool
-    if (!pointBar && !dragBar && !drawBar && !lineBar) return
+    val eraseBar = ed.tool == 1 // Eraser
+    if (!pointBar && !dragBar && !drawBar && !lineBar && !eraseBar) return
     val ctx = LocalContext.current
     var falloffOpen by remember { mutableStateOf(false) }
     var smoothBarOpen by remember { mutableStateOf(false) } // interpolation drag: the smoothness slider is shown
@@ -264,6 +265,8 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     VIconBtn(Icons.Filled.NavigateNext, tip = "Next ghost line. The ghost stays on a line after you draw it, so a line can be drawn in several strokes; skip when it is done. Traced lines stay on the ghost in yellow-orange (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), 1) } }
                 }
                 VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
+            } else if (eraseBar) {
+                VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecErasePoints, tip = if (ed.vecErasePoints) "Erase points: on. The eraser deletes only the points under the pen and the line stays joined (tap for the normal eraser)" else "Erase points: off. The eraser removes the part of a line up to the next crossings (tap to erase only points)") { ed.vecErasePoints = !ed.vecErasePoints }
             } else if (prevBar) {
                 // Selection tool on the interpolation preview: the preview lines are picked with the pen (tap a line, or drag a rectangle over several)
                 Text(if (ed.vecPreSel.isEmpty()) "Preview · all lines (tap or drag over lines to pick some)" else "Preview · ${ed.vecPreSel.size} line${if (ed.vecPreSel.size == 1) "" else "s"} picked", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))

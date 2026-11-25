@@ -1404,6 +1404,10 @@ object VectorInterpolation {
     }
 
     private fun blend(a: VectorStroke, b: VectorStroke, t: Float): VectorStroke {
+        // 0 % is exactly the previous frame's line and 100 % exactly the next frame's (own points, anchors, hidden points, wobble and look), not a resampled copy of it;
+        // the line keeps the previous line's id so it is still the same line across the frames.
+        if (t <= 1e-4f) return a
+        if (t >= 1f - 1e-4f) return b.copy(id = a.id)
         anchoredBlend(a, b, t)?.let { return it }
         val closed = a.isClosed && b.isClosed
         val bPts = if (closed && a.points.size >= 3 && b.points.size >= 3 && signedArea(a.points) * signedArea(b.points) < 0f) b.points.reversed() else b.points // match winding
@@ -2682,8 +2686,11 @@ object VectorEraser {
         var i = kotlin.math.floor(pos).toInt(); var t = pos - i
         if (closed) i = ((i % segs) + segs) % segs else if (i >= segs) { i = segs - 1; t = 1f } else if (i < 0) { i = 0; t = 0f }
         val a = src[i]; val b = src[i + 1]
-        val q = if (t < 0.5f) a else b
-        return VectorPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.pressure + (b.pressure - a.pressure) * t, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, q.anchor, q.hidden, q.auto, q.endpoint, q.endpointAliases)
+        if (t < 1e-4f) return a // the cut is on an existing point: it keeps everything it had
+        if (t > 1f - 1e-4f) return b
+        // A cut in the middle of a segment makes a NEW end: it must not copy the anchor number (or end identity) of the point next to it, which stays where it is;
+        // the new end gets its own anchor afterwards (Canvas.vecRefreshAnchors).
+        return VectorPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.pressure + (b.pressure - a.pressure) * t, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * t, 0, a.hidden && b.hidden)
     }
 
     private fun slice(src: List<VectorPoint>, segs: Int, closed: Boolean, a: Float, b: Float): List<VectorPoint> {
@@ -2695,6 +2702,25 @@ object VectorEraser {
         val clean = ArrayList<VectorPoint>()
         for (p in out) if (clean.isEmpty() || hypot(p.x - clean.last().x, p.y - clean.last().y) > 1e-3f) clean.add(p)
         return clean
+    }
+
+    /**
+     * Erases POINTS only: every point of every line within [radius] (plus half the line width) of (x, y) is deleted and the rest of each line stays one line
+     * (the neighbours of a deleted point are simply joined). A line left with fewer than two points disappears; a closed line left with fewer than three opens.
+     * Null when no point is within reach. The new ends get their anchors afterwards (Canvas.vecRefreshAnchors).
+     */
+    fun erasePointsAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float): List<VectorStroke>? {
+        var any = false
+        val out = ArrayList<VectorStroke>(strokes.size)
+        for (s in strokes) {
+            val reach = radius + s.baseWidth * 0.5f
+            val keep = s.points.filter { hypot(it.x - x, it.y - y) > reach }
+            if (keep.size == s.points.size) { out.add(s); continue }
+            any = true
+            if (keep.size < 2) continue
+            out.add(s.copy(points = keep, isClosed = s.isClosed && keep.size >= 3))
+        }
+        return if (any) out else null
     }
 
     /** Erases at (x, y); null when no line is within [radius] of that spot. */
