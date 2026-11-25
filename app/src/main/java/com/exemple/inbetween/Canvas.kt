@@ -500,7 +500,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val h = hitHandle(box.map { toScr(it) }, sp, handleSlop, handleSlop + 60f)
         if (h == H_NONE) return false
         if (h == H_MOVE && !(ctx == 0 || ctx == 7 || ctx == 5 || (ctx == 4 && allowMove) || (ctx == 2 && allowMove) || (ctx == 6 && allowMove))) return false // selection and Out of Peg move directly; Camera has its own nudge path
-        if (ctx == 3 && h != 2 && h != 5 && h != 6) return false // Cut is anchored at its top-left; resize from bottom-right, right edge or bottom edge only
+        if (ctx == 3 && h !in 0..7) return false // Cut: every corner and edge handle resizes it (the page origin stays at the top-left)
         if (ctx == 0 && ed.xform == null) { beginTransform(ed, cut); if (ed.xform == null) return false }
         val b0 = gBox(ctx) ?: return false
         gz.ctx = ctx; gz.h = h; gz.d0 = toDoc(sp.x, sp.y, applyLayerGroup = ctx != 3); gz.box0 = b0; gz.snap = null
@@ -533,11 +533,17 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val d = toDoc(sp.x, sp.y, applyLayerGroup = gz.ctx != 3); val t = cut.time
         when (gz.ctx) {
             3 -> ed.cutDraft?.let { dr ->
-                val dx = d.x - gz.d0.x; val dy = d.y - gz.d0.y
-                val resizeX = gz.h == 2 || gz.h == 5
-                val resizeY = gz.h == 2 || gz.h == 6
-                // The page origin is fixed at (0,0). Bottom-right scales both dimensions;
-                // the right/bottom midpoint handles change only their corresponding dimension.
+                // Which side the handle is on, read from where it sits on the box (corners 0..3 clockwise from the top-left, edges 4..7 between them): -1 left / top, +1 right / bottom, 0 = this axis is not touched.
+                val bx = gz.box0
+                val hp = if (gz.h < 4) bx[gz.h] else Offset((bx[gz.h - 4].x + bx[(gz.h - 3) % 4].x) / 2f, (bx[gz.h - 4].y + bx[(gz.h - 3) % 4].y) / 2f)
+                val mx = (bx[0].x + bx[2].x) / 2f; val my = (bx[0].y + bx[2].y) / 2f
+                val sideX = if (hp.x > mx + 1f) 1 else if (hp.x < mx - 1f) -1 else 0
+                val sideY = if (hp.y > my + 1f) 1 else if (hp.y < my - 1f) -1 else 0
+                // Dragging a handle outwards makes the Cut bigger whichever side it is on. The page origin is fixed at (0,0), so the size changes at the right / bottom
+                // (a left / top handle changes the width / height by the same amount).
+                val dx = (d.x - gz.d0.x) * sideX; val dy = (d.y - gz.d0.y) * sideY
+                val resizeX = sideX != 0
+                val resizeY = sideY != 0
                 if (cut.lockA && resizeX && resizeY) {
                     when {
                         cut.lockW && !cut.lockH -> dr.changeH(gz.h0 + dy.roundToInt())

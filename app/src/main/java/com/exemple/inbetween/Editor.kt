@@ -841,8 +841,25 @@ class Editor : ViewModel() {
     var gridOn by mutableStateOf(true)
     var gridFront by mutableStateOf(false) // false = behind artwork, true = in front
     var gridStep by mutableIntStateOf(30)   // document px
-    var flipH by mutableStateOf(false)
-    var flipV by mutableStateOf(false)
+    private var flipHState by mutableStateOf(false)
+    private var flipVState by mutableStateOf(false)
+    /**
+     * Flip the view. The view is mirrored around the centre of the screen (where the zoom and pan put the page), not around the centre of the page: the pan offset is mirrored
+     * with it, so the part of the page that is in the middle of the screen stays there.
+     */
+    var flipH: Boolean
+        get() = flipHState
+        set(v) { if (v != flipHState) flipPan(true); flipHState = v }
+    var flipV: Boolean
+        get() = flipVState
+        set(v) { if (v != flipVState) flipPan(false); flipVState = v }
+    private fun flipPan(horizontal: Boolean) {
+        val a = Math.toRadians(vRot.toDouble()); val c = Math.cos(a).toFloat(); val s = Math.sin(a).toFloat()
+        val o = vOff
+        val ux = o.x * c + o.y * s; val uy = -o.x * s + o.y * c // the pan in the view's own (rotated) axes
+        val mx = if (horizontal) -ux else ux; val my = if (horizontal) uy else -uy
+        vOff = Offset(mx * c - my * s, mx * s + my * c)
+    }
     var viewOpt by mutableIntStateOf(0)     // 0 none, 1 grid options, 2 invert options, 3 bleed options
     var bleedScope by mutableIntStateOf(1)  // "Delete bleed ink" target: 0 current frame, 1 current layer, 2 whole Cut
     var camEdit by mutableStateOf(false)    // move / scale the camera frame on the canvas

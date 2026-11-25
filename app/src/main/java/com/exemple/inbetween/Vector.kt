@@ -2705,20 +2705,29 @@ object VectorEraser {
     }
 
     /**
-     * Erases POINTS only: every point of every line within [radius] (plus half the line width) of (x, y) is deleted and the rest of each line stays one line
-     * (the neighbours of a deleted point are simply joined). A line left with fewer than two points disappears; a closed line left with fewer than three opens.
-     * Null when no point is within reach. The new ends get their anchors afterwards (Canvas.vecRefreshAnchors).
+     * Erases POINTS only: every point of every line within [radius] (plus half the line width) of (x, y) is deleted, and the line is CUT there: the stretches of
+     * points that are left on either side become lines of their own (the first keeps the id, the others get new ones; the ends of a closed line join into one stretch).
+     * A stretch of fewer than two points disappears. Null when no point is within reach. The new ends get their anchors afterwards (Canvas.vecRefreshAnchors).
      */
     fun erasePointsAt(strokes: List<VectorStroke>, x: Float, y: Float, radius: Float): List<VectorStroke>? {
         var any = false
         val out = ArrayList<VectorStroke>(strokes.size)
         for (s in strokes) {
+            val n = s.points.size
             val reach = radius + s.baseWidth * 0.5f
-            val keep = s.points.filter { hypot(it.x - x, it.y - y) > reach }
-            if (keep.size == s.points.size) { out.add(s); continue }
+            val gone = BooleanArray(n) { hypot(s.points[it].x - x, s.points[it].y - y) <= reach }
+            if (gone.none { it }) { out.add(s); continue }
             any = true
-            if (keep.size < 2) continue
-            out.add(s.copy(points = keep, isClosed = s.isClosed && keep.size >= 3))
+            val runs = ArrayList<List<VectorPoint>>()
+            var cur = ArrayList<VectorPoint>()
+            for (i in 0 until n) { if (gone[i]) { if (cur.isNotEmpty()) { runs.add(cur); cur = ArrayList() } } else cur.add(s.points[i]) }
+            if (cur.isNotEmpty()) runs.add(cur)
+            if (s.isClosed && n >= 3 && !gone[0] && !gone[n - 1] && runs.size >= 2) { val last = runs.removeAt(runs.size - 1); val first = runs.removeAt(0); runs.add(0, last + first) } // the ring is cut open: its two ends were one stretch
+            var first = true
+            for (r in runs) {
+                if (r.size < 2) continue
+                out.add(s.copy(id = if (first) s.id else newStrokeId(), points = r, isClosed = false)); first = false
+            }
         }
         return if (any) out else null
     }

@@ -38,11 +38,19 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            86, "2026-11-25", "Erase points cuts the line, flip around the screen centre, Cut handles from every point",
+            listOf(
+                "Erase points: the line is cut where a point is erased; the stretches that are left become separate lines with anchors on their new ends.",
+                "Invert (flip) the canvas: the view now mirrors around the centre of the screen, so what you were looking at stays in the middle after zooming and panning, instead of jumping around the centre of the page.",
+                "Cut settings: all eight handles (corners and edges) resize the Cut now, not just the bottom right. Dragging outwards makes it bigger from any side; the page origin stays at the top-left."
+            )
+        ),
+        ReleaseNote(
             85, "2026-11-25", "Interpolation drag ends are exact, vector eraser keeps end anchors, Erase points",
             listOf(
                 "Interpolation drag: at 0 % the in-between is exactly the previous frame's line and at 100 % exactly the next frame's (same points, anchors, hidden points, look), so the frame you create matches the preview.",
                 "Vector eraser: a line cut by the eraser keeps the anchors on the ends that stayed, and each new end gets an anchor of its own (with Auto anchors on) instead of copying a neighbouring point's number.",
-                "Eraser on a vector layer: the new Erase points button on its bar makes the eraser delete only the points under the pen. The line stays in one piece (the neighbours of a deleted point are joined) and the new ends get their anchors."
+                "Eraser on a vector layer: the new Erase points button on its bar makes the eraser delete only the points under the pen and cut the line there; the new ends get their anchors."
             )
         ),
         ReleaseNote(
