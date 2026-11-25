@@ -344,7 +344,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
                 IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
-                BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed }
+                BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed; ed.vecFixedAll.clear(); ed.vecFixedLines.clear() } // Fixed pins the preview where it is now
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming the preview (Selection tool) keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
                 if (!ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecPlaceSteps.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {

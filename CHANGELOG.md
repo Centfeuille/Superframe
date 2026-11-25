@@ -1,3 +1,13 @@
+## 2026-11-25 (3) — Fixed applies where the preview is; only picked preview lines move
+- AI model: Claude
+- Category: Changed (source code, no format change)
+- Request: (1) Fixed should apply to where the preview currently is; (2) a picked preview line should be the only one that can be dragged.
+- (1) Fixed used to pin the in-between's overall position to the FIRST KEYFRAME's. New `FixedAt` (`Vector.kt`): the centre of the lines is taken from the preview the first time it is drawn with Fixed on (so nothing jumps when Fixed is switched on), then kept while the interpolation is dragged. It is taken again when Fixed is toggled, on `resetPlace`, when the frame / layer changes, and when the group of lines changes. `InbetweenPlace.fixedAt / fixedAtLines`; `Editor.vecFixedAll / vecFixedLines`.
+- (2) With Fixed on, the old single centre meant that dragging ONE picked line moved the group's centre, so every other line was shifted to compensate (the whole preview moved). `fixedShift` is now `fixedShifts`: lines with their own position (picked and dragged: `tLines`) are one group, the others another, each pinned on its own; one shift per pair. Without picks nothing differs.
+- Known: if the user drags a global position after switching Fixed on and then picks a line, the other lines' pin is taken again where they are drawn at that moment.
+- Files: `Vector.kt`, `Editor.kt`, `Canvas.kt`, `VectorUi.kt`, `CHANGELOG.md`.
+- Validation: code reading only; not built. Next: Fixed on at 30%, drag: the preview keeps its place (shapes change); pick one line, drag: only that line changes, the others stay.
+
 ## 2026-11-25 (2) — Warped preview wobbled when the interpolation was dragged: warp steps now stay on their lines
 - AI model: Claude
 - Category: Changed (source code, no format change)

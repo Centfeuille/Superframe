@@ -198,6 +198,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     var vecXfOrig by remember { mutableStateOf<List<VectorStroke>?>(null) }  // Transform / Warp / Puppet session on real lines: the strokes when it began
     var vecXfSc by remember { mutableStateOf<VecScope?>(null) }              // ... and the scope it works on
     var vecXfPrev by remember { mutableStateOf<List<VectorStroke>?>(null) }  // session on the interpolation preview: the preview lines when it began
+    val vecFixedCtx = remember { arrayOfNulls<Any>(1) }                      // frame and layer the Fixed pin was taken on
     val vecXfCtx = remember { arrayOfNulls<Any>(2) }                         // frame and layer the session began on (it ends when either changes)
     var liveOn by remember { mutableStateOf(false) }                  // wand / fill preview overlay (st.bmp)
     var thr by remember { mutableIntStateOf(-1) }
@@ -1315,7 +1316,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     /** The interpolation as it is before any guide joint moves it (Fixed offset, smoothness and per-line positions applied, no manual transform): what a relative joint is measured from. */
     fun vecJointBaseStrokes(source: Cel, target: Cel, cfg: InterpolationConfig, mode: InterpolationMode, chosen: Set<Int>?): List<VectorStroke> {
         val p = ed.inbetweenPlace()
-        val basePlace = p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines) }
+        val basePlace = p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines) }
         return VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode, guideJoints = emptyList()), ed.vecDragT, chosen, false, basePlace)
     }
 
@@ -1928,6 +1929,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecPlaceSteps, vecJointsOn, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
     val vecPreview = remember(*vecPreviewKeys) {
         val pl = vecPrevLayer
+        val fixedCtx = Pair(cut.time, pl)
+        if (vecFixedCtx[0] != fixedCtx) { vecFixedCtx[0] = fixedCtx; ed.vecFixedAll.clear(); ed.vecFixedLines.clear() } // another frame: Fixed pins the preview where it is there
         if (pl == null) emptyList<VectorStroke>() else previewStrokes(pl, true, ed.inbetweenPlace())
     }
     // the unmoved interpolation (no joints, no manual transform): relative joints are measured from it, to be drawn where they are
@@ -1935,7 +1938,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val pl = vecPrevLayer
         if (pl == null || !vecJointsOn || vecPreviewCfg?.guideJoints?.any { it.rel } != true) emptyList<VectorStroke>() else {
             val p = ed.inbetweenPlace()
-            previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines) })
+            previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines) })
         }
     }
 

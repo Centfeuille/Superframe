@@ -1007,9 +1007,11 @@ class Editor : ViewModel() {
         val picked = vecPreSel
         if (picked.isEmpty()) { vecDragT = v; vecDragTLines = emptyMap() } else vecDragTLines = vecDragTLines + picked.associateWith { v }
     }
-    fun resetPlace() { vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
+    val vecFixedAll = FixedAt()                         // where Fixed pins the preview (see FixedAt): the lines dragged on their own / the rest
+    val vecFixedLines = FixedAt()
+    fun resetPlace() { vecFixedAll.clear(); vecFixedLines.clear(); vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
     fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecPlaceSteps.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
-        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps) else null
+        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps, vecFixedAll, vecFixedLines) else null
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)

@@ -1191,6 +1191,12 @@ data class Aff(val sx: Float = 1f, val kx: Float = 0f, val tx: Float = 0f, val k
     }
 }
 
+/** The pinned centre of a group of preview lines for Fixed; it is taken from the preview the first time it is drawn with Fixed on (so Fixed applies where the preview is), and again when the group changes. */
+class FixedAt {
+    var x = 0f; var y = 0f; var set = false; var ids: Set<String>? = null
+    fun clear() { set = false; ids = null }
+}
+
 /**
  * Interpolation drag placement. [fixed] keeps the in-between's overall position at the first keyframe's (the points still interpolate relative to each other).
  * [all] is the manual transform of the whole preview (Shift handles); [lines] adds a transform for single preview lines (key = line id) that is applied after it.
@@ -1199,7 +1205,9 @@ data class Aff(val sx: Float = 1f, val kx: Float = 0f, val tx: Float = 0f, val k
 data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: Map<String, Aff> = emptyMap(), val lockWeight: Boolean = false,
                           val smoothAll: Float = 0f, val smoothLines: Map<String, Float> = emptyMap(), val tLines: Map<String, Float> = emptyMap(),
                           /** Transform / Warp / Puppet Warp steps made with the Selection tool on the preview, applied in order after [all] and [lines]. */
-                          val steps: List<PreviewWarp> = emptyList()) {
+                          val steps: List<PreviewWarp> = emptyList(),
+                          /** Where Fixed pins the preview: the centre the lines had when Fixed was switched on (one for the lines dragged on their own, one for the rest). */
+                          val fixedAt: FixedAt? = null, val fixedAtLines: FixedAt? = null) {
     /** The interpolation position of line [id]: its own (dragged with the line picked), else the whole preview's [t]. */
     fun tOf(id: String, t: Float): Float = tLines[id] ?: t
     /** Smoothness 0..1 of line [id] (see [relaxStroke]): its own value, else the whole preview's. */
@@ -1240,17 +1248,32 @@ object VectorInterpolation {
         return place?.applyTo(r) ?: r
     }
 
-    /** Fixed position: the offset that puts the centre of the blended lines' bounding box where the first keyframe's matching lines have theirs. */
-    private fun fixedShift(aSide: List<VectorStroke>, blended: List<VectorStroke>, place: InbetweenPlace?): Pair<Float, Float> {
-        if (place == null || !place.fixed) return Pair(0f, 0f)
+    /**
+     * Fixed: the overall position of the in-between stays where the preview was when Fixed was switched on (the points still interpolate relative to each other).
+     * Lines that are dragged on their own (picked lines) are one group and the others another, each pinned on its own, so dragging a picked line moves only that line.
+     * Without a pinned centre ([InbetweenPlace.fixedAt] null, e.g. in tests) the first keyframe's centre is used. One shift per pair.
+     */
+    private fun fixedShifts(aSide: List<VectorStroke>, blended: List<VectorStroke>, place: InbetweenPlace?): List<Pair<Float, Float>> {
+        val zero = Pair(0f, 0f)
+        if (place == null || !place.fixed) return aSide.map { zero }
         fun centre(l: List<VectorStroke>): Pair<Float, Float>? {
             var x0 = Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
             for (st in l) for (p in st.points) { x0 = min(x0, p.x); x1 = max(x1, p.x); y0 = min(y0, p.y); y1 = max(y1, p.y) }
             return if (x0 > x1) null else Pair((x0 + x1) / 2f, (y0 + y1) / 2f)
         }
-        val ca = centre(aSide) ?: return Pair(0f, 0f)
-        val cb = centre(blended) ?: return Pair(0f, 0f)
-        return Pair(ca.first - cb.first, ca.second - cb.second)
+        fun shiftFor(idx: List<Int>, holder: FixedAt?): Pair<Float, Float> {
+            if (idx.isEmpty()) return zero
+            val cb = centre(idx.map { blended[it] }) ?: return zero
+            if (holder == null) { val ca = centre(idx.map { aSide[it] }) ?: return zero; return Pair(ca.first - cb.first, ca.second - cb.second) }
+            val group = idx.map { aSide[it].id }.toSet()
+            if (!holder.set || holder.ids != group) { holder.x = cb.first; holder.y = cb.second; holder.ids = group; holder.set = true }
+            return Pair(holder.x - cb.first, holder.y - cb.second)
+        }
+        val own = aSide.indices.filter { place.tLines.containsKey(aSide[it].id) }
+        val rest = aSide.indices.filter { !place.tLines.containsKey(aSide[it].id) }
+        val sOwn = shiftFor(own, place.fixedAtLines)
+        val sRest = shiftFor(rest, place.fixedAt)
+        return aSide.indices.map { if (place.tLines.containsKey(aSide[it].id)) sOwn else sRest }
     }
 
     /** Eased time t = evaluateCurve(u). Uses the Camera / Transformation easing, or the custom Bezier when one is set. */
@@ -1518,9 +1541,9 @@ object VectorInterpolation {
         if (chosen == null) return interpolate(a, b, mode, t, place, guides)
         val pairs = pairSelected(a, b, chosen)
         val blended = pairs.map { blend(a[it.first], b[it.second], place?.tOf(a[it.first].id, t) ?: t) }
-        val fixed = fixedShift(pairs.map { a[it.first] }, blended, place)
+        val fixed = fixedShifts(pairs.map { a[it.first] }, blended, place)
         val moved = HashMap<Int, VectorStroke>()
-        for ((k, pr) in pairs.withIndex()) blended[k].takeIf { visibleStroke(it) }?.let { moved[pr.second] = finish(it, fixed.first, fixed.second, guides, place) }
+        for ((k, pr) in pairs.withIndex()) blended[k].takeIf { visibleStroke(it) }?.let { moved[pr.second] = finish(it, fixed[k].first, fixed[k].second, guides, place) }
         val paired = pairs.map { it.second }.toSet()
         return if (keepRest) b.mapIndexedNotNull { j, st -> if (j in paired) moved[j] else st } else paired.sorted().mapNotNull { moved[it] }
     }
@@ -1535,10 +1558,10 @@ object VectorInterpolation {
         if (chosen == null) return interpolate(a, b, mode, t, place, guides)
         val pairs = pairSelected(a, b, chosen)
         val blended = pairs.map { blend(a[it.first], b[it.second], place?.tOf(a[it.first].id, t) ?: t) }
-        val fixed = fixedShift(pairs.map { a[it.first] }, blended, place)
+        val fixed = fixedShifts(pairs.map { a[it.first] }, blended, place)
         val ids = HashSet<String>()
         val moved = ArrayList<VectorStroke>()
-        for ((k, pr) in pairs.withIndex()) { ids.add(a[pr.first].id); ids.add(b[pr.second].id); blended[k].takeIf { visibleStroke(it) }?.let { moved.add(finish(it, fixed.first, fixed.second, guides, place)) } }
+        for ((k, pr) in pairs.withIndex()) { ids.add(a[pr.first].id); ids.add(b[pr.second].id); blended[k].takeIf { visibleStroke(it) }?.let { moved.add(finish(it, fixed[k].first, fixed[k].second, guides, place)) } }
         val rest = m.filter { it.id !in ids }
         return rest.filter { it.fill != 0 } + moved + rest.filter { it.fill == 0 }
     }
@@ -1549,9 +1572,10 @@ object VectorInterpolation {
         val out = ArrayList<VectorStroke>()
         val paired = HashMap<Int, VectorStroke>()
         for ((i, j) in pairs) { usedA[i] = true; usedB[j] = true; paired[i] = blend(a[i], b[j], place?.tOf(a[i].id, t) ?: t) }
-        val fixed = fixedShift(pairs.map { a[it.first] }, pairs.map { paired.getValue(it.first) }, place)
+        val shifts = fixedShifts(pairs.map { a[it.first] }, pairs.map { paired.getValue(it.first) }, place)
+        val fixedOf = HashMap<Int, Pair<Float, Float>>(); for ((k, pr) in pairs.withIndex()) fixedOf[pr.first] = shifts[k]
         for (i in a.indices) {
-            if (usedA[i]) out.add(finish(paired.getValue(i), fixed.first, fixed.second, guides, place)) else out.add(finish(faded(a[i], (1f - (place?.tOf(a[i].id, t) ?: t)).coerceIn(0f, 1f)), 0f, 0f, guides, place))
+            if (usedA[i]) out.add(finish(paired.getValue(i), fixedOf.getValue(i).first, fixedOf.getValue(i).second, guides, place)) else out.add(finish(faded(a[i], (1f - (place?.tOf(a[i].id, t) ?: t)).coerceIn(0f, 1f)), 0f, 0f, guides, place))
         }
         for (j in b.indices) if (!usedB[j]) out.add(finish(faded(b[j], (place?.tOf(b[j].id, t) ?: t).coerceIn(0f, 1f)), 0f, 0f, guides, place))
         return out.filter { it.points.isNotEmpty() && (it.fill != 0 || it.baseWidth > 0.02f || it.points.any { p -> p.elevationOffset > 0f }) && it.opacity > 0.004f }
