@@ -817,7 +817,7 @@ object LineGhost {
      */
     fun isClaimed(r: VectorStroke, nums: Set<Int>): Boolean {
         if (r.points.isEmpty()) return false
-        if (r.isClosed && !seamEnds(r)) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } } // a closed line that kept its two ends counts by its ends, like an open one
+        if (r.isClosed && !AutoAnchors.seamEnds(r)) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } } // a closed line that kept its two ends counts by its ends, like an open one
         return listOf(r.points.first(), r.points.last()).any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
     }
 
