@@ -1,3 +1,15 @@
+## 2026-11-26 (7) — Reference frames: one or two picked frames, the current frame needs no selection
+- AI model: Claude
+- Category: Changed (vector interpolation drag / line ghost; no `.inb` format change)
+- Request: replace the "exactly three selected frames" requirement for the line ghost and interpolation drag by one or two selected reference frames, working on the current frame without selecting it.
+- `Vector.kt`: `vecRefSelected` (selected frames other than the current one), `VecDragRefs` / `vecDragRefs` (two picked = both ends; one picked = that end + the nearest keyframe on the other side of the current frame; none or more than two = no references).
+- `Canvas.kt`: `previewStrokes`, `guideSourceFor`, `vecJointDown` and the onion references use `vecDragRefs`. `VectorUi.kt`: the drag bar text, Apply (writes into the current frame, no frame created) and the Displace joint source follow the same rule; more than two picked frames asks for one or two.
+- `AutoAnchors.kt`: `LineGhost.reference` uses the picked frames (two: first = previous ghost, last = next ghost; one: the ghost on its own side only, the search finds the other).
+- `WhatsNew.kt`: note 94 reworded. `PROJECT_MEMORY.md` updated. Old three-frame use (A, current, B selected) still works: the current frame is simply ignored in the selection.
+- Protected files untouched. `.inb` format unchanged.
+- Validation: source review of every call site; not compiled, no device test.
+- Follow-up: on the tablet, try one picked frame before and after the current frame, two picked frames, and the Ghost bar's previous / next toggle.
+
 ## 2026-11-26 (6) — Interpolation drag / ghost / points view / timeline curves; pen calibration affine fit
 - AI model: Claude
 - Category: Changed / Added (vector UI, timeline, pen calibration; no `.inb` format change)

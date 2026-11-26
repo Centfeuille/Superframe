@@ -40,7 +40,7 @@ object WhatsNew {
         ReleaseNote(
             94, "2026-11-26", "Interpolation drag, points view, timeline curves and a sturdier pen calibration",
             listOf(
-                "Interpolation drag: the preview is drawn in its own colour and the keyframes it comes from show as onion skins (previous red, next green). With three frames selected those are the two outer frames, and the line ghost also follows them (previous or next, as set on the Ghost bar). With the Selection tool the current frame no longer shows its points.",
+                "Interpolation drag: the preview is drawn in its own colour and the keyframes it comes from show as onion skins (previous red, next green). Pick one or two reference frames in the timeline (the current frame needs no selection) and those are the ends, the result lands in the current frame, and the line ghost follows them too (previous or next, as set on the Ghost bar). With one picked frame, the nearest keyframe on the other side of the current frame is the other end. With the Selection tool the current frame no longer shows its points.",
                 "Selection tool: a new button cycles the points view: all points, only anchor points, or none.",
                 "Interpolation settings now also work after Select all (they apply to every keyframe) and have an Off button; each keyframe keeps its own guide joints.",
                 "Vector layers with interpolation turned on get an arrow beside the layer name that opens a curves view: the easing curve of every span, with Linear / Ease / In / Out, strength, Settings and Off.",

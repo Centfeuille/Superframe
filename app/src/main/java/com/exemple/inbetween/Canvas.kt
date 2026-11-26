@@ -1402,9 +1402,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     fun guideSourceFor(layer: Layer): Pair<Cel, Cel>? {
-        val selected = vecSelectedFrames(layer, ed)
-        if (selected.size == 3) return if (layer.celAt(cut.time) === selected[1]) selected[0] to selected[2] else null
-        if (selected.isNotEmpty()) return null
+        if (vecRefSelected(layer, ed, cut.time).isNotEmpty()) return vecDragRefs(layer, ed, cut.time)?.let { it.a to it.b } // reference frames picked: they are the ends (the current frame needs no selection)
         val i = layer.indexAt(cut.time)
         if (i < 1 || i >= layer.cels.size) return null
         return layer.cels[i - 1] to layer.cels[i]
@@ -1543,8 +1541,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val (source, target) = pair
         val cfg = source.vecCfg ?: InterpolationConfig()
         val mode = if (cfg.mode == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else cfg.mode
-        val selectedFrames = vecSelectedFrames(l, ed)
-        val chosen = if (selectedFrames.size == 3) vecSelectedLinesIn(ed, target)
+        val chosen = if (vecRefSelected(l, ed, cut.time).isNotEmpty()) vecSelectedLinesIn(ed, target)
             else vecSelectedLineIndices(cut, ed, target).takeIf { it.isNotEmpty() }
         val place = ed.inbetweenPlace()
         val preview = VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode), ed.vecDragT, chosen, false, place)
@@ -1928,14 +1925,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val vecPreviewCfg = vecPrevLayer?.let { layer -> guideSourceFor(layer)?.first?.vecCfg }
     /** The interpolation preview of [pl] at the dragged position. [joints] = false leaves the guide joints out and [place] = what to place it with (the unmoved line a relative joint is measured from). */
     fun previewStrokes(pl: Layer, joints: Boolean, place: InbetweenPlace?): List<VectorStroke> {
-        val fs = vecSelectedFrames(pl, ed)
         fun cfgOf(c: InterpolationConfig?, pm: InterpolationMode): InterpolationConfig = (c ?: InterpolationConfig()).copy(mode = pm).let { if (joints) it else it.copy(guideJoints = emptyList()) }
-        return if (fs.size == 3) { // three frames selected: the two outer frames are the references, the result lands on the middle one (shown while the playhead is on it)
-            if (pl.celAt(cut.time) !== fs[1]) emptyList<VectorStroke>() else {
-                val pm = (fs[0].vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
-                VectorInterpolation.interpolateConfigured(fs[0].vectorStrokes(), fs[2].vectorStrokes(), cfgOf(fs[0].vecCfg, pm), ed.vecDragT, vecSelectedLinesIn(ed, fs[2]), false, place)
+        return if (vecRefSelected(pl, ed, cut.time).isNotEmpty()) { // reference frames picked (one or two, the current frame needs no selection): they are the ends, the result lands on the current frame
+            val r = vecDragRefs(pl, ed, cut.time)
+            if (r == null) emptyList<VectorStroke>() else {
+                val pm = (r.a.vecCfg ?: InterpolationConfig()).mode.let { if (it == InterpolationMode.NONE) InterpolationMode.SAME_STROKE else it }
+                VectorInterpolation.interpolateConfigured(r.a.vectorStrokes(), r.b.vectorStrokes(), cfgOf(r.a.vecCfg, pm), ed.vecDragT, vecSelectedLinesIn(ed, r.b), false, place)
             }
-        } else if (fs.size == 2 || fs.size > 3) emptyList<VectorStroke>() else {
+        } else {
             val pi = pl.indexAt(cut.time)
             if (pi < 1) emptyList<VectorStroke>() else {
                 val pc = pl.cels[pi - 1]; val cc = pl.cels[pi]
@@ -2336,14 +2333,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     }
                 }
                 // Interpolation drag / preview on a vector layer: the keyframes the preview is made from are shown as onion skins (previous red, next green) and the
-                // layer's own picture is replaced by the preview, which is drawn in its natural colour. With three frames selected the references are the two outer
-                // selected frames; otherwise the previous keyframe (red) and the current one (green).
+                // layer's own picture is replaced by the preview, which is drawn in its natural colour. With reference frames picked the references are the
+                // picked reference frames (see vecDragRefs); otherwise the previous keyframe (red) and the current one (green).
                 if (vecPrevLayer != null && vecPreview.isNotEmpty()) {
                     val pl = vecPrevLayer
-                    val fs = vecSelectedFrames(pl, ed)
+                    val dr = vecDragRefs(pl, ed, cut.time)
                     val pi = pl.indexAt(cut.time)
                     val refs: List<Pair<Cel, android.graphics.ColorFilter?>> =
-                        if (fs.size == 3) listOf(Pair(fs[0], red), Pair(fs[2], green))
+                        if (dr != null) listOf(Pair(dr.a, red), Pair(dr.b, green))
                         else listOfNotNull(pl.cels.getOrNull(pi - 1)?.let { Pair(it, red) }, pl.cels.getOrNull(pi)?.let { Pair(it, green) })
                     for ((rc, flt) in refs) {
                         if (rc.strokes.isEmpty()) continue

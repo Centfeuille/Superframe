@@ -209,8 +209,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         if (sess) VecXformRows(ed)
         if (prevBar && !sess && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             // Displace on the preview: guide joints on the in-between's lines (stored with the first keyframe's interpolation, so they are kept when it is made)
-            val pFrames = vecSelectedFrames(layer, ed)
-            val jointSource = if (pFrames.size == 3) pFrames[0] else layer.cels.getOrNull(idx - 1)
+            val jointSource = if (vecRefSelected(layer, ed, cut.time).isNotEmpty()) vecDragRefs(layer, ed, cut.time)?.a else layer.cels.getOrNull(idx - 1)
             val jointCfg = jointSource?.vecCfg
             val jointCount = jointCfg?.guideJoints?.size ?: 0
             Text(if (jointCount == 0) "Displace · tap a preview line to add a joint, then drag it" else "Displace · $jointCount joint${if (jointCount == 1) "" else "s"} (tap a selected joint again to delete it)", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
@@ -341,17 +340,21 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.AutoFixHigh, enabled = has, tip = "Smooth the selected points") { smoothOpen = true }
                 VIconBtn(Icons.Filled.Anchor, enabled = has, tint = Color(anchorColor(1, 3)), tip = "Anchor: number the selected points so the same numbers in the next keyframe are interpolated toward each other") { if (sc != null && !autoAnchor(cut, ed, sc)) anchorOpen = true }
             } else {
-                val frames = vecSelectedFrames(layer, ed)
-                val three = frames.size == 3
-                val badFrames = frames.size == 2 || frames.size > 3
-                val ready = if (three) true else idx >= 1 && cel != null && !badFrames
-                val lineSel = if (three) vecSelectedLinesIn(ed, frames[2]) else null
-                val selLines = if (three) (lineSel?.size ?: 0) else if (ready) vecSelectedLineIndices(cut, ed, cel).size else 0
-                val linesNote = if (selLines > 0) " · $selLines selected line${if (selLines == 1) "" else "s"}" else if (three && lineSel != null) " · selected line not found in the last frame" else ""
+                // Reference frames: the frames picked in the timeline OTHER than the current one (which needs no selection). One or two are the ends of the interpolation and the
+                // result lands in the current frame; none = the previous and the current keyframe (a new frame is created).
+                val refPicked = vecRefSelected(layer, ed, cut.time)
+                val refs = vecDragRefs(layer, ed, cut.time)
+                val byRefs = refPicked.isNotEmpty()
+                val badFrames = refPicked.size > 2
+                val ready = if (byRefs) refs != null else idx >= 1 && cel != null
+                val lineSel = if (refs != null) vecSelectedLinesIn(ed, refs.b) else null
+                val selLines = if (byRefs) (lineSel?.size ?: 0) else if (ready) vecSelectedLineIndices(cut, ed, cel).size else 0
+                val linesNote = if (selLines > 0) " · $selLines selected line${if (selLines == 1) "" else "s"}" else if (byRefs && lineSel != null) " · selected line not found in the last reference frame" else ""
                 Text(
-                    if (three) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → middle frame" + linesNote + (if (layer.celAt(cut.time) !== frames[1]) " (go to it to preview)" else "")
-                    else if (badFrames) "Select exactly three frames (two ends and the one between), or none"
-                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} picked" else "") else "Needs a previous keyframe",
+                    if (byRefs && refs != null) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → current frame (${refPicked.size} reference frame${if (refPicked.size == 1) "" else "s"})" + linesNote
+                    else if (badFrames) "Pick one or two reference frames (the current frame needs no selection), or none"
+                    else if (byRefs) "A reference frame needs a keyframe on the other side of the current frame"
+                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} refPicked" else "") else "Needs a previous keyframe",
                     fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
                 IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                 BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed; ed.vecFixedAll.clear(); ed.vecFixedLines.clear() } // Fixed pins the preview where it is now
@@ -369,10 +372,10 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     }
                 }
                 IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake, and Off") { ed.vecInterpOpen = true }
-                IconBtn(Icons.Filled.Check, tip = if (three) "Apply: the interpolation of the first and last selected frame replaces the middle selected frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
-                    if (three) {
-                        if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
-                    } else if (badFrames) android.widget.Toast.makeText(ctx, "Select exactly three frames: the two ends are the references, the one between receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
+                IconBtn(Icons.Filled.Check, tip = if (byRefs) "Apply: the interpolation of the reference frames replaces the current frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
+                    if (byRefs && refs != null) {
+                        if (interpolateIntoFrame(cut, ed, layer, refs.a, refs.m, refs.b, ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
+                    } else if (badFrames || byRefs) android.widget.Toast.makeText(ctx, "Pick one or two reference frames (a single one needs a keyframe on the other side of the current frame); the current frame receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
                     else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
                     else android.widget.Toast.makeText(ctx, "Move to a keyframe that has a previous keyframe", android.widget.Toast.LENGTH_SHORT).show()
                 }

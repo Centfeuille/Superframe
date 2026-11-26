@@ -897,17 +897,19 @@ object LineGhost {
 
     /**
      * The nearest previous (or next) keyframe whose drawing differs from the current one and has vector strokes (clones of the current drawing and empty frames are skipped).
-     * With three frames selected in the timeline and the playhead on the middle one (the interpolation-drag "three frames" setup), the references are the two OUTER selected
-     * frames instead: the first for the previous ghost, the last for the next ghost ([ed] given; an outer frame that shows the same drawing or is empty falls back to the search).
+     * With one or two frames picked in the timeline (other than the current frame, which needs no selection) and [ed] given, the picked frames are the references instead: with two, the
+     * first is the previous ghost and the last the next ghost; with one, it is the ghost on its own side. A picked frame that shows the same drawing or is empty falls back to the search.
      */
     fun reference(layer: Layer, idx: Int, next: Boolean, ed: Editor? = null): Cel? {
         val cur = layer.cels.getOrNull(idx) ?: return null
         if (ed != null) {
-            val fs = vecSelectedFrames(layer, ed)
-            if (fs.size == 3 && fs[1] === cur) {
-                val edge = if (next) fs[2] else fs[0]
-                if (edge.strokes !== cur.strokes && edge.strokes.any { it.kind == 5 }) return edge
+            val sel = vecRefSelected(layer, ed, layer.startOf(idx))
+            val pick: Cel? = when (sel.size) {
+                2 -> if (next) sel[1] else sel[0]
+                1 -> if (next == (layer.cels.indexOfFirst { it === sel[0] } > idx)) sel[0] else null // the one picked frame is the ghost on its own side only
+                else -> null
             }
+            if (pick != null && pick.strokes !== cur.strokes && pick.strokes.any { it.kind == 5 }) return pick
         }
         var i = if (next) idx + 1 else idx - 1
         while (i in layer.cels.indices) {

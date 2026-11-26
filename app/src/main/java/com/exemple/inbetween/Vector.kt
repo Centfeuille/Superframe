@@ -2051,8 +2051,40 @@ fun createDraggedInbetween(cut: Cut, layer: Layer, time: Int, t: Float, keepLeng
 }
 
 
-/** The frames of [layer] that are selected in the timeline (ed.selCels), in timeline order. Exactly three switch the interpolation drag to "three frames" mode. */
+/** The frames of [layer] that are selected in the timeline (ed.selCels), in timeline order. */
 fun vecSelectedFrames(layer: Layer, ed: Editor): List<Cel> = layer.cels.filter { c -> ed.selCels.any { it === c } }
+
+/**
+ * The reference frames the person picked for the interpolation drag and the line ghost: the selected frames OTHER than the one at the playhead (the current frame never has
+ * to be selected; selecting it too changes nothing), in timeline order. Empty = classic mode (previous keyframe and current keyframe). One or two are valid, more are too many.
+ */
+fun vecRefSelected(layer: Layer, ed: Editor, time: Int): List<Cel> {
+    val cur = layer.celAt(time)
+    return vecSelectedFrames(layer, ed).filter { it !== cur }
+}
+
+/** Reference-frame drag: [a] and [b] are the references (timeline order), the result lands in the current frame [m]. */
+class VecDragRefs(val a: Cel, val m: Cel, val b: Cel)
+
+/**
+ * Resolves the reference frames for the current frame at [time]. Two picked frames are both references. One picked frame is one end and the nearest keyframe on the OTHER side of
+ * the current frame is the other end (null when there is none). Null as well when nothing or more than two are picked, or there is no current frame.
+ */
+fun vecDragRefs(layer: Layer, ed: Editor, time: Int): VecDragRefs? {
+    val cur = layer.celAt(time) ?: return null
+    val ci = layer.cels.indexOfFirst { it === cur }
+    if (ci < 0) return null
+    val sel = vecRefSelected(layer, ed, time)
+    return when (sel.size) {
+        2 -> VecDragRefs(sel[0], cur, sel[1])
+        1 -> {
+            val r = sel[0]
+            if (layer.cels.indexOfFirst { it === r } < ci) layer.cels.getOrNull(ci + 1)?.let { VecDragRefs(r, cur, it) }
+            else layer.cels.getOrNull(ci - 1)?.let { VecDragRefs(it, cur, r) }
+        }
+        else -> null
+    }
+}
 
 /** Ids of the lines that have a selected point, over the whole selection scope (they identify the same lines in other keyframes). */
 fun vecSelectedLineIds(cut: Cut, ed: Editor): Set<String> {
@@ -2065,8 +2097,8 @@ fun vecSelectedLineIds(cut: Cut, ed: Editor): Set<String> {
 }
 
 /**
- * Interpolation drag in "three frames" mode: [a] and [b] (the two outer selected frames) are the references, and the interpolation at [t] is written INTO the
- * middle frame [m] (no frame is created). Only the selected lines of the last frame [b] ([chosen], see [vecSelectedLinesIn]) with their anchor / id partners in [a]; every line when null. [m] is replaced by a fresh frame of its own, so a clone of another
+ * Interpolation drag with reference frames: [a] and [b] (see [vecDragRefs]) are the references, and the interpolation at [t] is written INTO the
+ * current frame [m] (no frame is created). Only the selected lines of the last frame [b] ([chosen], see [vecSelectedLinesIn]) with their anchor / id partners in [a]; every line when null. [m] is replaced by a fresh frame of its own, so a clone of another
  * frame is not changed along with it. False when [m] is not on the layer.
  */
 fun interpolateIntoFrame(cut: Cut, ed: Editor, layer: Layer, a: Cel, m: Cel, b: Cel, t: Float, chosen: Set<Int>?): Boolean {
