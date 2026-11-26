@@ -156,7 +156,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val brushMode = ed.vecBrush
     // Brush / Merge sliders flush with the left edge of the canvas, Auto anchors flush with the right edge, the button bar in the middle
     Box(modifier.fillMaxWidth()) {
-    Column(Modifier.align(Alignment.BottomStart), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart), verticalArrangement = Arrangement.spacedBy(6.dp)) {
     if (brushRow && brushMode != 0) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("${listOf("", "Shift", "Smoothen", "Distort")[brushMode.coerceIn(1, 3)]} brush", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -184,7 +184,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         }
     }
     }
-    Column(Modifier.align(Alignment.BottomEnd)) {
+    Column(Modifier.align(if (AppSettings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd)) {
     if ((drawBar || lineBar) && ed.vecAnchorOpen) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("Auto anchors", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {

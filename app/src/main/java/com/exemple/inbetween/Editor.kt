@@ -1098,6 +1098,10 @@ class Editor : ViewModel() {
     var timelineOpen by mutableStateOf(true)
 
     private var loaded = false
+    /** The "open the last Cut at startup" check has run in this process. */
+    var autoOpenDone = false
+    /** A Cut waiting for the user's answer to "Delete this Cut?" (Settings > Safety > Confirm destructive actions). */
+    var pendingDelete by mutableStateOf<Cut?>(null)
     /** Cuts with a crash-recovery snapshot newer than their saved file; computed once per process, at the first load. */
     var recoveryPending: List<Recovery.Pending> = emptyList()
     var recoveryResolved by mutableStateOf(false)
@@ -1106,6 +1110,7 @@ class Editor : ViewModel() {
         loaded = true
         val t0 = android.os.SystemClock.elapsedRealtime()
         BrushAssets.init(dir); loadBrushes(dir); loadPalettes(dir)
+        AppSettings.load(dir); timelineH = AppSettings.timelineHeightDp // Settings.kt: default timeline height; the other options are read where they act
         val t1 = android.os.SystemClock.elapsedRealtime()
         cuts.addAll(Store.load(dir, context))
         library.load(dir)

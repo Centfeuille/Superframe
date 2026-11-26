@@ -126,11 +126,11 @@ class MainActivity : ComponentActivity() {
                             onContinue = { recoveryContinued = true }
                         )
                         else -> {
-                            App(ed)
+                            App(ed, autoOpenLast = previousStartup == null)
                             RecoveryAutosave(ed)
                             AudioScrubHost(ed)
                             if (ed.recoveryPending.isNotEmpty() && !ed.recoveryResolved) RecoveryDialog(ed, ed.recoveryPending) { ed.recoveryResolved = true }
-                            else WhatsNewHost()
+                            else if (AppSettings.showWhatsNew) WhatsNewHost()
                         }
                     }
                 }
@@ -171,9 +171,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun App(ed: Editor, previousStartup: String? = null) {
+fun App(ed: Editor, previousStartup: String? = null, autoOpenLast: Boolean = true) {
     LaunchedEffect(Unit) { CrashDiagnostics.markHealthy() }
     val cut = ed.open
+    // Settings > Startup: open the Cut that was open last. Once per process (the Editor outlives rotations), never after an incomplete previous launch
+    // and never while a crash-recovery choice is pending.
+    LaunchedEffect(Unit) {
+        if (!ed.autoOpenDone) {
+            ed.autoOpenDone = true
+            if (autoOpenLast && AppSettings.openLastCut && ed.open == null && ed.recoveryPending.isEmpty()) {
+                ed.cuts.firstOrNull { it.id == AppSettings.lastCutId }?.let { ed.open = it }
+            }
+        }
+    }
+    LaunchedEffect(cut?.id) { if (cut != null && AppSettings.lastCutId != cut.id) { AppSettings.lastCutId = cut.id; AppSettings.save() } }
     val ctx = LocalContext.current
     BackHandler(enabled = cut != null) { if (ed.fullscreen) ed.fullscreen = false else ed.close(ctx.filesDir) }
     if (cut == null) MenuScreen(ed, previousStartup) else EditorScreen(ed, cut)
@@ -187,6 +198,16 @@ fun MenuScreen(ed: Editor, previousStartup: String? = null) {
     var note by remember { mutableStateOf<String?>(null) }
     var pending by remember { mutableStateOf<Cut?>(null) }
     var diagnosticsOpen by remember { mutableStateOf(previousStartup != null) }
+    // Settings > Safety: deleting a Cut cannot be undone, so it can ask first (CutBrowser sets ed.pendingDelete).
+    ed.pendingDelete?.let { doomed ->
+        AlertDialog(
+            onDismissRequest = { ed.pendingDelete = null },
+            title = { Text("Delete “${doomed.name}”?") },
+            text = { Text("The Cut and its saved file are removed. This cannot be undone.") },
+            confirmButton = { TextButton({ ed.remove(doomed, ctx.filesDir); ed.pendingDelete = null }) { Text("Delete", color = Color(0xFFFF8A80)) } },
+            dismissButton = { TextButton({ ed.pendingDelete = null }) { Text("Cancel") } }
+        )
+    }
     val importPick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             val c = withContext(Dispatchers.IO) { runCatching { ctx.contentResolver.openInputStream(uri)!!.use { Store.unpack(it, ctx.filesDir, ctx) } }.getOrNull() }
@@ -346,6 +367,8 @@ fun EditorScreen(ed: Editor, cut: Cut) {
     var settingsOpen by remember { mutableStateOf(false) }
     var shortcutsOpen by remember { mutableStateOf(false) }
     var exportOpen by remember { mutableStateOf(false) }
+    // Settings > Layout: open every Cut with the panels hidden (the user can still leave fullscreen with the button / Back).
+    LaunchedEffect(cut.id) { if (AppSettings.startFullscreen) ed.fullscreen = true }
     // Hardware keyboard: the editor root holds focus and runs the shortcuts (see Keys.kt); text fields still get their own keys first.
     val keyFocus = remember { FocusRequester() }
     remember { KeyBindings.ensureLoaded(ctx.filesDir) }
@@ -469,6 +492,7 @@ fun EditorScreen(ed: Editor, cut: Cut) {
     Media3AudioLayerPlayback(cut, ed, ctx)
     Box(Modifier.fillMaxSize().background(BG).statusBarsPadding().navigationBarsPadding().focusRequester(keyFocus).focusable().onKeyEvent { handleKey(ed, cut, it.nativeKeyEvent, keyActions) }) {
         Row(Modifier.fillMaxSize()) {
+            if (AppSettings.leftHanded && !ed.fullscreen) ToolPanel(ed, cut, panel) { p -> panel = p; if (p != 0) shown = p; if (p == 1) optsDetail = false }
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 Row(Modifier.fillMaxWidth().background(BG).zIndex(1f).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconBtn(Icons.AutoMirrored.Filled.ArrowBack) { ed.fullscreen = false; ed.close(ctx.filesDir) }
@@ -495,7 +519,7 @@ fun EditorScreen(ed: Editor, cut: Cut) {
                 }
                 DrawingCanvas(
                     ed, cut,
-                    Modifier.weight(1f).fillMaxWidth().padding(if (ed.fullscreen) 2.dp else 8.dp)
+                    Modifier.weight(1f).fillMaxWidth().background(AppSettings.workspace).padding(if (ed.fullscreen) 2.dp else 8.dp)
                         .pointerInput(Unit) { // touching the canvas gives the keyboard shortcuts focus back (e.g. after typing in a number field)
                             awaitEachGesture { awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final); runCatching { keyFocus.requestFocus() } }
                         }
@@ -513,12 +537,12 @@ fun EditorScreen(ed: Editor, cut: Cut) {
                     if (ed.timelineOpen) Timeline(ed, cut, Modifier.fillMaxWidth().height(ed.timelineH.dp))
                 }
             }
-            if (!ed.fullscreen) ToolPanel(ed, cut, panel) { p -> panel = p; if (p != 0) shown = p; if (p == 1) optsDetail = false }
+            if (!AppSettings.leftHanded && !ed.fullscreen) ToolPanel(ed, cut, panel) { p -> panel = p; if (p != 0) shown = p; if (p == 1) optsDetail = false }
         }
         // Performance profiler: HUD (hideable), persistent recording indicator, frame-metrics lifecycle. See PerformanceProfiler.kt.
         PerformanceEffects()
-        PerformanceHud(Modifier.align(Alignment.TopEnd).padding(top = 52.dp, end = 84.dp))
-        PerformanceRecordingIndicator(Modifier.align(Alignment.TopStart).padding(top = 52.dp, start = 8.dp))
+        PerformanceHud(Modifier.align(if (AppSettings.leftHanded) Alignment.TopStart else Alignment.TopEnd).padding(top = 52.dp, start = if (AppSettings.leftHanded) 84.dp else 0.dp, end = if (AppSettings.leftHanded) 0.dp else 84.dp))
+        PerformanceRecordingIndicator(Modifier.align(if (AppSettings.leftHanded) Alignment.TopEnd else Alignment.TopStart).padding(top = 52.dp, start = if (AppSettings.leftHanded) 0.dp else 8.dp, end = if (AppSettings.leftHanded) 8.dp else 0.dp))
         // The selection widget bar (invert, fill, add / erase, transform, warp, puppet, apply) lives in DrawingCanvas so it follows the selection: SelectionBar.kt.
         if (cut.layer?.kind == 5 && !cut.playing) {
             val refLayer = cut.layer!!
@@ -560,39 +584,22 @@ fun EditorScreen(ed: Editor, cut: Cut) {
             Timeline(ed, cut, Modifier.fillMaxWidth().height((28 + 44 * miniRowCount(cut)).dp), mode = 2)
         }
         // Keep the dismiss surface below the fullscreen radial menu and options panel so their controls remain tappable.
-        if (panel != 0) Box(Modifier.fillMaxSize().padding(end = if (ed.fullscreen) 0.dp else TOOL_W).pointerInput(Unit) { detectTapGestures { panel = 0 } })
+        if (panel != 0) Box(Modifier.fillMaxSize().toolSidePadding(if (ed.fullscreen) 0.dp else TOOL_W).pointerInput(Unit) { detectTapGestures { panel = 0 } })
         TransformBars(ed, cut)
         CameraOverlays(ed, cut)
         // Keep the settings panel away from the right/bottom Cut resize handles.
-        ed.cutDraft?.let { dr -> CutSettingsPanel(ed, cut, dr, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 56.dp).heightIn(max = 460.dp)) }
+        ed.cutDraft?.let { dr -> CutSettingsPanel(ed, cut, dr, Modifier.align(if (AppSettings.leftHanded) Alignment.TopEnd else Alignment.TopStart).padding(start = if (AppSettings.leftHanded) 0.dp else 8.dp, end = if (AppSettings.leftHanded) 8.dp else 0.dp, top = 56.dp).heightIn(max = 460.dp)) }
         ViewPopups(ed, cut)
         AnimatedVisibility(
-            panel != 0, Modifier.align(if (shown == 1) Alignment.TopEnd else Alignment.CenterEnd).padding(end = if (ed.fullscreen) 8.dp else TOOL_W).zIndex(7f),
-            enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
-            exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut()
+            panel != 0,
+            Modifier.align(if (AppSettings.leftHanded) (if (shown == 1) Alignment.TopStart else Alignment.CenterStart) else (if (shown == 1) Alignment.TopEnd else Alignment.CenterEnd))
+                .toolSidePadding(if (ed.fullscreen) 8.dp else TOOL_W).zIndex(7f),
+            enter = expandHorizontally(expandFrom = if (AppSettings.leftHanded) Alignment.Start else Alignment.End) + fadeIn(),
+            exit = shrinkHorizontally(shrinkTowards = if (AppSettings.leftHanded) Alignment.Start else Alignment.End) + fadeOut()
         ) { if (shown == 1) OptionsPanel(ed, optsDetail) { optsDetail = it } else QuickPanel(ed) }
         if (ed.fullscreen) FullscreenRadialTools(ed) { p -> panel = p; if (p != 0) shown = p; if (p == 1) optsDetail = false }
     }
-    if (settingsOpen) AlertDialog(
-        onDismissRequest = { settingsOpen = false }, title = { Text("Settings") },
-        text = {
-            Column {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { settingsOpen = false; shortcutsOpen = true }.padding(horizontal = 8.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Filled.Keyboard, null, Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Keyboard shortcuts")
-                        Text("View and rebind keys for playback, tools, layers and the view", fontSize = 12.sp, color = Color.Gray)
-                    }
-                    Icon(Icons.Filled.KeyboardArrowRight, null, Modifier.size(24.dp))
-                }
-            }
-        },
-        confirmButton = { TextButton({ settingsOpen = false }) { Text("Close") } }
-    )
+    if (settingsOpen) SettingsDialog(onKeyboard = { settingsOpen = false; shortcutsOpen = true }, onClose = { settingsOpen = false })
     if (shortcutsOpen) KeyboardShortcutsDialog(ctx.filesDir, onBack = { shortcutsOpen = false; settingsOpen = true }, onClose = { shortcutsOpen = false })
     if (exportOpen) AlertDialog(
         onDismissRequest = { exportOpen = false },
@@ -706,7 +713,7 @@ private fun BoxScope.FullscreenRadialTools(ed: Editor, setPanel: (Int) -> Unit) 
     var dragVector by remember { mutableStateOf(Offset.Zero) }
     Box(Modifier.fillMaxSize().zIndex(6f)) {
         if (ed.radialToolsOpen) Box(Modifier.fillMaxSize().clickable { ed.radialToolsOpen = false; setPanel(0) })
-        Box(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 8.dp).size(360.dp, 310.dp)) {
+        Box(Modifier.align(if (AppSettings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(start = if (AppSettings.leftHanded) 8.dp else 0.dp, end = if (AppSettings.leftHanded) 0.dp else 8.dp, bottom = 8.dp).size(360.dp, 310.dp)) {
         if (armed) androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             val c = Offset(180.dp.toPx(), 155.dp.toPx())
             drawLine(Color.White.copy(alpha = 0.85f), c, c + dragVector, strokeWidth = 3.dp.toPx())

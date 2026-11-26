@@ -923,6 +923,15 @@ fun NumpadDialog(title: String, initial: Int, onOk: (Int) -> Unit, onDismiss: ()
  */
 @Composable
 fun CutSettingsPanel(ed: Editor, cut: Cut, draft: CutDraft, modifier: Modifier = Modifier) {
+    // Settings > Safety: a resize that moves / scales the drawing clears Undo, so Confirm can ask first.
+    var askClearUndo by remember { mutableStateOf(false) }
+    if (askClearUndo) AlertDialog(
+        onDismissRequest = { askClearUndo = false },
+        title = { Text("Apply the new Cut size?") },
+        text = { Text("The drawing is moved or scaled to the new size and Undo history is cleared. This cannot be undone.") },
+        confirmButton = { TextButton({ askClearUndo = false; ed.dropPendingTransform(); draft.apply(); ed.cutDraft = null }) { Text("Apply") } },
+        dismissButton = { TextButton({ askClearUndo = false }) { Text("Cancel") } }
+    )
     Column(modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xF22E2E36)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Cut settings", Modifier.weight(1f), fontSize = 15.sp)
@@ -944,7 +953,7 @@ fun CutSettingsPanel(ed: Editor, cut: Cut, draft: CutDraft, modifier: Modifier =
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton({ draft.reset() }) { Text("Reset") }
             Spacer(Modifier.weight(1f))
-            Button({ if (draft.changesContent) ed.dropPendingTransform(); draft.apply(); ed.cutDraft = null }) { Text("Confirm") }
+            Button({ if (draft.changesContent && AppSettings.confirmDestructive) askClearUndo = true else { if (draft.changesContent) ed.dropPendingTransform(); draft.apply(); ed.cutDraft = null } }) { Text("Confirm") }
         }
     }
 }
@@ -1023,7 +1032,7 @@ fun BoxScope.ViewPopups(ed: Editor, cut: Cut) {
     val ctx = LocalContext.current
     if (ed.viewOpt != 0) Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { ed.viewOpt = 0 } })
     if (ed.viewOpt != 0) Column(
-        Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = TOOL_W + 8.dp).width(250.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF2E2E36)).padding(12.dp),
+        Modifier.align(if (AppSettings.leftHanded) Alignment.TopStart else Alignment.TopEnd).padding(top = 56.dp).toolSidePadding(TOOL_W + 8.dp).width(250.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF2E2E36)).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (ed.viewOpt == 1) {
@@ -1057,7 +1066,7 @@ fun BoxScope.ViewPopups(ed: Editor, cut: Cut) {
 @Composable
 fun BoxScope.CameraOverlays(ed: Editor, cut: Cut) {
     val cam = cut.layer?.takeIf { it.kind == 2 }?.cam ?: return
-    Column(Modifier.align(Alignment.TopStart).padding(top = 56.dp, start = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.align(if (AppSettings.leftHanded) Alignment.TopEnd else Alignment.TopStart).padding(top = 56.dp, start = if (AppSettings.leftHanded) 0.dp else 8.dp, end = if (AppSettings.leftHanded) 8.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (ed.camPanel) {
             var open by remember { mutableStateOf(true) }
             Column(Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xEE2E2E36)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1277,7 +1286,7 @@ private fun plan(rows: List<Layer>, d: Layer, pos: Float): Triple<Layer, Boolean
 }
 
 /** How long a frame must be held (without moving) before it can be dragged: shorter than the system long-press. */
-private const val CEL_HOLD_MS = 200L
+const val CEL_HOLD_MS = 200L // default; the live value is AppSettings.celHoldMs (Settings > Timings)
 
 /** Puts a pop-up centred just above its anchor, never on top of it. */
 private object AboveAnchorPos : PopupPositionProvider {
@@ -1336,7 +1345,7 @@ private fun KeyMark(cell: Dp, t: Int, isNow: () -> Boolean, selected: Boolean, s
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     var held = true
-                    withTimeoutOrNull(CEL_HOLD_MS) {
+                    withTimeoutOrNull(AppSettings.celHoldMs.toLong()) {
                         while (true) {
                             val ev = awaitPointerEvent()
                             val c = ev.changes.firstOrNull { it.id == down.id }
@@ -1364,7 +1373,7 @@ private fun KeyMark(cell: Dp, t: Int, isNow: () -> Boolean, selected: Boolean, s
     )
 }
 
-private const val MULTI_GAP_MS = 350L // a second touch must land this soon after the first one lifted (and near it) ...
+private const val MULTI_GAP_MS = 350L // (default; live value AppSettings.doubleTouchMs) a second touch must land this soon after the first one lifted (and near it) ...
 private const val MULTI_TAP_MS = 300L // ... and the first touch only counts if it was a quick, still tap
 
 /**
@@ -1382,7 +1391,7 @@ private fun Modifier.marqueeSelect(onRect: (Rect?) -> Unit, onDone: (Rect) -> Un
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             val slop = viewConfiguration.touchSlop
-            val armed = enabledNow || (lastUp >= 0L && down.uptimeMillis - lastUp <= MULTI_GAP_MS && (down.position - lastPos).getDistance() <= radius)
+            val armed = enabledNow || (lastUp >= 0L && down.uptimeMillis - lastUp <= AppSettings.doubleTouchMs && (down.position - lastPos).getDistance() <= radius)
             var marquee = false
             fun rectOf(b: Offset) = Rect(min(down.position.x, b.x), min(down.position.y, b.y), max(down.position.x, b.x), max(down.position.y, b.y))
             while (true) {
@@ -1395,7 +1404,7 @@ private fun Modifier.marqueeSelect(onRect: (Rect?) -> Unit, onDone: (Rect) -> Un
                     else lastUp = -1L
                     return@awaitEachGesture
                 }
-                if (!marquee && armed && (enabledNow || c.uptimeMillis - down.uptimeMillis < CEL_HOLD_MS) && (c.position - down.position).getDistance() > slop) marquee = true
+                if (!marquee && armed && (enabledNow || c.uptimeMillis - down.uptimeMillis < AppSettings.celHoldMs) && (c.position - down.position).getDistance() > slop) marquee = true
                 if (marquee) { c.consume(); rectCb(rectOf(c.position)) }
             }
             if (marquee) rectCb(null)
@@ -2563,7 +2572,7 @@ private fun TimelineCelCell(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     var held = true
-                    withTimeoutOrNull(CEL_HOLD_MS) {
+                    withTimeoutOrNull(AppSettings.celHoldMs.toLong()) {
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == down.id }

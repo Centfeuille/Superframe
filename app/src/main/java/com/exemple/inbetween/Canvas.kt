@@ -1737,7 +1737,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     fun penMove(ev: MotionEvent) {
         val d = toDoc(ev.x, ev.y); hover = Offset(ev.x, ev.y)
         if (!st.moved && (d - st.start).getDistance() > 6f) st.moved = true
-        if (!st.farScr && (Offset(ev.x, ev.y) - st.downScr).getDistance() > TAP_SLOP_PX) st.farScr = true // tap slop in SCREEN px: pen jitter must not turn a tap into a drag
+        if (!st.farScr && (Offset(ev.x, ev.y) - st.downScr).getDistance() > AppSettings.tapSlopPx) st.farScr = true // tap slop in SCREEN px: pen jitter must not turn a tap into a drag
         when (st.kind) {
             1 -> sess[0]?.let { feedEv(ev, it) }
             15 -> vecFeed(ev)
@@ -2116,7 +2116,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         fingerTouches = ev.changes.filter { it.pressed }.map { it.position }
                         if (n == 2) {
                             val pair = ev.changes.filter { it.pressed }.take(2)
-                            if (pair.size == 2 && ed.xform == null && cut.layer?.kind != 2 && !(cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false) && (pair[0].position - pair[1].position).getDistance() <= RESET_PINCH_DP.dp.toPx()) {
+                            if (pair.size == 2 && ed.xform == null && cut.layer?.kind != 2 && !(cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false) && AppSettings.pinchReset && (pair[0].position - pair[1].position).getDistance() <= RESET_PINCH_DP.dp.toPx()) {
                                 resetArmed = true
                                 resetCue = true
                             }
@@ -2124,7 +2124,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         if (n > 0) {
                             val z = ev.calculateZoom(); val r = ev.calculateRotation()
                             val pan = ev.calculatePan(); val c = ev.calculateCentroid()
-                            if (n >= 3) {
+                            if (n >= 3 && AppSettings.threeFingerScrub) {
                                 val dd = pan.x + pan.y
                                 acc += dd; glow = if (dd > 0.5f) 1 else if (dd < -0.5f) -1 else glow
                                 val animatedLayer = cut.layers.firstOrNull { it.id == cut.layerId }?.takeIf { it.cam != null || (it.isGroup && it.transformFolder) }
@@ -2238,7 +2238,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                                     if (camBefore == null) camBefore = cut.snap()
                                     val cd = toDoc(c.x, c.y); val pd = toDoc(c.x + pan.x, c.y + pan.y) - cd
                                     camNudge(ed, cut, cam, cut.time, pd.x, pd.y, z, r * sgx * sgy)
-                                } else {
+                                } else if (n >= 2 || AppSettings.onePan) {
                                     val ns = (ed.vScale * z).coerceIn(0.2f, 20f); val ze = ns / ed.vScale
                                     ed.vOff = c + pan + rot(ctr + ed.vOff - c, r) * ze - ctr
                                     ed.vRot += r; ed.vScale = ns
@@ -2273,7 +2273,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     val dt = System.currentTimeMillis() - t0
                     if (maxN == 2 && resetArmed && !refGesture && ed.xform == null && cut.layer?.kind != 7) {
                         ed.resetView()
-                    } else if (maxN == 2 && cut.layer?.kind != 7 && dt < 300 && mv < 14f && abs(ln(zt)) < 0.08f && rt < 7f) cut.undo() // two-finger tap
+                    } else if (maxN == 2 && cut.layer?.kind != 7 && dt < 300 && mv < 14f && abs(ln(zt)) < 0.08f && rt < 7f) { when (AppSettings.twoFingerTap) { 1 -> cut.undo(); 2 -> cut.redo() } } // two-finger tap (Settings > Gestures: undo / redo / nothing)
                     resetCue = false
                 }
             }
@@ -2651,19 +2651,19 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         // a growing purple pull at the right edge past the last frame = a new frame will be created by the next stroke
         val gw = 70f
         val white = Color.White
-        if (glow != 0) { val left = glow < 0; drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0x33FFFFFF), Color.Transparent), startX = if (left) 0f else size.width, endX = if (left) gw else size.width - gw), topLeft = Offset(if (left) 0f else size.width - gw, 0f), size = Size(gw, size.height)) }
-        if (keyBumpAnim.value > 0.01f) {
+        if (glow != 0 && AppSettings.cueEdgeGlow) { val left = glow < 0; drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0x33FFFFFF), Color.Transparent), startX = if (left) 0f else size.width, endX = if (left) gw else size.width - gw), topLeft = Offset(if (left) 0f else size.width - gw, 0f), size = Size(gw, size.height)) }
+        if (AppSettings.cueEdgeGlow && keyBumpAnim.value > 0.01f) {
             val a = keyBumpAnim.value
             val left = bumpDir < 0
             val bw = gw * (1f + 0.6f * a)
             drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(purple.copy(alpha = 0.85f * a), white.copy(alpha = 0.45f * a), Color.Transparent), startX = if (left) 0f else size.width, endX = if (left) bw else size.width - bw), topLeft = Offset(if (left) 0f else size.width - bw, 0f), size = Size(bw, size.height))
         }
-        if (ed.newFrameArmed || newFramePull > 0f) {
+        if (AppSettings.cueNewFramePull && (ed.newFrameArmed || newFramePull > 0f)) {
             val p = if (ed.newFrameArmed) 1f else newFramePull
             val pw = gw * (0.5f + 0.5f * p)
             drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(purple.copy(alpha = (if (ed.newFrameArmed) 0.85f else 0.15f + 0.5f * p)), Color.Transparent), startX = size.width, endX = size.width - pw), topLeft = Offset(size.width - pw, 0f), size = Size(pw, size.height))
         }
-        fingerTouches.forEach { point ->
+        if (AppSettings.cueTouchRings) fingerTouches.forEach { point ->
             drawCircle(purple.copy(alpha = 0.14f), 22f, point)
             drawCircle(purple.copy(alpha = 0.8f), 22f, point, style = Stroke(2f))
         }
@@ -2677,8 +2677,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize().zIndex(3f)) {
             hover?.takeIf { !cut.playing }?.let { hp ->
                 val r = if (ed.tool == 0 || ed.tool == 1 || ed.tool == 4) max(ed.brush.size * fit * ed.vScale / 2f, 2f) else 8f
-                drawCircle(Color.White, r + 1f, hp, style = Stroke(3f))
-                drawCircle(Color.Black, r, hp, style = Stroke(1.5f))
+                if (AppSettings.cueHoverCursor) { // the Gap fill / Grow read-out below is working feedback, not a cue: it stays
+                    drawCircle(Color.White, r + 1f, hp, style = Stroke(3f))
+                    drawCircle(Color.Black, r, hp, style = Stroke(1.5f))
+                }
                 if (thr >= 0) drawIntoCanvas { it.nativeCanvas.drawText("Gap fill ${thr}px   Grow ${st.grow}px", hp.x + 30f, hp.y - 30f, textPaint) }
             }
         }
@@ -2852,9 +2854,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!cut.playing) VectorWidgetBar(cut, ed, Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 14.dp).zIndex(5f))
         if (!cut.playing) VectorInterpolationHost(cut, ed)
         if (!cut.playing) VectorFillBar(cut, ed, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).zIndex(5f))
-        if (!cut.playing) VectorInkBar(cut, ed, Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 14.dp).zIndex(6f))
+        if (!cut.playing) VectorInkBar(cut, ed, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = if (AppSettings.leftHanded) 0.dp else 14.dp, end = if (AppSettings.leftHanded) 14.dp else 0.dp, bottom = 14.dp).zIndex(6f))
         if (!cut.playing) VectorWobbleBar(cut, ed, Modifier.align(Alignment.TopCenter).padding(top = 14.dp).zIndex(6f))
-        ClipboardBar(ed, cut, Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 14.dp).zIndex(5f))
+        ClipboardBar(ed, cut, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(start = if (AppSettings.leftHanded) 14.dp else 0.dp, end = if (AppSettings.leftHanded) 0.dp else 14.dp, bottom = 14.dp).zIndex(5f))
         // Selection widget bar: follows the selection (and its transform) instead of staying at the top of the screen
         if ((ed.sel != null || ed.xform != null) && !(ed.outOfPeg && ed.outOfPegSide != 0) && !cut.playing) {
             SelectionBar(ed, cut) {

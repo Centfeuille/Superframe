@@ -38,6 +38,18 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            90, "2026-11-26", "Settings: left-handed layout, gesture switches, timings, visual cues, startup and safety options",
+            listOf(
+                "Settings (the gear in the top bar) now has real options. Changes apply at once and are remembered.",
+                "Left-handed layout: the tool panel, the tool options, the fullscreen tool puck, the Cut and camera panels, the view pop-ups and the vector bars move to the other side. The timeline itself is not mirrored.",
+                "Finger gestures: two-finger tap can undo, redo or do nothing; three-finger scrub, pinch-together reset and one-finger pan can each be switched off.",
+                "Timings: the hold time before a frame / key / layer drag, the double-touch window for timeline selection and the tap tolerance for pen taps on reference layers can be adjusted.",
+                "Visual cues: touch rings, the scrub edge gradient, the new-frame pull cue and the pen hover cursor can each be hidden.",
+                "Appearance: choose the workspace colour around the page. Startup: open the last Cut instead of the Cut list, open Cuts in fullscreen, hide What's new. Safety: optionally confirm before deleting a Cut and before a Cut resize / Stretch that clears Undo.",
+                "New in this build and not yet checked on the tablet; Reset all settings in the Settings window restores the previous behaviour."
+            )
+        ),
+        ReleaseNote(
             89, "2026-11-26", "Smarter anchors when tracing a ghost line, up to 999 anchor numbers",
             listOf(
                 "Ghost tracing: the in-between anchors of the ghost now go to the bend of your new line that matches them best, judged by how far along the line it is (also measured from the nearest end) and by which way and how sharply it bends. A left bend no longer takes the number of a right bend.",

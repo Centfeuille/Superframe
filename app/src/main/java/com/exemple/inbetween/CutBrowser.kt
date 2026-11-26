@@ -230,6 +230,9 @@ private fun FolderSection(f: CutFolder, st: BrowserState, onExport: (Cut) -> Uni
     }
 }
 
+/** Deletes a Cut, or asks first when Settings > Safety > Confirm destructive actions is on (the dialog lives in MenuScreen). */
+private fun askRemove(st: BrowserState, c: Cut) { if (AppSettings.confirmDestructive) st.ed.pendingDelete = c else st.ed.remove(c, st.dir) }
+
 @Composable
 private fun CutRow(c: Cut, st: BrowserState, onExport: (Cut) -> Unit, onRename: (Cut) -> Unit) {
     val origin = remember { floatArrayOf(0f, 0f) }
@@ -251,7 +254,7 @@ private fun CutRow(c: Cut, st: BrowserState, onExport: (Cut) -> Unit, onRename: 
         Column(horizontalAlignment = Alignment.End) {
             TextButton({ onRename(c) }) { Text("Rename") }
             TextButton({ onExport(c) }) { Text("Export") }
-            TextButton({ st.ed.remove(c, st.dir) }) { Text("Delete") }
+            TextButton({ askRemove(st, c) }) { Text("Delete") }
         }
     }
 }
@@ -284,7 +287,7 @@ private fun CutTile(c: Cut, st: BrowserState, modifier: Modifier, onExport: (Cut
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text("Rename") }, { menu = false; onRename(c) })
                     DropdownMenuItem({ Text("Export") }, { menu = false; onExport(c) })
-                    DropdownMenuItem({ Text("Delete") }, { menu = false; st.ed.remove(c, st.dir) })
+                    DropdownMenuItem({ Text("Delete") }, { menu = false; askRemove(st, c) })
                 }
             }
         }
