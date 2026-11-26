@@ -1856,6 +1856,35 @@ fun VectorInterpolation.interpolateConfigured(
 /** The key's own interpolation settings, or the default (same line, linear, on 1s). */
 fun Cel.vectorConfig(): InterpolationConfig = vecCfg ?: InterpolationConfig()
 
+/** Interpolation settings are ON for this keyframe: it has settings that are not Hold, so its span is interpolated live and can be baked. A key without settings simply holds. */
+fun Cel.interpolationOn(): Boolean = vecCfg?.let { it.mode != InterpolationMode.NONE } == true
+
+/** A vector layer with at least one keyframe whose interpolation settings are on (the timeline shows the curves arrow beside the layer name). */
+fun Layer.hasInterpolation(): Boolean = vector && cels.any { it.interpolationOn() }
+
+/** Turns interpolation off for [keys] (they hold again; no live in-betweens, nothing to bake) as one undo step. A key that has guide joints keeps them as a Hold setting so they are not lost. */
+fun vecInterpolationOff(cut: Cut, keys: List<Cel>) {
+    if (keys.none { it.interpolationOn() }) return
+    cut.record {
+        for (k in keys) {
+            val joints = k.vecCfg?.guideJoints.orEmpty()
+            k.vecCfg = if (joints.isEmpty()) null else (k.vecCfg ?: InterpolationConfig()).copy(mode = InterpolationMode.NONE)
+        }
+    }
+}
+
+/**
+ * The keyframes the interpolation settings work on: the timeline selection of this layer; else every keyframe when the three-dot "Select all" ([Cut.selAll]) is
+ * active on it; else the keyframe whose span the playhead is in (the previous keyframe, or the first one at the start).
+ */
+fun vecInterpTargets(cut: Cut, ed: Editor, layer: Layer): List<Cel> {
+    val picked = ed.selCels.filter { c -> layer.cels.any { it === c } }
+    if (picked.isNotEmpty()) return picked
+    if (cut.selAll == layer.id) return layer.cels.toList()
+    val idx = layer.indexAt(cut.time)
+    return listOfNotNull(layer.cels.getOrNull(idx - 1) ?: layer.cels.getOrNull(idx))
+}
+
 /**
  * Replaces the strokes of the vector cel at [index] with [strokes] as ONE undoable step. A cel is swapped for a new object (the undo
  * snapshots keep the old one); clones that share the drawing are swapped together so they stay the same drawing.

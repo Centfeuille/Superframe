@@ -38,6 +38,16 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            94, "2026-11-26", "Interpolation drag, points view, timeline curves and a sturdier pen calibration",
+            listOf(
+                "Interpolation drag: the preview is drawn in its own colour and the keyframes it comes from show as onion skins (previous red, next green). With three frames selected those are the two outer frames, and the line ghost also follows them (previous or next, as set on the Ghost bar). With the Selection tool the current frame no longer shows its points.",
+                "Selection tool: a new button cycles the points view: all points, only anchor points, or none.",
+                "Interpolation settings now also work after Select all (they apply to every keyframe) and have an Off button; each keyframe keeps its own guide joints.",
+                "Vector layers with interpolation turned on get an arrow beside the layer name that opens a curves view: the easing curve of every span, with Linear / Ease / In / Out, strength, Settings and Off.",
+                "Pen calibration now fits the global offset, rotation, scale and skew first and keeps only the local remainder in the 5x5 mesh, which is looked up at the corrected position. Existing calibrations keep working; recalibrate for the new behavior. Not yet verified on the tablet."
+            )
+        ),
+        ReleaseNote(
             93, "2026-11-26", "Pen calibration screen-coordinate alignment",
             listOf(
                 "Calibration target centres are now measured directly in physical screen coordinates, matching the S Pen's raw MotionEvent coordinates. This avoids manually combining dialog-window and screen origins, which could misplace the learned correction on devices with different window insets."

@@ -66,10 +66,10 @@ object AutoAnchors {
     }
 
     /** The lines of the previous and the next keyframe (the one on the [nextFirst] side first): the candidates a traced line can still be following. */
-    fun referenceLines(layer: Layer, idx: Int, nextFirst: Boolean): List<VectorStroke> {
+    fun referenceLines(layer: Layer, idx: Int, nextFirst: Boolean, ed: Editor? = null): List<VectorStroke> {
         val out = ArrayList<VectorStroke>()
-        LineGhost.reference(layer, idx, nextFirst)?.let { out.addAll(LineGhost.lines(it)) }
-        LineGhost.reference(layer, idx, !nextFirst)?.let { out.addAll(LineGhost.lines(it)) }
+        LineGhost.reference(layer, idx, nextFirst, ed)?.let { out.addAll(LineGhost.lines(it)) }
+        LineGhost.reference(layer, idx, !nextFirst, ed)?.let { out.addAll(LineGhost.lines(it)) }
         return out
     }
 
@@ -895,9 +895,20 @@ object AutoAnchors {
 object LineGhost {
     fun lines(c: Cel): List<VectorStroke> = c.vectorStrokes().filter { it.fill == 0 && it.points.size >= 2 }
 
-    /** The nearest previous (or next) keyframe whose drawing differs from the current one and has vector strokes (clones of the current drawing and empty frames are skipped). */
-    fun reference(layer: Layer, idx: Int, next: Boolean): Cel? {
+    /**
+     * The nearest previous (or next) keyframe whose drawing differs from the current one and has vector strokes (clones of the current drawing and empty frames are skipped).
+     * With three frames selected in the timeline and the playhead on the middle one (the interpolation-drag "three frames" setup), the references are the two OUTER selected
+     * frames instead: the first for the previous ghost, the last for the next ghost ([ed] given; an outer frame that shows the same drawing or is empty falls back to the search).
+     */
+    fun reference(layer: Layer, idx: Int, next: Boolean, ed: Editor? = null): Cel? {
         val cur = layer.cels.getOrNull(idx) ?: return null
+        if (ed != null) {
+            val fs = vecSelectedFrames(layer, ed)
+            if (fs.size == 3 && fs[1] === cur) {
+                val edge = if (next) fs[2] else fs[0]
+                if (edge.strokes !== cur.strokes && edge.strokes.any { it.kind == 5 }) return edge
+            }
+        }
         var i = if (next) idx + 1 else idx - 1
         while (i in layer.cels.indices) {
             val c = layer.cels[i]
@@ -943,7 +954,7 @@ object LineGhost {
      */
     fun skip(ed: Editor, layer: Layer, idx: Int, dir: Int) {
         val cur = layer.cels.getOrNull(idx) ?: return
-        val ref = reference(layer, idx, ed.vecGhostNext) ?: return
+        val ref = reference(layer, idx, ed.vecGhostNext, ed) ?: return
         val all = lines(ref)
         if (all.isEmpty()) return
         val open = unclaimed(all, cur.vectorStrokes(), 1f / ed.vecDocZoom.coerceAtLeast(0.0001f))

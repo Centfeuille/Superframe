@@ -80,6 +80,8 @@ fun gpuPlan(cut: Cut, ed: Editor): Int {
     // ~4 GCs per second (HeapTaskDaemon ~33% of a core), +50 points of process CPU, timeline-tick stalls and slower
     // frames than the Compose path (profiler scenario F, compositor on vs off, 2026-11-13). Editing still uses the plane.
     if (cut.playing) return -1
+    // Interpolation drag on a vector layer: the Compose canvas draws the previous / next keyframes as onion references and replaces the layer's picture by the preview
+    if (ed.vecMode == 3 && (ed.tool == 0 || ed.tool == 2) && cut.layer?.let { it.vector && it.visible } == true) return -1
     val active = cut.layer
     val k = if (active == null) 0 else max(0, cut.layers.indexOf(active))
     val onion = ed.onion

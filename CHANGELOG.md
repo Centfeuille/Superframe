@@ -1,3 +1,19 @@
+## 2026-11-26 (6) — Interpolation drag / ghost / points view / timeline curves; pen calibration affine fit
+- AI model: Claude
+- Category: Changed / Added (vector UI, timeline, pen calibration; no `.inb` format change)
+- Request: three-frame ghost references, no current-frame points during interpolation drag, natural-colour preview with onion references, points-view button, interpolation Off, interpolation settings after Select all, vector timeline curves arrow; and correct the pen-calibration mesh weaknesses.
+- `PenCalibration.kt`: the 25 errors are split into a least-squares affine part (offset, rotation, scale, skew; fitted on the RAW tap positions; also extends past the outer targets) and a residual 5×5 Catmull-Rom mesh. The residual is looked up at the affine-corrected position, fixing the old lookup at the raw position against nodes on the target grid. `settings.json` gains `penCalibrationAffineX/Y`; older files without them load with affine = 0 (old behaviour).
+- `AutoAnchors.kt`: `LineGhost.reference` / `referenceLines` take an optional `Editor`; with exactly three timeline frames selected and the playhead on the middle one, the previous / next ghost is the first / last selected frame (falls back to the nearest-keyframe search if that frame is empty or the same drawing). `Canvas.kt` passes `ed` at the ghost, trace and refresh call sites.
+- `Canvas.kt`: interpolation preview drawn in its natural colour (picked lines get an orange outline); while it is up the previous / next keyframes are drawn as red / green onion skins (three frames: the outer frames) and the layer's own picture is replaced by the preview; the Selection tool shows no lines, points or gap shimmer for the current frame. Points view (`Editor.vecPointView`): all / anchors only / none.
+- `GlLayers.kt`: `gpuPlan` returns -1 during interpolation drag so the Compose path draws these references.
+- `VectorUi.kt`: three-state points-view button on the Selection tool bar; interpolation dialog uses `vecInterpTargets` (selection, else every keyframe after Select all, else the span at the playhead), has an Off button, shows the on / off state, and Apply keeps each keyframe's own guide joints.
+- `Vector.kt`: `Cel.interpolationOn()`, `Layer.hasInterpolation()`, `vecInterpTargets`, `vecInterpolationOff`.
+- `Panels.kt` + new `VectorCurveView.kt`: vector layers with interpolation on show the expand arrow right of the layer name; it opens a curves view of each span's easing with Linear / Ease / In / Out, strength, Settings and Off. Reuses `Layer.expanded`.
+- Files: `PenCalibration.kt`, `AutoAnchors.kt`, `Canvas.kt`, `GlLayers.kt`, `VectorUi.kt`, `Vector.kt`, `Panels.kt`, `Editor.kt`, `VectorCurveView.kt` (new), `WhatsNew.kt` (note 94), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched. `.inb` format unchanged.
+- Validation: the calibration math was ported to Python and checked against numpy least squares and a simulated distorted pen (small distortion: mean error 51 px -> ~1 px; large rotation / scale distortion: old mesh ~9 px, new ~1 px). No Kotlin compile, Gradle build, or device / tablet test was available: all Kotlin changes are source-reviewed only.
+- Follow-up: build and test on the tablet: three-frame drag (ghost and onion), points view cycle, Select all + interpolation settings / Off, the curves arrow, and re-run the 25-point calibration.
+
 ## 2026-11-26 (5) — Pen calibration target coordinate-space alignment
 - AI model: GPT-6
 - Category: Fixed / Pen calibration coordinate capture (no `.inb` format change)

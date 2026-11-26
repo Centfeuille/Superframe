@@ -1951,8 +1951,9 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
     }
     // The layer whose curves are open: the selected Camera / Transformation layer if it is expanded, otherwise the first expanded one
     // (a reloaded cut selects another layer but keeps the expanded flag).
-    val curveLayer: Layer? = cut.layer?.takeIf { (it.kind == 2 || (it.isGroup && it.transformFolder)) && it.expanded }
-        ?: cut.layers.firstOrNull { (it.kind == 2 || (it.isGroup && it.transformFolder)) && it.expanded }
+    // A vector layer joins them while some of its keyframes have interpolation settings on (its curves are the easing of each span).
+    val curveLayer: Layer? = cut.layer?.takeIf { (it.kind == 2 || (it.isGroup && it.transformFolder) || it.hasInterpolation()) && it.expanded }
+        ?: cut.layers.firstOrNull { (it.kind == 2 || (it.isGroup && it.transformFolder) || it.hasInterpolation()) && it.expanded }
     val selCam = curveLayer?.takeIf { it.kind == 2 }?.cam
     val selFolder = curveLayer?.takeIf { it.isGroup && it.transformFolder }
     val keysPicked = ed.selKeys.isNotEmpty()
@@ -2054,7 +2055,9 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
             }
         }
         if (curveLayer != null) {
-            KeyCurveEditor(ed, cut, curveLayer, cell, cellPxUi, hs, rulerH, Modifier.weight(1f).fillMaxWidth(),
+            if (curveLayer.vector) VectorCurveEditor(ed, cut, curveLayer, cell, cellPxUi, hs, rulerH, Modifier.weight(1f).fillMaxWidth(),
+                { trackW = it }, { curveLayer.expanded = false })
+            else KeyCurveEditor(ed, cut, curveLayer, cell, cellPxUi, hs, rulerH, Modifier.weight(1f).fillMaxWidth(),
                 { trackW = it }, { curveLayer.expanded = false })
         } else Row(Modifier.weight(1f).fillMaxWidth()) {
             if (mode != 2) {
@@ -2204,8 +2207,8 @@ private fun TimelineNormalLayerRow(ed: Editor, cut: Cut, layer: Layer, rowH: Dp,
         Text(layer.name, Modifier.weight(1f).clickable(enabled = layer.id == cut.layerId) { ui.renaming.value = layer }, maxLines = 1, fontSize = 13.sp)
         if (layer.kind == 0 || layer.kind == 4 || layer.kind == 5 || layer.kind == 6 || layer.kind == 7) Icon(if (layer.locked) Icons.Filled.Lock else Icons.Filled.LockOpen,
             null, Modifier.clickable { cut.record { layer.locked = !layer.locked } }.padding(6.dp).size(28.dp))
-        if (layer.kind == 2) Icon(if (layer.expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
-            null, Modifier.clickable { cut.layerId = layer.id; layer.expanded = !layer.expanded }.padding(4.dp).size(28.dp))
+        if (layer.kind == 2 || layer.hasInterpolation()) Icon(if (layer.expanded) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowRight,
+            null, Modifier.clickable { cut.layerId = layer.id; layer.expanded = !layer.expanded }.padding(4.dp).size(28.dp)) // vector layers: only while interpolation settings are on for some keyframe
         if (layer.kind == 0 || layer.kind == 2) {
             Box {
                 Icon(Icons.Filled.MoreVert, null, Modifier.clickable { menuFor = layer.id }.padding(4.dp).size(28.dp))

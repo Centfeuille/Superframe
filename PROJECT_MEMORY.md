@@ -789,3 +789,12 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - AI model: GPT-6. Files changed: `PenCalibration.kt`, `WhatsNew.kt` (note 93), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: inspected Compose target-coordinate and Android raw-event coordinate paths; source diff and ZIP integrity checked. No Android Gradle build or tablet runtime test performed.
 - Follow-up: repeat all 25 targets on the tablet and verify the corrected crosshair intersection against straight-edge and centre-screen test strokes.
+
+## 2026-11-26 — Interpolation drag references, points view, vector timeline curves, calibration affine fit
+- Pen calibration: error field = least-squares affine part (`affX/affY`, functions of the RAW normalized position) + residual 5×5 mesh on the target grid, looked up at the affine-corrected position. Persisted as `penCalibrationAffineX/Y` (missing = 0, old files behave as before).
+- Interpolation "on" for a keyframe = `Cel.interpolationOn()` (`vecCfg != null && mode != NONE`); Off = `vecInterpolationOff` (clears `vecCfg`, or keeps guide joints as a Hold config). `vecInterpTargets` = selected keyframes, else all after Select all (`cut.selAll`), else the span at the playhead. The dialog Apply keeps each key's own guide joints.
+- Interpolation drag / Selection preview (`vecMode == 3`): `gpuPlan` returns -1; Canvas draws the preview in natural colour, the previous / next keyframes (outer selected frames in three-frame mode) as red / green onion references, hides the layer's own picture, and the Selection tool shows no current-frame points. `LineGhost.reference(..., ed)` uses the outer selected frames in three-frame mode.
+- `Editor.vecPointView` (0 all, 1 anchors only, 2 none) is session-only.
+- Vector layers with `hasInterpolation()` get the expand arrow (reuses `Layer.expanded`) and `VectorCurveEditor` (`VectorCurveView.kt`).
+- AI model: Claude. Not compiled or device-tested; see CHANGELOG (6).
+

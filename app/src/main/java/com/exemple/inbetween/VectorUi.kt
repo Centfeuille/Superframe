@@ -117,7 +117,7 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
         val here = ed.vecMode == 3 && ed.tool == 0 // from the Selection tool this returns to the drag tool instead of ending the mode
         ed.vecXfCancel(); ed.tool = 0; ed.vecMode = if (here) 0 else 3; ed.vecGuideSelected = -1
     }
-    IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes: lines, curve, bake") { ed.vecInterpOpen = true }
+    IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes (every keyframe after Select all): lines, curve, bake, and Off") { ed.vecInterpOpen = true }
     IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
     IconBtn(Icons.Filled.Edit, size = buttonSize, on = ed.vecInkOpen, tip = "Line weight: curvature, light direction and tapers for the selected keyframes (or the current one)") { ed.vecInkOpen = !ed.vecInkOpen; if (ed.vecInkOpen) ed.vecWobbleOpen = false }
     IconBtn(Icons.Filled.ContentCut, size = buttonSize, on = ed.vecMode == 2 && ed.tool == 0, tip = "Cutter: draw across strokes to slice them. Tap again to go back to drawing") {
@@ -275,6 +275,13 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 IconBtn(Icons.Filled.Refresh, tip = "Undo every transform / warp made on the preview and pick nothing") { ed.vecPlaceAll = Aff.ID; ed.vecPlaceLines = emptyMap(); ed.vecPlaceSteps = emptyList(); ed.vecPreSel = emptySet() }
             } else if (pointBar) {
                 VIconBtn(Icons.Filled.ScatterPlot, on = ed.vecPoints, tip = if (ed.vecPoints) "Points: on. Pick and edit single points (tap to select whole lines instead)" else "Points: off. Whole lines are selected (tap to pick single points)") { ed.vecPoints = !ed.vecPoints }
+                // One button, three views of the points: all of them -> only the anchor points -> none (the lines stay; selecting and editing work as before)
+                VIconBtn(when (ed.vecPointView) { 1 -> Icons.Filled.Anchor; 2 -> Icons.Filled.VisibilityOff; else -> Icons.Filled.Visibility }, on = ed.vecPointView != 0,
+                    tip = when (ed.vecPointView) {
+                        1 -> "Points view: only the anchor points are shown (tap to hide all points)"
+                        2 -> "Points view: no points are shown (tap to show all points)"
+                        else -> "Points view: all points are shown (tap to show only the anchor points)"
+                    }) { ed.vecPointView = (ed.vecPointView + 1) % 3 }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
                 BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; if (ed.vecDisplace) ed.vecBrush = 0 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
@@ -361,7 +368,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake") { ed.vecInterpOpen = true }
+                IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake, and Off") { ed.vecInterpOpen = true }
                 IconBtn(Icons.Filled.Check, tip = if (three) "Apply: the interpolation of the first and last selected frame replaces the middle selected frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
                     if (three) {
                         if (interpolateIntoFrame(cut, ed, layer, frames[0], frames[1], frames[2], ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
@@ -394,10 +401,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
 fun VectorInterpolationHost(cut: Cut, ed: Editor) {
     if (!ed.vecInterpOpen) return
     val layer = cut.layer?.takeIf { it.vector } ?: return
-    val idx = layer.indexAt(cut.time)
-    val cel = layer.cels.getOrNull(idx)
-    val targets = if (ed.selCels.isNotEmpty()) ed.selCels.toList() else listOfNotNull(layer.cels.getOrNull(idx - 1) ?: cel)
-    VectorInterpolationDialog(cut, ed, layer, targets)
+    VectorInterpolationDialog(cut, ed, layer, vecInterpTargets(cut, ed, layer)) // the selected keyframes, every keyframe after Select all, else the span at the playhead
 }
 
 /** The Wobble bar (bottom centre): sets the boil of the selected keyframes, or of the current keyframe when none is selected. Each keyframe gets its own noise. */
@@ -600,13 +604,14 @@ fun VectorInterpolationDialog(cut: Cut, ed: Editor, layer: Layer, targets: List<
     val keys = targets.filter { t -> layer.cels.any { it === t } }
     var draft by remember { mutableStateOf(keys.firstOrNull()?.vectorConfig() ?: InterpolationConfig()) }
     var customStep by remember { mutableStateOf(false) }
-    fun apply() { if (keys.isNotEmpty()) cut.record { keys.forEach { it.vecCfg = draft } } }
+    fun apply() { if (keys.isNotEmpty()) cut.record { keys.forEach { it.vecCfg = draft.copy(guideJoints = it.vecCfg?.guideJoints.orEmpty()) } } } // each keyframe keeps its OWN guide joints (they belong to its lines)
     AlertDialog(
         onDismissRequest = { ed.vecInterpOpen = false },
         title = { Text(if (keys.size <= 1) "Interpolation" else "Interpolation of ${keys.size} keyframes") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (keys.isEmpty()) Text("Select a keyframe first (tap a frame on the vector layer).", fontSize = 12.sp)
+                if (keys.isEmpty()) Text("Select a keyframe first (tap a frame on the vector layer, or use Select all).", fontSize = 12.sp)
+                else Text(if (keys.any { it.interpolationOn() }) "Interpolation is on for ${keys.count { it.interpolationOn() }} of ${keys.size} keyframe${if (keys.size == 1) "" else "s"}" else "Interpolation is off (the keyframes hold). Apply turns it on.", fontSize = 11.sp, color = Color(0xFF9E9E9E))
                 Text("Mode (same or different lines are detected automatically)", fontSize = 11.sp, color = Color(0xFF9E9E9E))
                 Row {
                     Choice("Interpolate", draft.mode != InterpolationMode.NONE) { draft = draft.copy(mode = InterpolationMode.SAME_STROKE) }
@@ -637,6 +642,8 @@ fun VectorInterpolationDialog(cut: Cut, ed: Editor, layer: Layer, targets: List<
         },
         confirmButton = {
             Row {
+                // Off: the keyframes go back to plain holds (no live in-betweens, nothing to bake). Guide joints are kept (as a Hold setting) so they are not lost.
+                TextButton(onClick = { vecInterpolationOff(cut, keys); ed.vecInterpOpen = false }, enabled = keys.any { it.interpolationOn() }) { Text("Off") }
                 TextButton(onClick = { apply() }, enabled = keys.isNotEmpty()) { Text("Apply") }
                 TextButton(onClick = {
                     apply()

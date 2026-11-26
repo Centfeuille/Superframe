@@ -740,7 +740,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val current = cel?.vectorStrokes() ?: emptyList()
         val blocked = AutoAnchors.usedNumbers(current)
         if (ed.vecGhost && cel != null) {
-            val refCel = LineGhost.reference(l, idx, ed.vecGhostNext)
+            val refCel = LineGhost.reference(l, idx, ed.vecGhostNext, ed)
             if (refCel != null) {
                 val px = 1f / vecZoom()
                 val allGhost = LineGhost.lines(refCel)
@@ -792,7 +792,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
         val avoid = AutoAnchors.neighbourNumbers(l, idx)
-        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, AutoAnchors.referenceLines(l, idx, ed.vecGhostNext)), avoid, ids)
+        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)), avoid, ids)
     }
     /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
     fun vecWithEnds(l: Layer, stroke: VectorStroke): VectorStroke {
@@ -1974,19 +1974,19 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val vecDisplaceShow = remember(vecDisplaceWarped) { vecDisplaceWarped.map { it.stroke } }
 
     // selection tool: places where separate lines cross or touch without being joined (they shimmer); not while a drag is running
-    val vecGaps = remember(vecShowStrokes, ed.vecMergeRadius, ed.tool, vecLives != null) {
-        if (ed.tool != 2 || vecLayerNow == null || vecLives != null) FloatArray(0) else VectorGaps.find(vecShowStrokes, (ed.vecMergeRadius / vecZoom()).coerceAtLeast(2f))
+    val vecGaps = remember(vecShowStrokes, ed.vecMergeRadius, ed.tool, vecLives != null, ed.vecMode) {
+        if (ed.tool != 2 || vecLayerNow == null || vecLives != null || ed.vecMode == 3) FloatArray(0) else VectorGaps.find(vecShowStrokes, (ed.vecMergeRadius / vecZoom()).coerceAtLeast(2f))
     }
 
     // line order onion skin: the next untraced line of the previous / next keyframe shimmers, with its anchors; a new line drawn over it takes those anchors
     val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 2 || ed.tool == 4) }
     val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
     val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
-    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor) {
+    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor, ed.selCels.toList()) {
         val gl = ghostLayer
         val idx = gl?.indexAt(cut.time) ?: -1
         val cur = gl?.cels?.getOrNull(idx)
-        val ref = if (gl != null && cur != null) LineGhost.reference(gl, idx, ed.vecGhostNext) else null
+        val ref = if (gl != null && cur != null) LineGhost.reference(gl, idx, ed.vecGhostNext, ed) else null
         if (cur == null || ref == null) null else {
             val all = LineGhost.lines(ref)
             val open = LineGhost.unclaimed(all, cur.vectorStrokes(), 1f / vecZoom())
@@ -2335,8 +2335,34 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         if (transformed) nc.restore()
                     }
                 }
+                // Interpolation drag / preview on a vector layer: the keyframes the preview is made from are shown as onion skins (previous red, next green) and the
+                // layer's own picture is replaced by the preview, which is drawn in its natural colour. With three frames selected the references are the two outer
+                // selected frames; otherwise the previous keyframe (red) and the current one (green).
+                if (vecPrevLayer != null && vecPreview.isNotEmpty()) {
+                    val pl = vecPrevLayer
+                    val fs = vecSelectedFrames(pl, ed)
+                    val pi = pl.indexAt(cut.time)
+                    val refs: List<Pair<Cel, android.graphics.ColorFilter?>> =
+                        if (fs.size == 3) listOf(Pair(fs[0], red), Pair(fs[2], green))
+                        else listOfNotNull(pl.cels.getOrNull(pi - 1)?.let { Pair(it, red) }, pl.cels.getOrNull(pi)?.let { Pair(it, green) })
+                    for ((rc, flt) in refs) {
+                        if (rc.strokes.isEmpty()) continue
+                        val refSet = TileCache.peekReady(rc.strokes) ?: run { OnionWarmup.request(rc.strokes); null } ?: continue
+                        paint.colorFilter = flt
+                        paint.alpha = (pl.opacity * 120).toInt().coerceIn(0, 255)
+                        val rIdx = pl.cels.indexOfFirst { it === rc }
+                        val tr = cut.transformFor(pl, pl.startOf(rIdx.coerceAtLeast(0)))
+                        val transformed = pl.group >= 0 && cut.layers.any { it.isGroup && it.id == pl.group && it.transformFolder }
+                        if (transformed) { nc.save(); nc.translate(cut.w / 2f + tr.x, cut.h / 2f + tr.y); nc.rotate(tr.rotation); nc.scale(tr.scale, tr.scale); nc.translate(-cut.w / 2f, -cut.h / 2f) }
+                        if (!ed.drawOutsideFrame) { nc.save(); nc.clipRect(0f, 0f, cut.w.toFloat(), cut.h.toFloat()) }
+                        refSet.draw(nc, nc.clipBounds, paint)
+                        if (!ed.drawOutsideFrame) nc.restore()
+                        if (transformed) nc.restore()
+                    }
+                }
                 if (ed.onion && !cut.playing && onionA > 0 && !glSkipOnion) for (l in cut.layers) {
                     if (!l.visible || l.kind == 5) continue
+                    if (vecPrevLayer != null && l === vecPrevLayer && vecPreview.isNotEmpty()) continue // its references are drawn above
                     val activeDrawingLayerId = cut.drawLayer?.id ?: cut.layerId
                     if (!ed.onionAllLayers && l.id != activeDrawingLayerId) continue
                     val i = l.indexAt(cut.time)
@@ -2373,6 +2399,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (layerIdx < glSkip) continue // drawn by the GPU compositor plane
                     if (!l.visible) continue
                     if (l.kind == 7) continue
+                    if (l === vecPrevLayer && vecPreview.isNotEmpty()) continue // interpolation preview: the keyframes are the onion references above, the preview is drawn on top
                     val ls = l.drawCel(cut.time)?.strokes ?: continue
                     if (l.kind == 5) {
                         val imageRevision = l.imageRevision
@@ -2455,7 +2482,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
             val vxp = ed.vecXf?.takeIf { it.onPreview }
             val vecPreviewDraw = if (vxp != null && vxp.rev >= 0) vecDeform(vecXfPrev ?: vecPreview, vxp.sel, vxp.frozen(), ed.vecLockWeight, false) else vecPreview // a running session shows its result on the preview
-            if (vecPreviewDraw.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreviewDraw) { val picked = vs.id in ed.vecPreSel; VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = (if (picked) 0xFFFF9800.toInt() else purple.toArgb()) or (0xFF shl 24), opacity = (vs.opacity * (if (picked) 0.7f else 0.4f)).coerceIn(0.05f, 1f)), pt) } }
+            // The interpolation preview is drawn in its natural colour (the previous / next keyframes are the onion-skin references, see below); a picked line gets an orange outline.
+            if (vecPreviewDraw.isNotEmpty()) {
+                drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecPreviewDraw) VectorTessellator.draw(cv.nativeCanvas, vs, pt) }
+                for (vs in vecPreviewDraw) if (vs.id in ed.vecPreSel && vs.points.size > 1) {
+                    val pl = vs.points.map { Offset(it.x, it.y) }
+                    drawPoly(pl, vs.isClosed, Color.White, 3f * px1); drawPoly(pl, vs.isClosed, Color(0xFFFF9800), 1.5f * px1)
+                }
+            }
             if (vecDisplaceShow.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecDisplaceShow) VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = 0xFFFF9800.toInt() or (0xFF shl 24), opacity = (vs.opacity * 0.55f).coerceIn(0.2f, 1f)), pt) }
             if (ed.tool == 2 && ed.vecDisplace) ed.vecDisplaceJoints.forEachIndexed { i, g ->
                 val p = Offset(g.x, g.y)
@@ -2483,10 +2517,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             // Vector edit overlay: hairline centrelines, points (selected = orange, raised = green, lowered = purple, size follows elevation), lasso and cutter path
             if (vecLayerNow != null) {
                 val numPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * px1; typeface = android.graphics.Typeface.DEFAULT_BOLD }
-                for ((si, vs) in vecShowStrokes.withIndex()) {
+                // Interpolation drag with the Selection tool: the current frame shows no lines and no points (only the preview is worked on).
+                // Points view (Selection tool button): 0 = every point, 1 = only the anchor points, 2 = none.
+                val pointView = if (ed.tool == 2) ed.vecPointView else 0
+                if (vecPrevLayer == null) for ((si, vs) in vecShowStrokes.withIndex()) {
                     if (vs.points.size > 1) drawPoly(vs.points.map { Offset(it.x, it.y) }, vs.isClosed, Color(0xAA3B82F6), 1.2f * px1)
                     val anchorCount = vs.points.maxOfOrNull { it.anchor } ?: 0
                     for ((pi, vp) in vs.points.withIndex()) {
+                        if (pointView == 2 || (pointView == 1 && vp.anchor <= 0)) continue
                         val picked = ed.vecSel.contains(vecKey(si, pi))
                         val e = vp.elevationOffset
                         val r = (3.5f + kotlin.math.min(abs(e), 12f) * 0.25f + (if (vp.anchor > 0) 2.5f else 0f)) * px1

@@ -34,8 +34,12 @@ import kotlin.math.floor
 /** Screen-space correction mesh for raw Android stylus coordinates. Errors are normalized to display size. */
 object PenCalibration {
     const val GRID = 5
+    // Residual mesh: what is left of each target's error after the global affine part (offset, rotation, scale, skew) is removed. Indexed on the target grid.
     private val dx = FloatArray(GRID * GRID)
     private val dy = FloatArray(GRID * GRID)
+    // Global affine part, fitted by least squares over the 25 taps: error ~ a[0] + a[1] * x + a[2] * y, x / y = the raw pen position normalized to the display. Zero in older settings files.
+    private val affX = FloatArray(3)
+    private val affY = FloatArray(3)
     private var gridLeft = 0.08f; private var gridRight = 0.92f
     private var gridTop = 0.08f; private var gridBottom = 0.92f
     var enabled by androidx.compose.runtime.mutableStateOf(false)
@@ -48,10 +52,13 @@ object PenCalibration {
         hasData = o.optBoolean("penCalibrationHasData", false) && ax != null && ay != null && ax.length() == GRID * GRID && ay.length() == GRID * GRID
         if (hasData) {
             for (i in dx.indices) { dx[i] = ax!!.optDouble(i, 0.0).toFloat(); dy[i] = ay!!.optDouble(i, 0.0).toFloat() }
+            // older files have no affine part: the stored mesh is then the whole correction (affine = 0 keeps the old behaviour)
+            val fx = o.optJSONArray("penCalibrationAffineX"); val fy = o.optJSONArray("penCalibrationAffineY")
+            for (i in 0 until 3) { affX[i] = if (fx != null && fx.length() == 3) fx.optDouble(i, 0.0).toFloat() else 0f; affY[i] = if (fy != null && fy.length() == 3) fy.optDouble(i, 0.0).toFloat() else 0f }
             gridLeft = o.optDouble("penCalibrationLeft", 0.08).toFloat(); gridRight = o.optDouble("penCalibrationRight", 0.92).toFloat()
             gridTop = o.optDouble("penCalibrationTop", 0.08).toFloat(); gridBottom = o.optDouble("penCalibrationBottom", 0.92).toFloat()
         }
-        else { dx.fill(0f); dy.fill(0f); enabled = false }
+        else { dx.fill(0f); dy.fill(0f); affX.fill(0f); affY.fill(0f); enabled = false }
     }
 
     fun write(o: org.json.JSONObject) {
@@ -67,28 +74,74 @@ object PenCalibration {
         }
         o.put("penCalibrationDx", ax)
         o.put("penCalibrationDy", ay)
+        val fx = org.json.JSONArray()
+        val fy = org.json.JSONArray()
+        for (i in 0 until 3) { fx.put(affX[i].toDouble()); fy.put(affY[i].toDouble()) }
+        o.put("penCalibrationAffineX", fx)
+        o.put("penCalibrationAffineY", fy)
         o.put("penCalibrationLeft", gridLeft.toDouble())
         o.put("penCalibrationRight", gridRight.toDouble())
         o.put("penCalibrationTop", gridTop.toDouble())
         o.put("penCalibrationBottom", gridBottom.toDouble())
     }
 
+    /**
+     * Stores a calibration. [errorsX] / [errorsY] = (target - tap) normalized to the display, [targetX] / [targetY] = the target centres in screen pixels.
+     * The error field is split in two: a least-squares affine part (global offset, rotation, scale and skew, which also extends past the outer targets) and
+     * the residual of each target, kept as a 5x5 mesh for the local warp. A single tap that is a little off therefore only bends its own neighbourhood.
+     */
     fun setSamples(errorsX: FloatArray, errorsY: FloatArray, targetX: FloatArray, targetY: FloatArray, screenWidth: Float, screenHeight: Float) {
         require(errorsX.size == GRID * GRID && errorsY.size == GRID * GRID)
         require(targetX.size == GRID * GRID && targetY.size == GRID * GRID)
-        for (i in dx.indices) { dx[i] = errorsX[i]; dy[i] = errorsY[i] }
+        val n = GRID * GRID
+        // where the pen really reported each tap (normalized): the affine part is a function of the RAW position, as it is at run time
+        val sx = FloatArray(n) { targetX[it] / screenWidth - errorsX[it] }
+        val sy = FloatArray(n) { targetY[it] / screenHeight - errorsY[it] }
+        val fitX = fitAffine(sx, sy, errorsX); val fitY = fitAffine(sx, sy, errorsY)
+        for (i in 0 until 3) { affX[i] = fitX[i]; affY[i] = fitY[i] }
+        for (i in 0 until n) {
+            dx[i] = errorsX[i] - (affX[0] + affX[1] * sx[i] + affX[2] * sy[i])
+            dy[i] = errorsY[i] - (affY[0] + affY[1] * sx[i] + affY[2] * sy[i])
+        }
         gridLeft = (targetX[0] / screenWidth).coerceIn(0f, 1f); gridRight = (targetX[GRID - 1] / screenWidth).coerceIn(gridLeft + 0.01f, 1f)
         gridTop = (targetY[0] / screenHeight).coerceIn(0f, 1f); gridBottom = (targetY[(GRID - 1) * GRID] / screenHeight).coerceIn(gridTop + 0.01f, 1f)
         hasData = true; enabled = true
     }
 
-    fun reset() { dx.fill(0f); dy.fill(0f); gridLeft = 0.08f; gridRight = 0.92f; gridTop = 0.08f; gridBottom = 0.92f; enabled = false; hasData = false }
+    /** Least-squares fit of v ~ c0 + c1 * x + c2 * y (normal equations, 3x3). All zeros when the taps do not span the plane. */
+    private fun fitAffine(x: FloatArray, y: FloatArray, v: FloatArray): FloatArray {
+        val n = v.size
+        var sx = 0.0; var sy = 0.0; var sxx = 0.0; var sxy = 0.0; var syy = 0.0; var sv = 0.0; var sxv = 0.0; var syv = 0.0
+        for (i in 0 until n) {
+            val xi = x[i].toDouble(); val yi = y[i].toDouble(); val vi = v[i].toDouble()
+            sx += xi; sy += yi; sxx += xi * xi; sxy += xi * yi; syy += yi * yi; sv += vi; sxv += xi * vi; syv += yi * vi
+        }
+        // | n   sx  sy  | |c0|   | sv  |
+        // | sx  sxx sxy | |c1| = | sxv |
+        // | sy  sxy syy | |c2|   | syv |
+        val det = n * (sxx * syy - sxy * sxy) - sx * (sx * syy - sxy * sy) + sy * (sx * sxy - sxx * sy)
+        if (kotlin.math.abs(det) < 1e-9) return FloatArray(3)
+        val c0 = (sv * (sxx * syy - sxy * sxy) - sx * (sxv * syy - sxy * syv) + sy * (sxv * sxy - sxx * syv)) / det
+        val c1 = (n * (sxv * syy - sxy * syv) - sv * (sx * syy - sxy * sy) + sy * (sx * syv - sxv * sy)) / det
+        val c2 = (n * (sxx * syv - sxv * sxy) - sx * (sx * syv - sxv * sy) + sv * (sx * sxy - sxx * sy)) / det
+        return floatArrayOf(c0.toFloat(), c1.toFloat(), c2.toFloat())
+    }
 
-    /** Smooth bicubic interpolation over the 5x5 normalized screen-space displacement mesh. */
+    fun reset() { dx.fill(0f); dy.fill(0f); affX.fill(0f); affY.fill(0f); gridLeft = 0.08f; gridRight = 0.92f; gridTop = 0.08f; gridBottom = 0.92f; enabled = false; hasData = false }
+
+    /**
+     * The correction (in pixels) for a raw pen position: the global affine part, plus the residual mesh read with smooth bicubic interpolation. The mesh sits on the
+     * TARGET grid, so it is looked up at the affine-corrected position (close to where the pen is really aimed), not at the raw one. Outside the outer targets the
+     * affine part keeps going and the residual holds its edge value.
+     */
     fun correction(rawX: Float, rawY: Float, screenWidth: Float, screenHeight: Float): Offset {
         if (!enabled || !hasData || screenWidth <= 0f || screenHeight <= 0f) return Offset.Zero
-        val gx = ((rawX / screenWidth - gridLeft) / (gridRight - gridLeft).coerceAtLeast(0.01f)).coerceIn(0f, 1f) * (GRID - 1)
-        val gy = ((rawY / screenHeight - gridTop) / (gridBottom - gridTop).coerceAtLeast(0.01f)).coerceIn(0f, 1f) * (GRID - 1)
+        val nx = rawX / screenWidth; val ny = rawY / screenHeight
+        val ex = affX[0] + affX[1] * nx + affX[2] * ny
+        val ey = affY[0] + affY[1] * nx + affY[2] * ny
+        val qx = nx + ex; val qy = ny + ey
+        val gx = ((qx - gridLeft) / (gridRight - gridLeft).coerceAtLeast(0.01f)).coerceIn(0f, 1f) * (GRID - 1)
+        val gy = ((qy - gridTop) / (gridBottom - gridTop).coerceAtLeast(0.01f)).coerceIn(0f, 1f) * (GRID - 1)
         val x0 = floor(gx).toInt().coerceIn(0, GRID - 2); val y0 = floor(gy).toInt().coerceIn(0, GRID - 2)
         val tx = gx - x0; val ty = gy - y0
         fun catmull(p0: Float, p1: Float, p2: Float, p3: Float, t: Float): Float {
@@ -107,7 +160,7 @@ object PenCalibration {
             }
             return catmull(rows[0], rows[1], rows[2], rows[3], ty)
         }
-        return Offset(sample(dx) * screenWidth, sample(dy) * screenHeight)
+        return Offset((ex + sample(dx)) * screenWidth, (ey + sample(dy)) * screenHeight)
     }
 
     /** Makes a corrected copy; original MotionEvent ownership remains with Android. */
