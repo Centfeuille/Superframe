@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            92, "2026-11-26", "Smaller pen calibration crosshairs and safer Cancel placement",
+            listOf(
+                "Calibration targets are now small crosshairs with a precise centre mark instead of large blue circles. The touch hit area remains slightly larger than the visible mark so the S Pen can land accurately.",
+                "Cancel is moved into the header, outside the calibration grid, so no target overlaps the button."
+            )
+        ),
+        ReleaseNote(
             91, "2026-11-26", "5 × 5 pen calibration",
             listOf(
                 "Settings > Pen input > Calibrate guides you through 25 screen targets using the S Pen. The saved correction mesh compensates for global offset, rotation, scale and skew, plus position-dependent screen distortion.",

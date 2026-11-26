@@ -773,3 +773,11 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - Startup: `App` opens `AppSettings.lastCutId` once per process when `openLastCut` is on (`Editor.autoOpenDone`; skipped after an incomplete previous launch or with recovery pending). `confirmDestructive` (default off) guards Cut deletion (`Editor.pendingDelete`, dialog in `MenuScreen`) and a history-clearing Cut resize (`CutSettingsPanel`).
 - Not built yet: pen-button mapping, pen-vs-finger drawing choice, UI scale, toolbar customisation, tooltips switch, light / dark theme, haptics, number-entry choice, timeline-selection default, auto-hide panels, presets, settings export / import.
 - Unverified: not compiled, not run on a device.
+
+
+## 2026-11-26 — Pen calibration target UI refinement
+- `PenCalibrationDialog` now draws a fine crosshair (14 dp arms, 1 dp stroke, 1.25 dp centre dot) in a 28 dp stylus hit area. The recorded target coordinate is the centre of that hit area, not the visible line edge.
+- Cancel is in the top-right header. The calibration grid begins 84 dp below the dialog top, keeping the first row clear of the header controls; the last row remains 40 dp above the bottom. Horizontal margins are at least 36 dp or 6% of the dialog width.
+- No change to calibration math, raw `MotionEvent` capture, settings persistence or `.inb` format.
+- AI model: GPT-6. Files changed: `PenCalibration.kt`, `WhatsNew.kt` (note 92), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: source review and geometry/bounds inspection only; no Android Gradle build or tablet test performed.

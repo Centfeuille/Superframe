@@ -1,3 +1,14 @@
+## 2026-11-26 (4) — Smaller pen calibration crosshairs; Cancel separated from targets
+- AI model: GPT-6
+- Category: Fixed / Pen calibration UI (no `.inb` format change)
+- Request: replace oversized circular calibration targets with precise crosshairs and prevent a target tap from activating Cancel.
+- `PenCalibration.kt`: replaced the 50 dp blue filled circle with a fine 14 dp-arm crosshair and a small centre dot, drawn inside a 28 dp stylus hit area. The measured target remains the exact centre of that hit area. Moved Cancel to the top-right header and constrained the grid below the header, keeping every target clear of the Cancel button.
+- `WhatsNew.kt`: added release note 92.
+- Files: `PenCalibration.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper / build scripts / dependency versions, `gradle.properties`, manifest, SDK / Java and signing configuration.
+- Validation: source and layout bounds reviewed; checked the 5×5 target centre calculation and ensured the top row begins below the Cancel/header hit area. No Android Gradle build or tablet runtime test was available. ZIP integrity and complete source diff reviewed.
+- Known follow-up: verify target visibility, hit accuracy and Cancel separation on the tablet in landscape and portrait; calibration accuracy itself remains dependent on raw-screen coordinate validation.
+
 ## 2026-11-26 (3) — 5×5 S Pen calibration mesh
 - AI model: GPT-6
 - Category: Added (source code, no `.inb` format change)

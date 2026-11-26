@@ -1,15 +1,13 @@
 package com.example.inbetween
 
 import android.view.MotionEvent
+import androidx.compose.foundation.Canvas as ComposeCanvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -20,9 +18,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -134,13 +132,26 @@ fun PenCalibrationDialog(onClose: () -> Unit) {
         BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xEE17171B))) {
             val w = with(density) { maxWidth.toPx() }
             val h = with(density) { maxHeight.toPx() }
-            val marginX = w * 0.06f; val marginY = h * 0.07f
-            val targetX = marginX + (w - 2f * marginX) * (active % PenCalibration.GRID) / (PenCalibration.GRID - 1)
-            val targetY = marginY + (h - 2f * marginY) * (active / PenCalibration.GRID) / (PenCalibration.GRID - 1)
-            Text("Pen calibration  •  ${samples.size + 1} / $total\nTap the target with the pen tip. Keep the tablet in its normal drawing orientation.", color = Color.White, modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp))
-            Box(
-                Modifier.offset(x = with(density) { targetX.toDp() } - 25.dp, y = with(density) { targetY.toDp() } - 25.dp)
-                    .size(50.dp).clip(CircleShape).background(Color(0x332196F3)).border(2.dp, Color(0xFF64B5F6), CircleShape)
+            // Keep calibration targets clear of the header (including Cancel). The target hit
+            // area is modest, while the visible crosshair itself is deliberately much smaller.
+            val marginX = with(density) { 36.dp.toPx() }.coerceAtLeast(w * 0.06f)
+            val topSafe = with(density) { 84.dp.toPx() }
+            val bottomSafe = with(density) { 40.dp.toPx() }
+            val targetX = marginX + (w - 2f * marginX).coerceAtLeast(1f) * (active % PenCalibration.GRID) / (PenCalibration.GRID - 1)
+            val targetY = topSafe + (h - topSafe - bottomSafe).coerceAtLeast(1f) * (active / PenCalibration.GRID) / (PenCalibration.GRID - 1)
+            Text(
+                "Pen calibration  •  ${samples.size + 1} / $total\nTap the crosshair with the pen tip. Keep the tablet in its normal drawing orientation.",
+                color = Color.White,
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 28.dp, top = 24.dp)
+            )
+            TextButton(
+                onClick = onClose,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 20.dp, top = 16.dp)
+            ) { Text("Cancel") }
+            ComposeCanvas(
+                modifier = Modifier
+                    .offset(x = with(density) { targetX.toDp() } - 14.dp, y = with(density) { targetY.toDp() } - 14.dp)
+                    .size(28.dp)
                     .onGloballyPositioned { coords ->
                         val p = coords.positionInWindow() + Offset(coords.size.width / 2f, coords.size.height / 2f)
                         val loc = IntArray(2); view.rootView.getLocationOnScreen(loc)
@@ -164,8 +175,15 @@ fun PenCalibrationDialog(onClose: () -> Unit) {
                         }
                         true
                     }
-            )
-            TextButton(onClick = onClose, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp)) { Text("Cancel") }
+            ) {
+                val c = Color(0xFF64B5F6)
+                val mid = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                val arm = 7.dp.toPx()
+                val stroke = 1.dp.toPx()
+                drawLine(c, androidx.compose.ui.geometry.Offset(mid.x - arm, mid.y), androidx.compose.ui.geometry.Offset(mid.x + arm, mid.y), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(c, androidx.compose.ui.geometry.Offset(mid.x, mid.y - arm), androidx.compose.ui.geometry.Offset(mid.x, mid.y + arm), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawCircle(c, radius = 1.25.dp.toPx(), center = mid)
+            }
         }
     }
 }
