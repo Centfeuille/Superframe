@@ -13,9 +13,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -54,12 +57,22 @@ object PenCalibration {
     }
 
     fun write(o: org.json.JSONObject) {
-        o.put("penCalibrationEnabled", enabled).put("penCalibrationHasData", hasData)
-        val ax = org.json.JSONArray(); val ay = org.json.JSONArray()
-        for (i in dx.indices) { ax.put(dx[i].toDouble()); ay.put(dy[i].toDouble()) }
-        o.put("penCalibrationDx", ax).put("penCalibrationDy", ay)
-            .put("penCalibrationLeft", gridLeft.toDouble()).put("penCalibrationRight", gridRight.toDouble())
-            .put("penCalibrationTop", gridTop.toDouble()).put("penCalibrationBottom", gridBottom.toDouble())
+        // Keep writes separate: Android's platform JSONObject overloads are not
+        // consistently chainable across the API stubs used by Kotlin compilation.
+        o.put("penCalibrationEnabled", enabled)
+        o.put("penCalibrationHasData", hasData)
+        val ax = org.json.JSONArray()
+        val ay = org.json.JSONArray()
+        for (i in dx.indices) {
+            ax.put(dx[i].toDouble())
+            ay.put(dy[i].toDouble())
+        }
+        o.put("penCalibrationDx", ax)
+        o.put("penCalibrationDy", ay)
+        o.put("penCalibrationLeft", gridLeft.toDouble())
+        o.put("penCalibrationRight", gridRight.toDouble())
+        o.put("penCalibrationTop", gridTop.toDouble())
+        o.put("penCalibrationBottom", gridBottom.toDouble())
     }
 
     fun setSamples(errorsX: FloatArray, errorsY: FloatArray, targetX: FloatArray, targetY: FloatArray, screenWidth: Float, screenHeight: Float) {
@@ -108,6 +121,7 @@ object PenCalibration {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun PenCalibrationDialog(onClose: () -> Unit) {
     val view = LocalView.current
