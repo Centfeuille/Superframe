@@ -11,7 +11,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Cuts are compact binary (.inb). V28 adds a "relative" flag to guide joints (offset from the unmoved line); V27 adds non-destructive interpolation guide joints; V26 adds Uniform timing flags (folder + attached layers); V25 adds vector point reference anchors; V24 adds vector layers (a layer flag, ink kind 5 strokes and per-keyframe interpolation settings); V23 adds the vanishing-point-vs-guide-line magnetism mode; V22 stores physical focal length directly; V21 adds adjustable curvilinear ray density; V20 adds per-guide 30-degree rotation snapping and camera FOV; V19 adds per-guide curvilinear strength; V18 adds independent perspective-guide controls; V17 adds selection-clipped strokes and warp meshes; V16 adds brush flow / cap, tip shape, texture controls and wet pressure, and embeds imported brush assets.
+ * Cuts are compact binary (.inb). V29 stores vector anchor values as variable-length numbers (anchor numbers above 99); it is written only when a stroke needs it. V28 adds a "relative" flag to guide joints (offset from the unmoved line); V27 adds non-destructive interpolation guide joints; V26 adds Uniform timing flags (folder + attached layers); V25 adds vector point reference anchors; V24 adds vector layers (a layer flag, ink kind 5 strokes and per-keyframe interpolation settings); V23 adds the vanishing-point-vs-guide-line magnetism mode; V22 stores physical focal length directly; V21 adds adjustable curvilinear ray density; V20 adds per-guide 30-degree rotation snapping and camera FOV; V19 adds per-guide curvilinear strength; V18 adds independent perspective-guide controls; V17 adds selection-clipped strokes and warp meshes; V16 adds brush flow / cap, tip shape, texture controls and wet pressure, and embeds imported brush assets.
  * v2 (per-layer timing) and v1 (shared frames) are still read and converted.
  */
 object Store {
@@ -39,6 +39,7 @@ object Store {
     private const val V26 = 0x494E424A // V26: Uniform timing flags
     private const val V27 = 0x494E424B // V27: non-destructive interpolation guide joints
     private const val V28 = 0x494E424C // V28: guide joints carry a "relative" flag (offset from the unmoved line instead of an absolute spot)
+    private const val V29 = 0x494E424D // V29: vector anchor values are variable-length numbers instead of one byte (anchor numbers above 99 / 255). Written ONLY when a stroke needs it; has the V28 layout otherwise.
     private const val V17 = 0x494E4241 // V17: strokes drawn inside a selection store its runs; region warps (ink kind 4: runs + mesh vertices)
     private const val V16 = 0x494E4240 // V16: stroke flow / cap, tip shape, texture controls, wet pressure, and the imported stamps / textures the strokes use
     private const val V15 = 0x494E423F // V15: per-cel persistent-canvas flag and inbetween label
@@ -61,7 +62,7 @@ object Store {
         return (r ushr 1) xor -(r and 1)
     }
 
-    private fun writeInk(o: DataOutputStream, k: Ink) {
+    private fun writeInk(o: DataOutputStream, k: Ink, wide: Boolean = false) {
         o.writeByte(k.kind); o.writeInt(k.color); o.writeBoolean(k.b.erase)
         o.writeFloat(k.b.size); o.writeFloat(k.b.opacity); o.writeFloat(k.b.hardness); o.writeFloat(k.b.spacing); o.writeFloat(k.b.texture)
         o.writeByte(k.b.tip); o.writeByte(k.b.textureId); o.writeByte((k.b.textureAmt * 100f).roundToInt().coerceIn(0, 100)); o.writeByte((k.b.aa * 100f).roundToInt().coerceIn(0, 100))
@@ -107,7 +108,7 @@ object Store {
             // V25: sparse reference anchors (point index, rank)
             val na = if (mm.size > 3) (mm.size - 3) / 2 else 0
             wv(o, na)
-            for (q in 0 until na) { wv(o, mm[3 + q * 2].toInt()); o.writeByte(mm[4 + q * 2].toInt().coerceIn(0, 255)) }
+            for (q in 0 until na) { wv(o, mm[3 + q * 2].toInt()); if (wide) wv(o, mm[4 + q * 2].toInt()) else o.writeByte(mm[4 + q * 2].toInt().coerceIn(0, 255)) } // V29: the value (rank / flags) is a variable-length number
             val n = k.p.size / 4
             wv(o, n)
             for (f in k.p) o.writeFloat(f)
@@ -178,7 +179,7 @@ object Store {
             if (v >= 25) {
                 val na = rv(i).coerceIn(0, 2_000_000)
                 val extra = FloatArray(na * 2)
-                for (q in 0 until na) { extra[q * 2] = rv(i).toFloat(); extra[q * 2 + 1] = i.readUnsignedByte().toFloat() }
+                for (q in 0 until na) { extra[q * 2] = rv(i).toFloat(); extra[q * 2 + 1] = (if (v >= 29) rv(i) else i.readUnsignedByte()).toFloat() }
                 mm = mm + extra
             }
             val n = rv(i).coerceIn(0, 2_000_000)
@@ -221,8 +222,11 @@ object Store {
     fun write(c: Cut, out: OutputStream, embedMedia: Boolean = true) {
         val o = DataOutputStream(BufferedOutputStream(out))
         val usesUniform = c.layers.any { it.uniformTiming || it.uniformAttached }
-        val usesGuides = c.layers.any { l -> l.vector && l.cels.any { !it.vecCfg?.guideJoints.isNullOrEmpty() } }
-        o.writeInt(if (usesGuides) V28 else if (usesUniform) V26 else V25); o.writeLong(c.id); o.writeUTF(c.name) // use V27 only when guide joints are present; otherwise retain the older compatible version
+        // V29 only when an anchor value does not fit the old single byte (anchor numbers above 99 are written as 1000 + number, see encodeAnchorRank). A V29 file has the V28 layout (guide counts and
+        // the Uniform flags block are always written), so `usesGuides` is also true for it. Drawings that only use anchors up to 99 are written exactly as before.
+        val wide = c.layers.any { l -> l.cels.any { cel -> cel.strokes.any { k -> k.kind == 5 && k.m?.let { m -> (4 until m.size step 2).any { m[it] > 255f } } == true } } }
+        val usesGuides = wide || c.layers.any { l -> l.vector && l.cels.any { !it.vecCfg?.guideJoints.isNullOrEmpty() } }
+        o.writeInt(if (wide) V29 else if (usesGuides) V28 else if (usesUniform) V26 else V25); o.writeLong(c.id); o.writeUTF(c.name) // use V27 only when guide joints are present; otherwise retain the older compatible version
         o.writeInt(c.fps); o.writeInt(c.w); o.writeInt(c.h); o.writeInt(c.dpi)
         o.writeInt(c.layers.size)
         for (l in c.layers) {
@@ -274,7 +278,7 @@ object Store {
                 }
                 val link = l.cels.indexOfFirst { it.strokes === cel.strokes } // first cel showing this drawing; a later one is its clone
                 if (link in 0 until celIndex) { o.writeInt(link); continue }
-                o.writeInt(-1); o.writeInt(cel.strokes.size); for (k in cel.strokes) writeInk(o, k)
+                o.writeInt(-1); o.writeInt(cel.strokes.size); for (k in cel.strokes) writeInk(o, k, wide)
             }
         }
         // V16: the imported stamps / textures the strokes use, so the cut opens correctly on a device that never imported them
@@ -296,7 +300,7 @@ object Store {
 
     fun read(input: InputStream, newId: Long? = null, mediaRoot: File? = null, context: Context? = null): Cut {
         val i = DataInputStream(BufferedInputStream(input))
-        val v = when (i.readInt()) { V1 -> 1; V2 -> 2; V3 -> 3; V4 -> 4; V5 -> 5; V6 -> 6; V7 -> 7; V8 -> 8; V9 -> 9; V10 -> 10; V11 -> 11; V12 -> 12; V13 -> 13; V14 -> 14; V15 -> 15; V16 -> 16; V17 -> 17; V18 -> 18; V19 -> 19; V20 -> 20; V21 -> 21; V22 -> 22; V23 -> 23; V24 -> 24; V25 -> 25; V26 -> 26; V27 -> 27; V28 -> 28; else -> throw IllegalArgumentException("Not an Inbetween cut") }
+        val v = when (i.readInt()) { V1 -> 1; V2 -> 2; V3 -> 3; V4 -> 4; V5 -> 5; V6 -> 6; V7 -> 7; V8 -> 8; V9 -> 9; V10 -> 10; V11 -> 11; V12 -> 12; V13 -> 13; V14 -> 14; V15 -> 15; V16 -> 16; V17 -> 17; V18 -> 18; V19 -> 19; V20 -> 20; V21 -> 21; V22 -> 22; V23 -> 23; V24 -> 24; V25 -> 25; V26 -> 26; V27 -> 27; V28 -> 28; V29 -> 29; else -> throw IllegalArgumentException("Not an Inbetween cut") }
         val id = i.readLong()
         val c = Cut(i.readUTF(), i.readInt(), i.readInt(), i.readInt(), i.readInt(), newId ?: id)
         c.layers.clear()

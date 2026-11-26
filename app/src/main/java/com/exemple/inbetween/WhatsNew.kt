@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            89, "2026-11-26", "Smarter anchors when tracing a ghost line, up to 999 anchor numbers",
+            listOf(
+                "Ghost tracing: the in-between anchors of the ghost now go to the bend of your new line that matches them best, judged by how far along the line it is (also measured from the nearest end) and by which way and how sharply it bends. A left bend no longer takes the number of a right bend.",
+                "A ghost anchor that has no fitting bend on the new line is left out (the interpolation then follows the shape), and a bend that no ghost anchor fits gets a new number of its own.",
+                "Anchor numbers now go up to 999 (was 99). Drawings that only use numbers up to 99 are saved exactly as before. A drawing that uses a number above 99 is saved in the new format V29, which older versions of the app cannot open. Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             88, "2026-11-25", "Cut handles work on every side, Stretch image, self-merge keeps its ends, dragged in-betweens on the timeline",
             listOf(
                 "Cut settings: the left and top handles now move that edge of the page. Pulling outwards adds space on that side and the drawing keeps its place; pushing inwards crops. Confirming such a resize clears Undo.",

@@ -20,7 +20,8 @@ import kotlin.math.sqrt
  * tip positions (as 0..1 progress along the line) that the detected apexes are paired with, in order. Three ways to get a plan:
  *   - a new line: no numbers yet, so fresh ones are allocated in path order ([assignFresh]);
  *   - a line traced over a ghost line ([inherit]): the two ends take the ghost's end numbers, the start of the new line decides which one is which,
- *     and the apexes take the ghost's in-between numbers in order;
+ *     and the apexes take the ghost's in-between numbers by position (progress and distance from the nearest end) and bend (side and sharpness) with
+ *     an ordered alignment ([matchDescs]); a ghost number with no acceptable apex is dropped, and an apex no ghost number fits gets a new number;
  *   - a line that changed shape (merged, points deleted; [refresh]): its numbers are kept. A traced line keeps following its ghost: the end where the line
  *     started stays put, the other end moves to wherever the line now ends, and the apexes are detected again on the whole line.
  */
@@ -288,6 +289,81 @@ object AutoAnchors {
         return out
     }
 
+    /** An apex / ghost tip for [matchDescs]: [u] = position (0..1, along the line in the direction of the new line), [turn] = signed bend in degrees (0 = none / unknown). */
+    private class Desc(val u: Float, val turn: Float)
+
+    /** Smallest bend (degrees) whose direction counts as known. */
+    private const val BEND_MIN = 6f
+    /** A pair costing more than this is refused (an opposite bend alone costs 0.5, so a left bend never takes a right bend's number). */
+    private const val PAIR_MAX = 0.45f
+    /** Cost of leaving one apex or one ghost tip unpaired (two skips = 0.5 > [PAIR_MAX], so any allowed pair beats skipping both). */
+    private const val PAIR_SKIP = 0.25f
+
+    /**
+     * Signed bend (degrees) of the dense curve [d] at progress [u]: the turn between the chord arriving from a short way before and the chord leaving to a short way after
+     * (the same window the apex detection uses). 0 when there is no room on either side (an end of an open line).
+     */
+    private fun bendAt(d: Dense, u: Float): Float {
+        if (d.total < 1e-3f) return 0f
+        val w = (d.total * 0.035f).coerceIn(5f, 28f) / d.total
+        val ua: Float; val ub: Float
+        if (d.ring) { ua = (((u - w) % 1f) + 1f) % 1f; ub = (((u + w) % 1f) + 1f) % 1f }
+        else { ua = (u - w).coerceAtLeast(0f); ub = (u + w).coerceAtMost(1f); if (u - ua < 1e-4f || ub - u < 1e-4f) return 0f }
+        val a = FloatArray(2); val b = FloatArray(2); val c = FloatArray(2)
+        pointAt(d, ua, a); pointAt(d, u, b); pointAt(d, ub, c)
+        val v1x = b[0] - a[0]; val v1y = b[1] - a[1]
+        val v2x = c[0] - b[0]; val v2y = c[1] - b[1]
+        if (hypot(v1x, v1y) < 1e-3f || hypot(v2x, v2y) < 1e-3f) return 0f
+        return Math.toDegrees(atan2((v1x * v2y - v1y * v2x).toDouble(), (v1x * v2x + v1y * v2y).toDouble())).toFloat()
+    }
+
+    /**
+     * Cost of letting apex [a] take the number of ghost tip [b] (both positions in the same 0..1 space). Position: half the plain difference of progress, half the difference of the
+     * distance from the NEAREST END (a bend close to one end stays close to that end when the middle of the line is stretched; a bend on the other half of the line only gets the plain
+     * difference). Shape: when both bends are clear, opposite directions add 0.5 (refused), otherwise up to 0.1 for a different sharpness.
+     */
+    private fun pairCost(a: Desc, b: Desc): Float {
+        val du = abs(a.u - b.u)
+        val sameHalf = (a.u < 0.5f) == (b.u < 0.5f)
+        val de = abs(min(a.u, 1f - a.u) - min(b.u, 1f - b.u))
+        var c = 0.5f * du + 0.5f * (if (sameHalf) de else du)
+        if (abs(a.turn) >= BEND_MIN && abs(b.turn) >= BEND_MIN) {
+            c += if ((a.turn > 0f) != (b.turn > 0f)) 0.5f else 0.1f * min(abs(abs(a.turn) - abs(b.turn)) / 90f, 1f)
+        }
+        return c
+    }
+
+    /**
+     * Ordered pairing of detected apexes [a] with ghost tips [b] (both ascending by position): the alignment of least total cost, where a pair costs [pairCost] and is only allowed
+     * up to [PAIR_MAX], and an unpaired apex or tip costs [PAIR_SKIP]. Unlike [matchOrdered], equal counts are not paired blindly. For each apex the index of its tip, or -1.
+     */
+    private fun matchDescs(a: List<Desc>, b: List<Desc>): IntArray {
+        val na = a.size; val nb = b.size
+        val out = IntArray(na) { -1 }
+        if (na == 0 || nb == 0) return out
+        val cost = Array(na + 1) { FloatArray(nb + 1) }
+        val from = Array(na + 1) { ByteArray(nb + 1) } // 1 = pair, 2 = skip an apex, 3 = skip a tip
+        for (i in 1..na) { cost[i][0] = i * PAIR_SKIP; from[i][0] = 2 }
+        for (j in 1..nb) { cost[0][j] = j * PAIR_SKIP; from[0][j] = 3 }
+        for (i in 1..na) for (j in 1..nb) {
+            var best = cost[i - 1][j] + PAIR_SKIP; var how: Byte = 2
+            val tip = cost[i][j - 1] + PAIR_SKIP
+            if (tip < best) { best = tip; how = 3 }
+            val pc = pairCost(a[i - 1], b[j - 1])
+            if (pc <= PAIR_MAX) { val both = cost[i - 1][j - 1] + pc; if (both <= best) { best = both; how = 1 } }
+            cost[i][j] = best; from[i][j] = how
+        }
+        var i = na; var j = nb
+        while (i > 0 || j > 0) {
+            when (from[i][j].toInt()) {
+                1 -> { out[i - 1] = j - 1; i--; j-- }
+                2 -> i--
+                else -> j--
+            }
+        }
+        return out
+    }
+
     /** [matchOrdered] for closed lines, where progress wraps round: the best turn of [b] onto [a], then nearest unique pairs. */
     private fun matchCyclic(a: FloatArray, b: FloatArray): IntArray {
         val out = IntArray(a.size) { -1 }
@@ -322,14 +398,21 @@ object AutoAnchors {
     // Plans and the layout they drive.
     // ---------------------------------------------------------------------------------------------------------------------------------------------
 
-    private class PlanTip(val num: Int, val u: Float)
+    /** [turn]: signed bend (degrees) of the ghost at this anchor, in the direction the NEW line runs; 0 = no clear bend or unknown (then only the position is compared). */
+    private class PlanTip(val num: Int, val u: Float, val turn: Float = 0f)
 
     /**
      * [start] / [end]: numbers for the first / last point of an open line (0 = none). [tips]: numbered progress positions, ascending. [fresh]: detected apexes with no
      * number to take get a new one (false for a traced line: only the ghost's numbers are used). [toPlanU]: maps a detected apex (x, y, own progress) into the plan's
      * progress space; null = own progress (used when the line lies over the ghost, so a partial trace pairs with the right part of the ghost).
      */
-    private class Plan(val start: Int, val end: Int, val tips: List<PlanTip>, val fresh: Boolean, val toPlanU: ((Float, Float, Float) -> Float)? = null)
+    private class Plan(
+        val start: Int, val end: Int, val tips: List<PlanTip>, val fresh: Boolean, val toPlanU: ((Float, Float, Float) -> Float)? = null,
+        /** Pair apexes with the tips by position AND bend ([matchDescs]); a ghost tip with no acceptable apex is dropped (no number, the interpolation falls back to geometry). */
+        val smart: Boolean = false,
+        /** Apexes that no ghost tip took get new numbers (ends do not: only [fresh] numbers ends). The ghost's own numbers are never reused for them. */
+        val freshTips: Boolean = false
+    )
 
     private class Ins(val t: Float, val p: VectorPoint)
 
@@ -383,9 +466,16 @@ object AutoAnchors {
         if (tk > 0 && plan.tips.isNotEmpty()) {
             fun space(i: Int): Float = plan.toPlanU?.invoke(tipX[i], tipY[i], tipU[i]) ?: tipU[i]
             val order = (0 until tk).sortedBy { space(it) }
-            val au = FloatArray(tk) { space(order[it]) }
-            val bu = FloatArray(plan.tips.size) { plan.tips[it].u }
-            val mt = if (ring) matchCyclic(au, bu) else matchOrdered(au, bu)
+            val mt: IntArray
+            if (plan.smart && !ring && d != null) {
+                val da = List(tk) { q -> val i = order[q]; Desc(space(i), bendAt(d, tipU[i])) }
+                val db = plan.tips.map { Desc(it.u, it.turn) }
+                mt = matchDescs(da, db)
+            } else {
+                val au = FloatArray(tk) { space(order[it]) }
+                val bu = FloatArray(plan.tips.size) { plan.tips[it].u }
+                mt = if (ring) matchCyclic(au, bu) else matchOrdered(au, bu)
+            }
             for (q in 0 until tk) { val j = mt[q]; if (j >= 0) tipNum[order[q]] = plan.tips[j].num }
         }
         var firstNum = if (!ring && !firstManual) plan.start else 0
@@ -395,7 +485,13 @@ object AutoAnchors {
         for (q in 0 until tk) if (tipNum[q] > 0) taken.add(tipNum[q])
 
         // fresh numbers, in path order
-        if (plan.fresh) {
+        if (plan.fresh || plan.freshTips) {
+            // the ghost's own numbers stay out of reach even when no apex took them (a ghost tip that was dropped must not get a wrong partner through a fresh number)
+            if (plan.freshTips) {
+                for (t in plan.tips) taken.add(t.num)
+                if (plan.start > 0) taken.add(plan.start)
+                if (plan.end > 0) taken.add(plan.end)
+            }
             fun freshNum(): Int {
                 var c = 1
                 while (c <= ANCHOR_MAX && c in taken) c++
@@ -403,9 +499,9 @@ object AutoAnchors {
                 taken.add(c)
                 return c
             }
-            if (!ring && !firstManual && firstNum == 0) firstNum = freshNum()
+            if (plan.fresh && !ring && !firstManual && firstNum == 0) firstNum = freshNum()
             for (q in 0 until tk) if (tipNum[q] == 0) tipNum[q] = freshNum()
-            if (!ring && !lastManual && lastNum == 0) lastNum = freshNum()
+            if (plan.fresh && !ring && !lastManual && lastNum == 0) lastNum = freshNum()
         }
 
         // put the anchors on the line
@@ -633,7 +729,8 @@ object AutoAnchors {
                 val p = g.points[i]
                 if (p.anchor !in 1..ANCHOR_MAX || p.anchor in blocked) continue
                 project(gd, p.x, p.y, tmp)
-                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0]))
+                val bend = bendAt(gd, tmp[0]) // reading the ghost the other way round flips the side of a bend
+                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0], if (fwd) bend else -bend))
             }
         } else {
             fun area(p: List<VectorPoint>): Float { var a = 0f; for (i in p.indices) { val q = p[(i + 1) % p.size]; a += p[i].x * q.y - q.x * p[i].y }; return a }
@@ -660,7 +757,7 @@ object AutoAnchors {
                 }
             }
         }
-        return Plan(start, end, tips, false, toPlanU)
+        return Plan(start, end, tips, false, toPlanU, smart = !gRing, freshTips = !gRing)
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------------------------

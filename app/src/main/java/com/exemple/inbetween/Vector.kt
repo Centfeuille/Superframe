@@ -71,7 +71,21 @@ val ANCHOR_COLORS: List<Long> = listOf(
     0xFFFF5722, 0xFFFFB300, 0xFFAEEA00, 0xFF00ACC1, 0xFF5C6BC0, 0xFFD81B60      // tertiaries: red-orange, yellow-orange, yellow-green, blue-green, blue-violet, red-violet
 )
 val ANCHOR_NAMES: List<String> = listOf("Blue", "Red", "Yellow", "Green", "Orange", "Purple", "Red-orange", "Yellow-orange", "Yellow-green", "Blue-green", "Blue-violet", "Red-violet")
-const val ANCHOR_MAX = 99
+const val ANCHOR_MAX = 999
+/**
+ * Sparse anchor entry value (second float of a point's pair, see [toInk]). Numbers 0..99 keep the original encoding, so files that only use them are identical to before and older builds
+ * read them: rank, +128 = hidden point. Numbers 100..999 (new) are written as 1000 + rank, hidden as 3000 + rank; an older build cannot represent them (it reads such a point with a wrong number).
+ */
+fun encodeAnchorRank(anchor: Int, hidden: Boolean): Int {
+    val a = anchor.coerceIn(0, ANCHOR_MAX)
+    return if (a <= 99) a + (if (hidden) 128 else 0) else a + (if (hidden) 3000 else 1000)
+}
+/** Inverse of [encodeAnchorRank]: (anchor number, hidden). */
+fun decodeAnchorRank(r: Int): Pair<Int, Boolean> = when {
+    r >= 3000 -> (r - 3000).coerceIn(0, ANCHOR_MAX) to true
+    r >= 1000 -> (r - 1000).coerceIn(0, ANCHOR_MAX) to false
+    else -> (r and 127).coerceIn(0, ANCHOR_MAX) to (r >= 128)
+}
 /** In a stroke's sparse anchor list, an entry whose index is this much higher than a point's means "the anchor of that point is automatic" (older builds ignore such entries, they are out of range for them). */
 const val AUTO_FLAG_OFFSET = 1_000_000
 /** Sparse Ink metadata for a structural endpoint identity (kept separate from ordinary automatic curve-tip anchors). */
@@ -197,7 +211,7 @@ fun VectorStroke.toInk(): Ink {
     points.forEachIndexed { i, pt -> p[i * 4] = pt.x; p[i * 4 + 1] = pt.y; p[i * 4 + 2] = pt.pressure; p[i * 4 + 3] = pt.elevationOffset }
     val m = ArrayList<Float>(3 + 2 * points.size)
     m.add(baseWidth); m.add(if (isClosed) 1f else 0f); m.add(opacity)
-    points.forEachIndexed { i, pt -> if (pt.anchor > 0 || pt.hidden) { m.add(i.toFloat()); m.add((pt.anchor + if (pt.hidden) 128 else 0).toFloat()) } } // sparse anchors: point index, rank (+128 = hidden point)
+    points.forEachIndexed { i, pt -> if (pt.anchor > 0 || pt.hidden) { m.add(i.toFloat()); m.add(encodeAnchorRank(pt.anchor, pt.hidden).toFloat()) } } // sparse anchors: point index, rank (see encodeAnchorRank: +128 = hidden point for 0..99)
     points.forEachIndexed { i, pt -> if (pt.auto && pt.anchor > 0) { m.add((AUTO_FLAG_OFFSET + i).toFloat()); m.add(1f) } } // automatic anchors: AUTO_FLAG_OFFSET + point index
     points.forEachIndexed { i, pt -> if (pt.endpoint && pt.anchor > 0) { m.add((ENDPOINT_FLAG_OFFSET + i).toFloat()); m.add(1f) }; pt.endpointAliases.forEach { r -> if (r in 1..ANCHOR_MAX) { m.add((ENDPOINT_ALIAS_OFFSET + i).toFloat()); m.add(r.toFloat()) } } } // structural endpoint identities, including aliases carried through a join
     return Ink(p, color, VECTOR_BRUSH, 5, null, m.toFloatArray(), (if (hasStyle()) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed|$hardness|$texId|$texAmt|$texScale|${if (texInvert) 1 else 0}|$texImg|$tipShape|$roundness|$tipAngle|${if (tipFollow) 1 else 0}|$fill|$fillGap|$fillGrow|${if (fillAcross) 1 else 0}|$fillSeedX|$fillSeedY|$inkCurve|$inkLight|$inkAngle|$taperIn|$taperOut|$inkIrr|$inkIrrScale|$aaSoft|$joinSharp"
@@ -229,7 +243,7 @@ fun Ink.toVectorStroke(): VectorStroke? {
             i >= ENDPOINT_ALIAS_OFFSET && i - ENDPOINT_ALIAS_OFFSET in pts.indices -> { val pi = i - ENDPOINT_ALIAS_OFFSET; pts[pi] = pts[pi].copy(endpointAliases = pts[pi].endpointAliases + r.coerceIn(1, ANCHOR_MAX)) }
             i >= ENDPOINT_FLAG_OFFSET && i - ENDPOINT_FLAG_OFFSET in pts.indices -> { val pi = i - ENDPOINT_FLAG_OFFSET; pts[pi] = pts[pi].copy(endpoint = true) }
             i >= AUTO_FLAG_OFFSET && i - AUTO_FLAG_OFFSET in pts.indices -> { val pi = i - AUTO_FLAG_OFFSET; pts[pi] = pts[pi].copy(auto = true) }
-            i in pts.indices -> pts[i] = pts[i].copy(anchor = (r and 127).coerceIn(0, ANCHOR_MAX), hidden = r >= 128)
+            i in pts.indices -> { val (an, hid) = decodeAnchorRank(r); pts[i] = pts[i].copy(anchor = an, hidden = hid) }
         }
         k += 2
     }
@@ -1326,10 +1340,10 @@ object VectorInterpolation {
     /** Anchors present in both strokes (same rank): index pairs, increasing in both strokes (conflicting order is dropped). */
     private fun anchorPairs(pa: List<VectorPoint>, pb: List<VectorPoint>): List<Pair<Int, Int>> {
         val out = ArrayList<Pair<Int, Int>>()
-        for (r in 1..ANCHOR_MAX) {
-            val i = pa.indexOfFirst { it.anchor == r }; val j = pb.indexOfFirst { it.anchor == r }
-            if (i >= 0 && j >= 0) out.add(i to j)
-        }
+        val firstA = HashMap<Int, Int>(); val firstB = HashMap<Int, Int>() // first point of each number (a walk over 1..ANCHOR_MAX would cost 999 scans per stroke pair)
+        for ((i, p) in pa.withIndex()) if (p.anchor in 1..ANCHOR_MAX) firstA.putIfAbsent(p.anchor, i)
+        for ((j, p) in pb.withIndex()) if (p.anchor in 1..ANCHOR_MAX) firstB.putIfAbsent(p.anchor, j)
+        for (r in firstA.keys.sorted()) { val j = firstB[r] ?: continue; out.add(firstA.getValue(r) to j) }
         out.sortBy { it.first }
         val kept = ArrayList<Pair<Int, Int>>()
         for (p in out) if (kept.isEmpty() || p.second > kept.last().second) kept.add(p)
