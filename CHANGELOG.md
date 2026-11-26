@@ -1,3 +1,15 @@
+## 2026-11-26 (3) — 5×5 S Pen calibration mesh
+- AI model: GPT-6
+- Category: Added (source code, no `.inb` format change)
+- Request: add pen calibration that compensates for global offset, rotation, scale, skew and position-dependent warp.
+- Added `PenCalibration.kt`: a guided 25-target calibration dialog captures S Pen / eraser raw screen coordinates and target positions, then stores normalized displacement vectors in a 5×5 mesh. Runtime uses smooth bicubic interpolation to compute a screen-space correction.
+- `Canvas.kt`: applies the correction to a copied raw `MotionEvent` at the stylus / eraser interop boundary, before the existing input handlers. `MotionEvent.setLocation` shifts contact, hover and historical coordinates together while leaving the Android-owned event untouched; pressure, tilt, buttons and timing remain unchanged.
+- `Settings.kt` persists the mesh and enabled state in `settings.json`; `SettingsUi.kt` adds Calibrate / Recalibrate, enable / disable and reset controls; `MainActivity.kt` launches the calibration overlay. Calibration is app-wide and does not change `.inb` documents.
+- Files: `PenCalibration.kt` (new), `Canvas.kt`, `Settings.kt`, `SettingsUi.kt`, `MainActivity.kt`, `WhatsNew.kt` (note 91), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper / build scripts / dependency versions, `gradle.properties`, manifest, SDK / Java and signing configuration.
+- Validation: source inspection and targeted static review only; no Android Gradle build, CI build or tablet runtime test was available. Not yet compiled or device-tested. Full diff review and ZIP integrity check were completed.
+- Known follow-up: validate target coordinates against raw display coordinates on the actual tablet; verify all 25 targets are captured in order, then test constant offset, edge drift, rotation / skew and local warp. The current mesh interpolates the measured displacement grid directly; it does not separately fit an affine transform and residual mesh. The calibration target grid occupies the dialog's safe content area, so edge extrapolation behavior needs device validation.
+
 ## 2026-11-26 (2) — Settings: left-handed layout, gesture switches, timings, visual cues, appearance, startup, safety
 - AI model: Claude
 - Category: Added (source code, no `.inb` format change)

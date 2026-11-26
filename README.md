@@ -9,6 +9,7 @@
 ### Drawing and canvas
 
 - Pressure- and tilt-aware stylus drawing, with finger navigation and touch gestures.
+- Guided 5×5 S Pen calibration for global offset / rotation / scale / skew and position-dependent screen distortion.
 - Brush and eraser presets, stabilization, pressure curves and texture controls.
 - Selection, transform, fill, magic wand, line and shape tools.
 - Unbounded drawing with optional bleed outside the Cut.

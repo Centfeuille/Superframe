@@ -365,6 +365,7 @@ fun EditorScreen(ed: Editor, cut: Cut) {
     var shown by remember { mutableIntStateOf(1) }
     var optsDetail by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var penCalibrationOpen by remember { mutableStateOf(false) }
     var shortcutsOpen by remember { mutableStateOf(false) }
     var exportOpen by remember { mutableStateOf(false) }
     // Settings > Layout: open every Cut with the panels hidden (the user can still leave fullscreen with the button / Back).
@@ -599,7 +600,8 @@ fun EditorScreen(ed: Editor, cut: Cut) {
         ) { if (shown == 1) OptionsPanel(ed, optsDetail) { optsDetail = it } else QuickPanel(ed) }
         if (ed.fullscreen) FullscreenRadialTools(ed) { p -> panel = p; if (p != 0) shown = p; if (p == 1) optsDetail = false }
     }
-    if (settingsOpen) SettingsDialog(onKeyboard = { settingsOpen = false; shortcutsOpen = true }, onClose = { settingsOpen = false })
+    if (settingsOpen) SettingsDialog(onKeyboard = { settingsOpen = false; shortcutsOpen = true }, onCalibratePen = { settingsOpen = false; penCalibrationOpen = true }, onClose = { settingsOpen = false })
+    if (penCalibrationOpen) PenCalibrationDialog(onClose = { penCalibrationOpen = false })
     if (shortcutsOpen) KeyboardShortcutsDialog(ctx.filesDir, onBack = { shortcutsOpen = false; settingsOpen = true }, onClose = { shortcutsOpen = false })
     if (exportOpen) AlertDialog(
         onDismissRequest = { exportOpen = false },

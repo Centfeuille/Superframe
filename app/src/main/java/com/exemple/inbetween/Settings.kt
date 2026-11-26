@@ -101,6 +101,7 @@ object AppSettings {
             showWhatsNew = o.optBoolean("showWhatsNew", showWhatsNew)
             lastCutId = o.optLong("lastCutId", lastCutId)
             confirmDestructive = o.optBoolean("confirmDestructive", confirmDestructive)
+            PenCalibration.load(o)
         }
     }
 
@@ -116,6 +117,7 @@ object AppSettings {
                 .put("workspaceColor", workspaceColor)
                 .put("openLastCut", openLastCut).put("showWhatsNew", showWhatsNew).put("lastCutId", lastCutId)
                 .put("confirmDestructive", confirmDestructive)
+            PenCalibration.write(o)
             val tmp = File(d, "$FILE.tmp")
             tmp.writeText(o.toString())
             if (!tmp.renameTo(File(d, FILE))) { File(d, FILE).writeText(o.toString()); tmp.delete() }
@@ -131,6 +133,7 @@ object AppSettings {
         workspaceColor = DEFAULT_WORKSPACE
         openLastCut = false; showWhatsNew = true
         confirmDestructive = false
+        PenCalibration.reset()
         save()
     }
 }

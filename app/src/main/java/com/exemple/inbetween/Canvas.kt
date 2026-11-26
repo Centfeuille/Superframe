@@ -2015,16 +2015,19 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             .pointerInteropFilter { ev ->
                 val tt = ev.getToolType(0)
                 if ((tt != MotionEvent.TOOL_TYPE_STYLUS && tt != MotionEvent.TOOL_TYPE_ERASER) || cut.playing) return@pointerInteropFilter false
-                when (ev.actionMasked) {
+                val metrics = android.content.res.Resources.getSystem().displayMetrics
+                val corrected = PenCalibration.correctedEvent(ev, metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat())
+                val input = corrected ?: ev
+                val handled = when (input.actionMasked) {
                     MotionEvent.ACTION_HOVER_ENTER -> {
                         // Start a fresh trajectory on each entry into hover range.
-                        val position = Offset(ev.x, ev.y)
+                        val position = Offset(input.x, input.y)
                         hover = position; hoverLastPosition = position
                         hoverDirection = null; hoverDirectionAt = 0L
                         true
                     }
                     MotionEvent.ACTION_HOVER_MOVE -> {
-                        val position = Offset(ev.x, ev.y)
+                        val position = Offset(input.x, input.y)
                         hover = position
                         val previous = hoverLastPosition
                         val delta = previous?.let { position - it }
@@ -2045,11 +2048,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         hover = null; hoverLastPosition = null
                         true
                     }
-                    MotionEvent.ACTION_DOWN -> { penDown(ev, if (tt == MotionEvent.TOOL_TYPE_ERASER) 1 else ed.tool); tick++; true }
-                    MotionEvent.ACTION_MOVE -> { penMove(ev); true }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { penUp(ev); true }
+                    MotionEvent.ACTION_DOWN -> { penDown(input, if (tt == MotionEvent.TOOL_TYPE_ERASER) 1 else ed.tool); tick++; true }
+                    MotionEvent.ACTION_MOVE -> { penMove(input); true }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { penUp(input); true }
                     else -> true
                 }
+                corrected?.recycle()
+                handled
             }
             // ----- pen hovering above the screen: cursor preview; also sets the ellipse's minor axis -----
             .pointerInput(box, ed.flipH, ed.flipV) {

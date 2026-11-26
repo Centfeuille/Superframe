@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            91, "2026-11-26", "5 × 5 pen calibration",
+            listOf(
+                "Settings > Pen input > Calibrate guides you through 25 screen targets using the S Pen. The saved correction mesh compensates for global offset, rotation, scale and skew, plus position-dependent screen distortion.",
+                "The correction is applied to S Pen and eraser MotionEvents before they reach the drawing and editing tools, including hover and historical stroke samples. It is saved in app settings, not in individual Cuts.",
+                "You can disable, redo or reset calibration in Settings. Initial implementation; verify the target capture and accuracy on the tablet before relying on it for precision work."
+            )
+        ),
+        ReleaseNote(
             90, "2026-11-26", "Settings: left-handed layout, gesture switches, timings, visual cues, startup and safety options",
             listOf(
                 "Settings (the gear in the top bar) now has real options. Changes apply at once and are remembered.",

@@ -42,7 +42,7 @@ import kotlin.math.roundToInt
  * and the check where the behaviour happens.
  */
 @Composable
-fun SettingsDialog(onKeyboard: () -> Unit, onClose: () -> Unit) {
+fun SettingsDialog(onKeyboard: () -> Unit, onCalibratePen: () -> Unit, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("Settings") },
@@ -65,6 +65,17 @@ fun SettingsDialog(onKeyboard: () -> Unit, onClose: () -> Unit) {
                 SwitchRow("Left-handed layout", "Tool panel, tool options, the fullscreen tool puck, the Cut and camera panels and the vector bars move to the other side. The timeline is not mirrored.", AppSettings.leftHanded) { AppSettings.leftHanded = it; AppSettings.save() }
                 SwitchRow("Open Cuts in fullscreen", "Panels start hidden; the fullscreen button brings them back.", AppSettings.startFullscreen) { AppSettings.startFullscreen = it; AppSettings.save() }
                 SliderRow("Timeline height", "${AppSettings.timelineHeightDp.roundToInt()} dp", AppSettings.timelineHeightDp, 96f..520f, 0, "Applies the next time the app starts; dragging the timeline's handle still resizes it for the session.") { AppSettings.timelineHeightDp = it.roundToInt().toFloat() }
+
+                SectionTitle("Pen input")
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("Pen calibration", fontSize = 14.sp)
+                        Text(if (PenCalibration.hasData) "5 × 5 correction mesh ${if (PenCalibration.enabled) "· enabled" else "· disabled"}" else "Correct pen offset, rotation, skew and position-dependent screen distortion.", fontSize = 12.sp, color = Color.Gray)
+                    }
+                    TextButton(onClick = onCalibratePen) { Text(if (PenCalibration.hasData) "Recalibrate" else "Calibrate") }
+                }
+                if (PenCalibration.hasData) SwitchRow("Enable pen calibration", "Apply the saved screen-space correction to stylus and eraser input.", PenCalibration.enabled) { PenCalibration.enabled = it; AppSettings.save() }
+                if (PenCalibration.hasData) TextButton(onClick = { PenCalibration.reset(); AppSettings.save() }) { Text("Reset pen calibration") }
 
                 SectionTitle("Finger gestures")
                 ChoiceRow("Two-finger tap", listOf("Nothing", "Undo", "Redo"), AppSettings.twoFingerTap) { AppSettings.twoFingerTap = it; AppSettings.save() }
