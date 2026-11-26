@@ -38,6 +38,12 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            93, "2026-11-26", "Pen calibration screen-coordinate alignment",
+            listOf(
+                "Calibration target centres are now measured directly in physical screen coordinates, matching the S Pen's raw MotionEvent coordinates. This avoids manually combining dialog-window and screen origins, which could misplace the learned correction on devices with different window insets."
+            )
+        ),
+        ReleaseNote(
             92, "2026-11-26", "Smaller pen calibration crosshairs and safer Cancel placement",
             listOf(
                 "Calibration targets are now small crosshairs with a precise centre mark instead of large blue circles. The touch hit area remains slightly larger than the visible mark so the S Pen can land accurately.",

@@ -54,7 +54,7 @@ The Kotlin package, Android namespace and application ID are `com.example.inbetw
 - Onion skin: `onionAllLayers` controls whether neighbouring cels are drawn from every visible drawing layer (default on, preserving prior behavior) or only the active drawing layer. Opacity decays by a factor of 0.68 for each additional cel away from the playhead. The detailed Onion Options pop-up exposes this toggle.
 - Document-to-screen and screen-to-document transforms.
 - Stylus and eraser input through Android "MotionEvent", including pressure, tilt and event history.
-- Stylus hover cursor preview; recent hover movement direction is used to choose perspective magnet paths. Optional app-wide pen calibration applies a 5×5 bicubic screen-space displacement mesh to raw S Pen / eraser MotionEvents before the drawing handlers; the correction covers hover, contact, historical samples and all canvas tools, and is stored in `settings.json` (not `.inb`). The 25-point guided calibration records target-to-contact errors normalized to display dimensions.
+- Stylus hover cursor preview; recent hover movement direction is used to choose perspective magnet paths. Optional app-wide pen calibration applies a 5×5 bicubic screen-space displacement mesh to raw S Pen / eraser MotionEvents before the drawing handlers; the correction covers hover, contact, historical samples and all canvas tools, and is stored in `settings.json` (not `.inb`). The 25-point guided calibration records target-to-contact errors normalized to display dimensions. Calibration target centres are obtained with Compose `positionOnScreen()` so they share the same physical screen-coordinate space as `MotionEvent.rawX/rawY`.
 - When a perspective layer is visible, brush and eraser strokes latch to the selected perspective path. The perspective layer has a saved magnet mode: vanishing-point mode uses VP rays as authoritative candidates (not competing with the horizon/perpendicular axes); guide mode magnetizes only to those two straight axes. If VP mode is selected with no VPs placed, the guide axes are used as a safe fallback. The straight-line shape tool shares the hover-guided latch and follows a sampled curved VP path when curvilinear mode is active.
 - Finger gestures:
   - One finger pans.
@@ -781,3 +781,11 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - No change to calibration math, raw `MotionEvent` capture, settings persistence or `.inb` format.
 - AI model: GPT-6. Files changed: `PenCalibration.kt`, `WhatsNew.kt` (note 92), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
 - Validation: source review and geometry/bounds inspection only; no Android Gradle build or tablet test performed.
+
+
+## 2026-11-26 — Pen calibration target coordinate-space alignment
+- `PenCalibrationDialog` now records each target centre with Compose `positionOnScreen()` directly, matching the physical screen coordinate space used by S Pen `MotionEvent.rawX/rawY`. Removed the manual `positionInWindow()` plus `rootView.getLocationOnScreen()` conversion, which could introduce a window-origin / inset displacement on tablet dialogs.
+- Calibration mesh math, target layout, capture order, settings persistence and `.inb` format are unchanged.
+- AI model: GPT-6. Files changed: `PenCalibration.kt`, `WhatsNew.kt` (note 93), `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Validation: inspected Compose target-coordinate and Android raw-event coordinate paths; source diff and ZIP integrity checked. No Android Gradle build or tablet runtime test performed.
+- Follow-up: repeat all 25 targets on the tablet and verify the corrected crosshair intersection against straight-edge and centre-screen test strokes.

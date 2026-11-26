@@ -1,3 +1,14 @@
+## 2026-11-26 (5) — Pen calibration target coordinate-space alignment
+- AI model: GPT-6
+- Category: Fixed / Pen calibration coordinate capture (no `.inb` format change)
+- Request: the learned pen position appeared substantially above the visible crosshair intersection.
+- `PenCalibration.kt`: replaced the manual `positionInWindow()` plus dialog-root screen-origin addition with Compose `positionOnScreen()`. Calibration target centres now use the same physical screen-coordinate space as the S Pen's `MotionEvent.rawX/rawY` samples.
+- `WhatsNew.kt`: added release note 93. `PROJECT_MEMORY.md` documents the coordinate-space invariant.
+- Files: `PenCalibration.kt`, `WhatsNew.kt`, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched: `.github/workflows/**`, Gradle wrapper / build scripts / dependency versions, `gradle.properties`, manifest, SDK / Java and signing configuration. `.inb` format unchanged.
+- Validation: inspected the Compose target-position and Android raw-event coordinate paths; reviewed the focused diff and ZIP integrity. No Android Gradle build or tablet runtime test was available, so the fix is not device-verified.
+- Follow-up: repeat all 25 targets on the tablet and verify the crosshair intersection against straight-edge and centre-screen test strokes.
+
 ## 2026-11-26 (4) — Smaller pen calibration crosshairs; Cancel separated from targets
 - AI model: GPT-6
 - Category: Fixed / Pen calibration UI (no `.inb` format change)

@@ -23,7 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -153,9 +153,11 @@ fun PenCalibrationDialog(onClose: () -> Unit) {
                     .offset(x = with(density) { targetX.toDp() } - 14.dp, y = with(density) { targetY.toDp() } - 14.dp)
                     .size(28.dp)
                     .onGloballyPositioned { coords ->
-                        val p = coords.positionInWindow() + Offset(coords.size.width / 2f, coords.size.height / 2f)
-                        val loc = IntArray(2); view.rootView.getLocationOnScreen(loc)
-                        val screen = Offset(p.x + loc[0], p.y + loc[1])
+                        // MotionEvent.rawX/rawY are in physical screen coordinates. Use
+                        // Compose's matching screen-space position directly; manually adding
+                        // the dialog root's screen origin to window coordinates can introduce
+                        // a vertical inset / window-origin error on tablet dialogs.
+                        val screen = coords.positionOnScreen() + Offset(coords.size.width / 2f, coords.size.height / 2f)
                         if (targets.size <= active) { if (targets.size == active) targets.add(screen) else targets[active] = screen }
                     }
                     .pointerInteropFilter { e ->
