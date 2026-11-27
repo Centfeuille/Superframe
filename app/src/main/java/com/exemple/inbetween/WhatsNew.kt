@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            100, "2026-11-27", "Selection tool: Cut button, no blue hairline, interpolation bar beside it",
+            listOf(
+                "Selection tool: the thin blue line along the vector lines is no longer drawn.",
+                "Selection tool: the Cut button is back (scissors, next to Displace). Draw across lines to slice them. Each cut gets new end anchors where it was made; the anchors on the ends that were not cut stay as they were.",
+                "Interpolation drag with the Selection tool: the interpolation controls (In-between %, Fixed, Smooth, Reset, settings, Apply) now stay on screen in a second bar next to the selection bar.",
+                "Puppet Warp: the line of help text on the bar is gone."
+            )
+        ),
+        ReleaseNote(
             99, "2026-11-27", "Merge on selected points: the longest line decides the new end anchors",
             listOf(
                 "When lines are merged with Merge on selected points, the end numbers of the longest of the merged lines now become the end numbers of the new line, instead of a short stub taking them over. The number at the join moves to the new far end.",

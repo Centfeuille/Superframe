@@ -180,18 +180,9 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         }
     }
     }
-    Column(Modifier.align(Alignment.BottomCenter).clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
-        if (dragBar && smoothBarOpen) Row(verticalAlignment = Alignment.CenterVertically) {
-            // Smoothness of the picked preview lines (every line when none is picked): evens out the curves between the points without adding any
-            val pickedNow = ed.vecPreSel
-            val shownValue = if (pickedNow.isEmpty()) ed.vecSmoothAll else (pickedNow.firstOrNull()?.let { ed.vecSmoothLines[it] } ?: ed.vecSmoothAll)
-            Text(if (pickedNow.isEmpty()) "Smoothness · all lines" else "Smoothness · ${pickedNow.size} picked line${if (pickedNow.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-            Slider(value = shownValue, onValueChange = { v ->
-                if (pickedNow.isEmpty()) { ed.vecSmoothAll = v; ed.vecSmoothLines = emptyMap() }
-                else ed.vecSmoothLines = ed.vecSmoothLines + pickedNow.associateWith { v }
-            }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
-            Text("${(shownValue * 100).roundToInt()}%  ·  no points added", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-        }
+    Row(Modifier.align(Alignment.BottomCenter), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+    Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
+        if (dragBar && smoothBarOpen) InterpSmoothRow(ed)
         if (sess) VecXformRows(ed)
         if (prevBar && !sess && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             // Displace on the preview: guide joints on the in-between's lines (stored with the first keyframe's interpolation, so they are kept when it is made)
@@ -273,7 +264,8 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         else -> "Points view: all points are shown (tap to show only the anchor points)"
                     }) { ed.vecPointView = (ed.vecPointView + 1) % 3 }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
-                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
+                VIconBtn(Icons.Filled.ContentCut, on = ed.vecSelCut, tip = if (ed.vecSelCut) "Cut: on. Draw across lines to slice them; each cut makes new end anchors, the other ends keep theirs" else "Cut: draw across lines to slice them (new end anchors where cut)") { ed.vecSelCut = !ed.vecSelCut; if (ed.vecSelCut) { ed.vecDisplace = false; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 } }
+                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; if (ed.vecDisplace) ed.vecSelCut = false; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 if (pointsMode) {
                     IconBtn(Icons.Filled.SwapVert, on = ed.vecRaise, tip = "Raise / lower points: drag up or down") { ed.vecRaise = !ed.vecRaise }
@@ -326,47 +318,14 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                 VIconBtn(Icons.Filled.AutoFixHigh, enabled = has, tip = "Smooth the selected points") { smoothOpen = true }
                 VIconBtn(Icons.Filled.Anchor, enabled = has, tint = Color(anchorColor(1, 3)), tip = "Anchor: number the selected points so the same numbers in the next keyframe are interpolated toward each other") { if (sc != null && !autoAnchor(cut, ed, sc)) anchorOpen = true }
             } else {
-                // Reference frames: the frames picked in the timeline OTHER than the current one (which needs no selection). One or two are the ends of the interpolation and the
-                // result lands in the current frame; none = the previous and the current keyframe (a new frame is created).
-                val refPicked = vecRefSelected(layer, ed, cut.time)
-                val refs = vecDragRefs(layer, ed, cut.time)
-                val byRefs = refPicked.isNotEmpty()
-                val badFrames = refPicked.size > 2
-                val ready = if (byRefs) refs != null else idx >= 1 && cel != null
-                val lineSel = if (refs != null) vecSelectedLinesIn(ed, refs.b) else null
-                val selLines = if (byRefs) (lineSel?.size ?: 0) else if (ready) vecSelectedLineIndices(cut, ed, cel).size else 0
-                val linesNote = if (selLines > 0) " · $selLines selected line${if (selLines == 1) "" else "s"}" else if (byRefs && lineSel != null) " · selected line not found in the last reference frame" else ""
-                Text(
-                    if (byRefs && refs != null) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → current frame (${refPicked.size} reference frame${if (refPicked.size == 1) "" else "s"})" + linesNote
-                    else if (badFrames) "Pick one or two reference frames (the current frame needs no selection), or none"
-                    else if (byRefs) "A reference frame needs a keyframe on the other side of the current frame"
-                    else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} refPicked" else "") else "Needs a previous keyframe",
-                    fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-                IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
-                BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed; ed.vecFixedAll.clear(); ed.vecFixedLines.clear() } // Fixed pins the preview where it is now
-                VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming the preview (Selection tool) keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
-                BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { smoothBarOpen = !smoothBarOpen }
-                if (!ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecPlaceSteps.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
-                    // Reset: the picked lines go back to what the interpolation makes (position, smoothness, transforms and warps); with nothing picked, the whole preview does
-                    BarChip("Reset", false) {
-                        val picked = ed.vecPreSel
-                        if (picked.isEmpty()) ed.resetPlace()
-                        else {
-                            ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked; ed.vecDragTLines = ed.vecDragTLines - picked
-                            ed.vecPlaceSteps = ed.vecPlaceSteps.filter { st -> st.ids?.none { it in picked } ?: true }
-                        }
-                    }
-                }
-                IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake, and Off") { ed.vecInterpOpen = true }
-                IconBtn(Icons.Filled.Check, tip = if (byRefs) "Apply: the interpolation of the reference frames replaces the current frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
-                    if (byRefs && refs != null) {
-                        if (interpolateIntoFrame(cut, ed, layer, refs.a, refs.m, refs.b, ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
-                    } else if (badFrames || byRefs) android.widget.Toast.makeText(ctx, "Pick one or two reference frames (a single one needs a keyframe on the other side of the current frame); the current frame receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
-                    else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
-                    else android.widget.Toast.makeText(ctx, "Move to a keyframe that has a previous keyframe", android.widget.Toast.LENGTH_SHORT).show()
-                }
+                InterpDragContent(cut, ed, layer, idx, cel, ctx, smoothBarOpen) { smoothBarOpen = !smoothBarOpen }
             }
         }
+    }
+    if (prevBar && !sess) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) { // Selection tool while the interpolation preview is up: the drag controls stay next to the selection bar
+        if (smoothBarOpen) InterpSmoothRow(ed)
+        Row(verticalAlignment = Alignment.CenterVertically) { InterpDragContent(cut, ed, layer, idx, cel, ctx, smoothBarOpen) { smoothBarOpen = !smoothBarOpen } }
+    }
     }
     }
     if (falloffOpen) AlertDialog(
@@ -383,6 +342,66 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     )
     if (anchorOpen) VectorAnchorDialog(cut, ed) { anchorOpen = false }
     if (smoothOpen) VectorSmoothDialog(cut, ed) { smoothOpen = false }
+}
+
+/** The interpolation drag controls (In-between %, Back to the middle, Fixed, Smooth, Reset, settings, Apply): the drag bar, and the second bar next to the Selection bar while the preview is up. */
+@Composable
+private fun InterpDragContent(cut: Cut, ed: Editor, layer: Layer, idx: Int, cel: Cel?, ctx: android.content.Context, smoothBarOpen: Boolean, onSmooth: () -> Unit) {
+    // Reference frames: the frames picked in the timeline OTHER than the current one (which needs no selection). One or two are the ends of the interpolation and the
+    // result lands in the current frame; none = the previous and the current keyframe (a new frame is created).
+    val refPicked = vecRefSelected(layer, ed, cut.time)
+    val refs = vecDragRefs(layer, ed, cut.time)
+    val byRefs = refPicked.isNotEmpty()
+    val badFrames = refPicked.size > 2
+    val ready = if (byRefs) refs != null else idx >= 1 && cel != null
+    val lineSel = if (refs != null) vecSelectedLinesIn(ed, refs.b) else null
+    val selLines = if (byRefs) (lineSel?.size ?: 0) else if (ready) vecSelectedLineIndices(cut, ed, cel).size else 0
+    val linesNote = if (selLines > 0) " · $selLines selected line${if (selLines == 1) "" else "s"}" else if (byRefs && lineSel != null) " · selected line not found in the last reference frame" else ""
+    Text(
+        if (byRefs && refs != null) "In-between ${(ed.dragTShown() * 100).roundToInt()}% → current frame (${refPicked.size} reference frame${if (refPicked.size == 1) "" else "s"})" + linesNote
+        else if (badFrames) "Pick one or two reference frames (the current frame needs no selection), or none"
+        else if (byRefs) "A reference frame needs a keyframe on the other side of the current frame"
+        else if (ready) "In-between ${(ed.dragTShown() * 100).roundToInt()}%" + linesNote + (if (ed.vecPreSel.isNotEmpty()) " · ${ed.vecPreSel.size} preview line${if (ed.vecPreSel.size == 1) "" else "s"} refPicked" else "") else "Needs a previous keyframe",
+        fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+    IconBtn(Icons.Filled.Refresh, tip = "Back to the middle (and the preview back to where it was)") { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
+    BarChip("Fixed", ed.vecDragFixed) { ed.vecDragFixed = !ed.vecDragFixed; ed.vecFixedAll.clear(); ed.vecFixedLines.clear() } // Fixed pins the preview where it is now
+    VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming the preview (Selection tool) keeps the line weight" else "Lock weight: off. Scaling the preview scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
+    BarChip("Smooth", smoothBarOpen || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty()) { onSmooth() }
+    if (!ed.vecPlaceAll.isIdentity || ed.vecPlaceLines.isNotEmpty() || ed.vecPlaceSteps.isNotEmpty() || ed.vecSmoothAll > 0.001f || ed.vecSmoothLines.isNotEmpty() || ed.vecDragTLines.isNotEmpty()) {
+        // Reset: the picked lines go back to what the interpolation makes (position, smoothness, transforms and warps); with nothing picked, the whole preview does
+        BarChip("Reset", false) {
+            val picked = ed.vecPreSel
+            if (picked.isEmpty()) ed.resetPlace()
+            else {
+                ed.vecPlaceLines = ed.vecPlaceLines - picked; ed.vecSmoothLines = ed.vecSmoothLines - picked; ed.vecDragTLines = ed.vecDragTLines - picked
+                ed.vecPlaceSteps = ed.vecPlaceSteps.filter { st -> st.ids?.none { it in picked } ?: true }
+            }
+        }
+    }
+    IconBtn(Icons.Filled.LinearScale, on = ed.vecInterpOpen, tip = "Interpolation settings: lines, curve, bake, and Off") { ed.vecInterpOpen = true }
+    IconBtn(Icons.Filled.Check, tip = if (byRefs) "Apply: the interpolation of the reference frames replaces the current frame (no frame is created)" else if (ed.rippleRetime) "Create the frame: it takes its time from the previous frame, else from the current frame (layer length kept)" else "Create the frame: it takes its time from the previous frame, else the current frame and the ones after it are pushed later") {
+        if (byRefs && refs != null) {
+            if (interpolateIntoFrame(cut, ed, layer, refs.a, refs.m, refs.b, ed.vecDragT, lineSel)) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
+        } else if (badFrames || byRefs) android.widget.Toast.makeText(ctx, "Pick one or two reference frames (a single one needs a keyframe on the other side of the current frame); the current frame receives the in-between", android.widget.Toast.LENGTH_SHORT).show()
+        else if (createDraggedInbetween(cut, layer, cut.time, ed.vecDragT, ed.rippleRetime, vecSelectedLineIndices(cut, ed, cel), ed.inbetweenPlace())) { ed.vecDragT = 0.5f; ed.resetPlace(); ed.vecPreSel = emptySet() }
+        else android.widget.Toast.makeText(ctx, "Move to a keyframe that has a previous keyframe", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** The smoothness slider of the interpolation drag bar. */
+@Composable
+private fun InterpSmoothRow(ed: Editor) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+            // Smoothness of the picked preview lines (every line when none is picked): evens out the curves between the points without adding any
+            val pickedNow = ed.vecPreSel
+            val shownValue = if (pickedNow.isEmpty()) ed.vecSmoothAll else (pickedNow.firstOrNull()?.let { ed.vecSmoothLines[it] } ?: ed.vecSmoothAll)
+            Text(if (pickedNow.isEmpty()) "Smoothness · all lines" else "Smoothness · ${pickedNow.size} picked line${if (pickedNow.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            Slider(value = shownValue, onValueChange = { v ->
+                if (pickedNow.isEmpty()) { ed.vecSmoothAll = v; ed.vecSmoothLines = emptyMap() }
+                else ed.vecSmoothLines = ed.vecSmoothLines + pickedNow.associateWith { v }
+            }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
+            Text("${(shownValue * 100).roundToInt()}%  ·  no points added", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+    }
 }
 
 /** The interpolation dialog, opened by the timeline button or the drag bar. Composed from the canvas so it works with any vector tool (the widget bar is not always shown). */
@@ -891,7 +910,6 @@ fun VecXformRows(ed: Editor) {
     }
     if (x.mode == 2) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Tap to place a pin, drag a pin to bend, tap a pin to remove it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(180.dp).padding(4.dp))
             PinRadiusBtn(radiusOpen, (x.pins.getOrNull(x.pinSel)?.r ?: 0f) > 0f || x.pinRadius > 0f) { radiusOpen = !radiusOpen }
             TextButton({ x.clearPins() }) { Text("Clear", fontSize = 12.sp) }
         }

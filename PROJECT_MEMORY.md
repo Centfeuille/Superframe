@@ -814,3 +814,6 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 ## 2026-11-27 (5) — Selection merge keeps the longest line's end numbers (see CHANGELOG)
 - Selection merge only (`mergePoints` -> `join(byLength = true)`, `refreshFor` -> `refresh(longest = true)`); the pen merge is unchanged. `VectorMerge.mid` puts the longer line's numbers first at a join. `AutoAnchors.selfPlan` gives the numbers bounding the longest piece (`piecesOf`) to the ends of the merged line; `ghostFor` prefers the ghost line matched by the longest piece. Join points are recognised by `endpointAliases`, which exist only until the next refresh. Not compiled or run.
 
+## 2026-11-27 (6) — Selection tool Cut, beside-bar, see CHANGELOG
+- `ed.vecSelCut` (Selection bar scissors) makes a pen stroke cut lines through the shared `vecCutUp`, which now gives new end anchors to the cut ends only (`AutoAnchors.ensureEnds` on the changed lines). With the interpolation preview up and the Selection tool picked, `VectorWidgetBar` shows the selection bar and the drag controls (`InterpDragContent`) side by side. No blue centreline with the Selection tool. Not compiled or run.
+

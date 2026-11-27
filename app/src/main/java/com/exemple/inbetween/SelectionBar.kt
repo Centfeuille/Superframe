@@ -110,7 +110,6 @@ fun SelectionBar(ed: Editor, cut: Cut, anchor: () -> List<Offset>?) {
             }
             if (x != null && x.mode == 2) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Tap to place a pin, drag a pin to bend, tap a pin to remove it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(180.dp).padding(4.dp))
                     PinRadiusBtn(radiusOpen, x.pinSel >= 0 && (x.pins.getOrNull(x.pinSel)?.r ?: 0f) > 0f || x.pinRadius > 0f) { radiusOpen = !radiusOpen }
                     TextButton({ x.clearPins() }) { Text("Clear", fontSize = 12.sp) }
                 }

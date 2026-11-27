@@ -1,3 +1,14 @@
+## 2026-11-27 (6) — Selection tool: no blue hairline, Cut button back, drag bar beside the selection bar, no Pin Warp text
+- AI model: Claude
+- Category: Changed / Added (vector Selection tool UI; no `.inb` format change)
+- Request: (1) no thin blue line in selection mode; (2) bring back the cut button on the selection tool, new end anchors where a line is cut, opposite ends unchanged; (3) in drag interpolation show the selection bar and the drag interpolation bar side by side when the selection tool is picked; (4) remove the Pin Warp text description from the bar.
+- `Canvas.kt`: the 1.2 px blue centreline of every line in the vector edit overlay is skipped when `ed.tool == 2` (still drawn for the Brush-tool Cutter). Selection tool pen-down: with `ed.vecSelCut` on (and no transform session) it starts the existing cutter path (`st.kind = 17`, finished by `vecCutUp`), checked before Displace. `vecCutUp` (shared by both cutters): after cutting, when Auto anchors is on, `AutoAnchors.ensureEnds` runs only on the lines the cut changed (their point list is a new object), with the neighbouring / picked frames' numbers avoided. `withEnds` only fills ends that have no anchor, so the new ends at the cut get new numbers and the ends that were not cut keep theirs. The new numbers are not ghost-paired. Before this change a cut gave the new ends no anchors at all.
+- `Editor.kt`: `vecSelCut` (session state, not saved).
+- `VectorUi.kt`: Cut toggle (`ContentCut`) in the Selection bar before Displace; Cut and Displace switch each other off. `VectorWidgetBar`: the drag controls moved out into `InterpDragContent` / `InterpSmoothRow`; while the Selection tool is on with the interpolation preview up (`prevBar`, not in a transform session) a second bar with those controls is shown next to the selection bar (the two are in one `Row`); with the Brush tool the drag bar is unchanged. The Pin Warp help line is removed from `VecXformRows`, and from the raster `SelectionBar.kt` as well.
+- `WhatsNew.kt` note 100, `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected files untouched.
+- Validation: source review of the diff only. Not compiled, not run on a device. The two bars side by side are about 1,100 dp wide together; on a narrower screen they may crowd each other (not measured).
+- Follow-up: on the tablet check (a) no blue line with Selection, still there with the Brush Cutter; (b) Cut across one line: two pieces, new numbered ends at the cut, far ends unchanged; Undo restores; also cut a closed shape and a line with the ghost on; (c) with the interpolation preview up and the Selection tool picked, both bars show and Apply / Fixed / Smooth still work; (d) Puppet Warp bar has no help text.
+
 ## 2026-11-27 (5) — Selection merge: the longest line's end anchors become the new ends
 - AI model: Claude
 - Category: Fixed (vector anchors on merge; no `.inb` format change)

@@ -1200,6 +1200,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
         if (!any) return
         ed.vecSel = emptySet()
+        // Each cut makes new ends: they get new end anchors (numbers no line of this frame or its neighbours uses, so they pair with nothing). The ends that were not cut keep their anchors.
+        if (ed.vecAutoAnchor) {
+            val before = cel.vectorStrokes().associateBy { it.id }
+            val cutIds = strokes.filter { before[it.id]?.points !== it.points }.map { it.id }.toSet()
+            strokes = AutoAnchors.ensureEnds(strokes, AutoAnchors.neighbourNumbers(l, idx, ed), cutIds)
+        }
         replaceVectorCel(cut, l, idx, strokes)
     }
 
@@ -1628,6 +1634,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (ed.vecDisplace) vecJointDown(l, d) else { st.kind = 29; preSel = listOf(d) } // Displace: joints on the preview; otherwise tap a line / drag a rectangle to pick
                     return
                 }
+                if (ed.vecSelCut && ed.vecXf == null) { st.kind = 17; vecCutPath = listOf(d); return } // Cut: draw across lines to slice them (see vecCutUp)
                 if (ed.vecDisplace) { vecDisplaceDown(l, d); return } // Displace: tap a selected line to add a joint, drag a joint to warp the selection
                 if (ed.vecPoints) vecEditDown(l, d) else vecSelectDown(l, ev, d)
                 return
@@ -2531,7 +2538,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 // Points view (Selection tool button): 0 = every point, 1 = only the anchor points, 2 = none.
                 val pointView = if (ed.tool == 2) ed.vecPointView else 0
                 if (vecPrevLayer == null) for ((si, vs) in vecShowStrokes.withIndex()) {
-                    if (vs.points.size > 1) drawPoly(vs.points.map { Offset(it.x, it.y) }, vs.isClosed, Color(0xAA3B82F6), 1.2f * px1)
+                    if (vs.points.size > 1 && ed.tool != 2) drawPoly(vs.points.map { Offset(it.x, it.y) }, vs.isClosed, Color(0xAA3B82F6), 1.2f * px1) // the thin blue centreline is not drawn with the Selection tool
                     val anchorCount = vs.points.maxOfOrNull { it.anchor } ?: 0
                     for ((pi, vp) in vs.points.withIndex()) {
                         if (pointView == 2 || (pointView == 1 && vp.anchor <= 0)) continue
