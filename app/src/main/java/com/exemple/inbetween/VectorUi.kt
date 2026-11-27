@@ -157,7 +157,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     // Brush / Merge sliders flush with the left edge of the canvas, Auto anchors flush with the right edge, the button bar in the middle
     Box(modifier.fillMaxWidth()) {
     Column(Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    if (((drawBar || lineBar) && ed.vecMerge) || (pointBar && pointsMode)) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
+    if (((drawBar || lineBar) && ed.vecMerge) || (pointBar && ed.vecMode != 3)) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) { // Merge sliders: Selection tool with Points on or off (not on the interpolation preview)
         Text("Merge", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Radius", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))

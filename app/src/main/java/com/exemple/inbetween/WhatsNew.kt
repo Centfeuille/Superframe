@@ -40,8 +40,9 @@ object WhatsNew {
         ReleaseNote(
             102, "2026-11-27", "Merge onto the body of a line, anchors after an erase",
             listOf(
+                "Merge with the Brush tool: a line you draw so that its end lands on the body of another line now becomes one line with it. The other line is split there and your line joins the piece that continues most smoothly; the rest stays a separate line starting on the same spot.",
                 "Merge: the end of a line now snaps onto the body of another line where the line is actually drawn. Before, only the control points were checked, so a smooth line with few points refused any merge except at its ends.",
-                "The Merge button is now also on the Selection bar with Points off: it merges the ends of the selected lines onto other lines.",
+                "The Merge button is now also on the Selection bar with Points off: it merges the ends of the selected lines onto other lines. The Merge radius and Sharp joins sliders are shown there too, so the reach can be widened.",
                 "After you erase or delete a line that was following a ghost line, the line that took its place now follows that ghost line: it inherits the numbers by position and bend, with new numbers where needed."
             )
         ),
