@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.SelectAll
@@ -247,6 +248,11 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     VIconBtn(if (ed.vecGhostNext) Icons.Filled.SkipNext else Icons.Filled.SkipPrevious, tip = if (ed.vecGhostNext) "Ghost from the NEXT keyframe (tap for the previous one)" else "Ghost from the PREVIOUS keyframe (tap for the next one)") { ed.vecGhostNext = !ed.vecGhostNext; ed.vecGhostPin = null }
                     VIconBtn(Icons.Filled.NavigateBefore, tip = "Previous ghost line, traced ones included (they are yellow-orange) so you can go back and extend one (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), -1) } }
                     VIconBtn(Icons.Filled.NavigateNext, tip = "Next ghost line. The ghost stays on a line after you draw it, so a line can be drawn in several strokes; skip when it is done. Traced lines stay on the ghost in yellow-orange (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), 1) } }
+                    VIconBtn(Icons.Filled.LinkOff, tip = "Unclaim the ghost line now shown: if it is yellow-orange (already traced) by mistake, its anchor numbers are taken off the lines that carry them so the next stroke traces it again (one undo step)") {
+                        val l = cut.layer
+                        val done = l != null && LineGhost.unclaim(ed, cut, l)
+                        android.widget.Toast.makeText(ctx, if (done) "Ghost line unclaimed" else "Nothing claims this ghost line", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
                 VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
             } else if (eraseBar) {

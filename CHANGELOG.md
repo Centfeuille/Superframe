@@ -1,3 +1,17 @@
+## 2026-11-27 (4) — Ghost lines wrongly shown as traced: cause narrowed, manual Unclaim button
+- AI model: Claude
+- Category: Fixed / Added (vector line ghost; no `.inb` format change)
+- Request: inspect why ghost lines are sometimes wrongly claimed, and add a manual unclaim button for the current ghost line.
+- How a claim works (read from the code): a ghost line counts as traced (`LineGhost.isClaimed`) when ANY anchor number or end alias on ANY point of ANY line of the current keyframe equals one of the ghost line's end numbers (all its numbers for a closed ghost). There is no check of position or shape; it is purely number equality. `Canvas.kt` `vecAnchorNew` uses the same test (and then refuses to number the new stroke).
+- Cause found by reading: the numbers a new line is given avoid `AutoAnchors.neighbourNumbers`, which looked only at the nearest previous / next keyframe with lines. The ghost, however, can come from the frames picked in the timeline (2026-11-26 (7)), which need not be those keyframes. A line numbered fresh could therefore reuse an end number of the picked ghost frame, and that ghost line then showed yellow-orange although nothing traced it. The same collision can follow from reordering frames, files from older builds, or a frame drawn while its reference frame was empty. Not reproduced on a device.
+- Candidate causes NOT changed (needs your decision, see follow-up): the claim also counts interior curve-tip numbers and hidden points of current lines, although the doc comment says only ends count; stale `endpointAliases` left on a point count as well.
+- `AutoAnchors.kt`: `neighbourNumbers(layer, idx, ed)` also includes the numbers of the picked reference frames (`refreshFor` passes `ed`). `LineGhost.claimNumbers` (a ghost line's claim numbers) and `LineGhost.unclaim(ed, cut, layer)`: for the ghost line now shown, every point of the current keyframe carrying one of its claim numbers gets a new number that no line of this keyframe, of the neighbouring / picked reference keyframes or of the ghost frame uses (aliases are dropped; if numbers run out the anchor is cleared). Lines keep their anchors; one undo step through `replaceVectorCel`; the ghost line stays pinned.
+- `Canvas.kt`: the four fresh-numbering / merge call sites that avoid neighbour numbers now pass `ed`. The ghost-frame call (`gTaken`) is unchanged.
+- `VectorUi.kt`: unclaim button (`LinkOff` icon) in the ghost controls, next to previous / next ghost line; shows a short message when nothing was claiming the line.
+- `WhatsNew.kt` note 98, `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected files untouched.
+- Validation: source review of every call site and the diff only. Not compiled, not run on a device (no Gradle / Kotlin compiler in the sandbox).
+- Follow-up: on the tablet, reproduce a wrong claim, tap Unclaim and check the line turns teal and traces again, and that Undo restores it. Decide whether `isClaimed` / the `vecAnchorNew` refusal should count only the ENDS of current lines (matches the documented rule, would stop interior-tip collisions; both places must change together). Existing wrong numbers are not repaired automatically.
+
 ## 2026-11-27 (3) — Reshape tool (Shift / Smoothen / Distort) as a tool of its own
 - AI model: Claude
 - Category: Changed / Added (tools, vector layers; no `.inb` format change)

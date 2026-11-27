@@ -702,13 +702,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val idx = l.indexAt(cut.time)
         val cel = l.cels.getOrNull(idx)
         val blocked = AutoAnchors.usedNumbers(cel?.vectorStrokes() ?: emptyList())
-        return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()), ed.vecTipSens)
+        return AutoAnchors.assignFresh(stroke, blocked + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx, ed) else emptySet()), ed.vecTipSens)
     }
     /** After [VectorMerge.attach]: the part of the new stroke that stayed a line of its own (crossing / T junction) gets its anchors now; a stroke that joined a line gets none, so the line keeps its own numbers. */
     fun vecFreshAfterMerge(l: Layer, merged: List<VectorStroke>, newId: String, wasClosed: Boolean = true): List<VectorStroke> {
         if (!ed.vecAutoAnchor) return merged
         val idx = l.indexAt(cut.time)
-        val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx)
+        val used = AutoAnchors.usedNumbers(merged) + AutoAnchors.neighbourNumbers(l, idx, ed)
         return merged.map { s ->
             if (!anchorGhostTrace[0] && s.id == newId && s.fill == 0 && s.points.none { it.anchor > 0 }) {
                 // [wasClosed] false and now closed: the new line closed onto its own start (self-merge). It keeps both end points where they were drawn, so it is numbered and traced as the
@@ -791,7 +791,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
-        val avoid = AutoAnchors.neighbourNumbers(l, idx)
+        val avoid = AutoAnchors.neighbourNumbers(l, idx, ed)
         return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)), avoid, ids)
     }
     /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
@@ -799,7 +799,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!ed.vecAutoAnchor) return stroke
         val idx = l.indexAt(cut.time)
         val cel = l.cels.getOrNull(idx)
-        return AutoAnchors.withEnds(stroke, AutoAnchors.usedNumbers(cel?.vectorStrokes() ?: emptyList()) + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx) else emptySet()))
+        return AutoAnchors.withEnds(stroke, AutoAnchors.usedNumbers(cel?.vectorStrokes() ?: emptyList()) + (if (cel != null) AutoAnchors.neighbourNumbers(l, idx, ed) else emptySet()))
     }
 
     /** Line / circle / ellipse: pressure goes through the selected brush's size and opacity curves. */

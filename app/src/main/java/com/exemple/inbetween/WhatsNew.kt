@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            98, "2026-11-27", "Unclaim button for the ghost line; fewer wrong claims",
+            listOf(
+                "New Unclaim button (broken-link icon) in the ghost controls: if the ghost line now shown is yellow-orange (counted as traced) when it should not be, tap it and the anchor numbers that paired it with your lines are replaced, so the next stroke traces it again. One undo step.",
+                "New lines are now numbered so they never reuse the numbers of the reference frames you picked in the timeline, which could make an untraced ghost line look traced. Existing drawings are not renumbered; use Unclaim on any that are already wrong."
+            )
+        ),
+        ReleaseNote(
             97, "2026-11-27", "New Reshape tool: Shift, Smoothen and Distort",
             listOf(
                 "Shift, Smoothen and Distort are now a tool of their own (the hand icon in the tool column and in the fullscreen tool wheel), no longer buttons on the Selection tool's vector bar. Shift is the default; tap the tool again to pick Smoothen or Distort and to set the brush Size and Strength.",

@@ -806,3 +806,8 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 ## 2026-11-27 (3) — Reshape tool
 - Tool id 6 = Reshape (tool column, fullscreen wheel with seven slots). Sub-tool `Editor.reshapeMode` (0 Shift default, 1 Smoothen, 2 Distort); size = `vecBrushRadius` (document px), strength = `vecBrushStrength`; both set in the tool's options panel (`OptionsPanel` branch 6). It runs the vector point-brush session (`Canvas.kt` `vecBrushDown` / `vecBrushStep` / `vecBrushUp`, pen kind 24, `VectorBrush.apply(mode = reshapeMode + 1)`); this SUPERSEDES the older notes about `Editor.vecBrush` and the brush buttons on the Selection tool's vector bar. Vector layers only: on a drawing layer the tool shows a message. Not compiled or run.
+
+## 2026-11-27 (4) — Ghost claim and Unclaim (see CHANGELOG)
+- A ghost line is "claimed" (yellow-orange) purely by number equality: any anchor / alias in the current keyframe equal to one of the ghost's end numbers (`LineGhost.isClaimed`, `claimNumbers`); `vecAnchorNew` applies the same rule. Fresh numbering must therefore avoid the numbers of every frame the ghost can come from: `AutoAnchors.neighbourNumbers(layer, idx, ed)` includes the picked reference frames. Any new numbering path must pass `ed`.
+- `LineGhost.unclaim(ed, cut, layer)` renumbers the colliding points of the current keyframe (one undo step); button in the ghost controls of `VectorWidgetBar`. Open question: the claim test still counts interior tips and hidden points of current lines. Not compiled or run.
+

@@ -58,10 +58,16 @@ object AutoAnchors {
     }
 
     /** Anchor numbers used in the previous and the next keyframe with lines: a new line avoids them, so it never pairs with a line it was not meant to by accident. */
-    fun neighbourNumbers(layer: Layer, idx: Int): Set<Int> {
+    fun neighbourNumbers(layer: Layer, idx: Int, ed: Editor? = null): Set<Int> {
         val out = HashSet<Int>()
         LineGhost.reference(layer, idx, false)?.let { out.addAll(usedNumbers(it.vectorStrokes())) }
         LineGhost.reference(layer, idx, true)?.let { out.addAll(usedNumbers(it.vectorStrokes())) }
+        // The ghost can come from frames picked in the timeline, which need not be the nearest keyframes: their numbers must be avoided too, or a new line could be numbered like a
+        // ghost line it never traced and that ghost line would then show as already traced.
+        if (ed != null) {
+            LineGhost.reference(layer, idx, false, ed)?.let { out.addAll(usedNumbers(it.vectorStrokes())) }
+            LineGhost.reference(layer, idx, true, ed)?.let { out.addAll(usedNumbers(it.vectorStrokes())) }
+        }
         return out
     }
 
@@ -898,7 +904,7 @@ object AutoAnchors {
                 o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
-        val avoid = neighbourNumbers(layer, idx)
+        val avoid = neighbourNumbers(layer, idx, ed)
         return ensureEnds(refresh(strokes, avoid, sens, ids, referenceLines(layer, idx, nextFirst, ed)), avoid, ids)
     }
 }
@@ -941,6 +947,55 @@ object LineGhost {
         if (r.points.isEmpty()) return false
         if (r.isClosed && !AutoAnchors.seamEnds(r)) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } } // a closed line that kept its two ends counts by its ends, like an open one
         return listOf(r.points.first(), r.points.last()).any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
+    }
+
+    /** The numbers that make the ghost line [r] count as traced when a line of the current keyframe carries one of them (see [isClaimed]): its end numbers and their aliases (a closed ghost: all its numbers). */
+    fun claimNumbers(r: VectorStroke): Set<Int> {
+        if (r.points.isEmpty()) return emptySet()
+        val pts = if (r.isClosed && !AutoAnchors.seamEnds(r)) r.points else listOf(r.points.first(), r.points.last())
+        val out = HashSet<Int>()
+        for (p in pts) { if (p.anchor > 0) out.add(p.anchor); for (a in p.endpointAliases) if (a > 0) out.add(a) }
+        return out
+    }
+
+    /**
+     * Manual unclaim of the ghost line now shown: every point of the current keyframe that carries one of its claim numbers ([claimNumbers]) is given a new number that no line of this keyframe
+     * or of the neighbouring / picked reference keyframes uses (aliases are dropped), so the ghost line is open again and the next stroke traces it. The lines keep their anchors, only the
+     * numbers that paired them with this ghost line change. One undo step. Returns false when nothing was claiming it.
+     */
+    fun unclaim(ed: Editor, cut: Cut, layer: Layer): Boolean {
+        val idx = layer.indexAt(cut.time)
+        val cur = layer.cels.getOrNull(idx) ?: return false
+        val ref = reference(layer, idx, ed.vecGhostNext, ed) ?: return false
+        val all = lines(ref)
+        val strokes = cur.vectorStrokes()
+        val ghost = shown(all, unclaimed(all, strokes, 1f), ed, key(layer, idx)) ?: return false
+        val nums = claimNumbers(ghost)
+        if (nums.isEmpty()) return false
+        fun hit(p: VectorPoint) = (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums }
+        if (strokes.none { it.fill == 0 && it.points.any { p -> hit(p) } }) return false
+        val taken = HashSet<Int>(AutoAnchors.usedNumbers(strokes))
+        taken.addAll(AutoAnchors.neighbourNumbers(layer, idx, ed))
+        taken.addAll(AutoAnchors.usedNumbers(ref.vectorStrokes()))
+        var next = 1
+        val remap = HashMap<Int, Int>()
+        fun fresh(old: Int): Int = remap.getOrPut(old) {
+            while (next in taken && next <= ANCHOR_MAX) next++
+            if (next > ANCHOR_MAX) 0 else { taken.add(next); next }
+        }
+        val out = strokes.map { s ->
+            if (s.fill != 0 || s.points.none { hit(it) }) s
+            else s.copy(points = s.points.map { p ->
+                if (!hit(p)) p else {
+                    val n = if (p.anchor > 0 && p.anchor in nums) fresh(p.anchor) else p.anchor
+                    val aliases = p.endpointAliases.filter { it !in nums }
+                    if (n == 0 && p.anchor > 0) p.copy(anchor = 0, auto = false, endpoint = false, endpointAliases = aliases) else p.copy(anchor = n, endpointAliases = aliases)
+                }
+            })
+        }
+        replaceVectorCel(cut, layer, idx, out)
+        ed.vecGhostPin = ghost.id; ed.vecGhostPinKey = key(layer, idx)
+        return true
     }
 
     /** Lines of [ref] nobody has traced yet (see [isClaimed]); the traced ones stay on the ghost, drawn in another colour, and can still be referred to. [px] is kept for the callers. */
