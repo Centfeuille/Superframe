@@ -883,11 +883,23 @@ object AutoAnchors {
         return if (changed) cur else strokes
     }
 
-    /** [refresh] for the cel [cel] of [layer] (its neighbours decide which numbers are avoided and which ghost lines can be followed; [nextFirst] = the next keyframe's lines are preferred). */
-    fun refreshFor(layer: Layer, cel: Cel, strokes: List<VectorStroke>, sens: Float, nextFirst: Boolean = false): List<VectorStroke> {
+    /**
+     * [refresh] for the cel [cel] of [layer] (its neighbours decide which numbers are avoided and which ghost lines can be followed; [nextFirst] = the next keyframe's lines are preferred).
+     * With [ed] the reference frames picked in the timeline are used, exactly as the ghost shows them. Like the canvas merge (`vecRefreshAnchors`), only lines that really changed
+     * (new, or an end that moved) are renumbered and every open line then keeps an anchor on each end, so a merge made with the selection tool behaves like one made with the pen.
+     */
+    fun refreshFor(layer: Layer, cel: Cel, strokes: List<VectorStroke>, sens: Float, nextFirst: Boolean = false, ed: Editor? = null): List<VectorStroke> {
         val idx = layer.cels.indexOfFirst { it === cel }
         if (idx < 0) return refresh(strokes, emptySet(), sens)
-        return refresh(strokes, neighbourNumbers(layer, idx), sens, null, referenceLines(layer, idx, nextFirst))
+        val old = cel.vectorStrokes().associateBy { it.id }
+        val ids = strokes.filter { s ->
+            val o = old[s.id]
+            o == null || o.isClosed != s.isClosed || o.points.size < 2 || s.points.size < 2 ||
+                o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
+                o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
+        }.map { it.id }.toSet()
+        val avoid = neighbourNumbers(layer, idx)
+        return ensureEnds(refresh(strokes, avoid, sens, ids, referenceLines(layer, idx, nextFirst, ed)), avoid, ids)
     }
 }
 

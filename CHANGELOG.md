@@ -1,3 +1,16 @@
+## 2026-11-27 (2) — Selection-tool merge / delete updates the ghost line consistently
+- AI model: Claude
+- Category: Fixed (vector anchors / line ghost; no `.inb` format change)
+- Request: merging lines with the selection tool did not consistently update the ghost line feature.
+- Causes found by reading the code: (1) `AutoAnchors.refreshFor`, used by the selection bar's Merge and Delete, refreshed EVERY line of the cel, did not call `ensureEnds`, and called `referenceLines` without the editor, so it followed the nearest-keyframe search instead of the reference frames picked in the timeline that the ghost shows; the pen merge (`vecRefreshAnchors` in `Canvas.kt`) refreshes only changed lines, then `ensureEnds`, with the picked frames. (2) `ghostData` in `Canvas.kt` was keyed on `tick` and other state, none of which changes when the selection bar swaps the cel, so the ghost kept showing the old claimed / untraced state.
+- `AutoAnchors.kt`: `refreshFor` takes an optional `ed` and now mirrors `vecRefreshAnchors` (changed-lines-only ids, `neighbourNumbers` as avoid set, `referenceLines(..., ed)`, `ensureEnds`).
+- `VectorUi.kt`: Delete and Merge points pass `ed` to `refreshFor`.
+- `Canvas.kt`: `ghostData` keys now include the current cel object, its `vecRev`, its stroke count and `ed.vecSelCels`.
+- `WhatsNew.kt` note 96, `PROJECT_MEMORY.md`, `CHANGELOG.md`.
+- Protected files untouched. `.inb` format unchanged.
+- Validation: source review of call sites and the diff only. Not compiled, not run on a device.
+- Follow-up (tablet): with ghost on and reference frames picked, merge two points with the Selection tool and check the ghost's claimed / untraced colours update at once and anchor numbers match what the pen merge gives; repeat with Delete, with no frames picked, and with refAll on (several layers).
+
 ## 2026-11-27 — Unmerged-lines shimmer on the Brush tool; detection on the drawn curve
 - AI model: Claude
 - Category: Changed / Fixed (vector layers; no `.inb` format change)

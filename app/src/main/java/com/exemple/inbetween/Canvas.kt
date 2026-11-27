@@ -1984,7 +1984,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 2 || ed.tool == 4) }
     val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
     val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
-    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor, ed.selCels.toList()) {
+    // the current keyframe's cel object, its revision and line count are keys: a merge / delete made with the selection tool swaps the cel without bumping `tick`
+    val ghostCur = ghostLayer?.let { gl -> gl.cels.getOrNull(gl.indexAt(cut.time)) }
+    val ghostData = remember(ghostLayer, cut.time, ed.vecGhostNext, ed.vecGhostPin, ed.vecGhostPinKey, tick, ed.vecAutoAnchor, ed.selCels.toList(), ghostCur, ghostCur?.vecRev, ghostCur?.strokes?.size, ed.vecSelCels) {
         val gl = ghostLayer
         val idx = gl?.indexAt(cut.time) ?: -1
         val cur = gl?.cels?.getOrNull(idx)

@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            96, "2026-11-27", "Merging with the Selection tool keeps the ghost line in step",
+            listOf(
+                "Merging or deleting points with the Selection tool now renumbers anchors the same way the pen merge does: only lines whose end really moved are touched, every open line keeps an anchor on each end, and the reference frames you picked in the timeline are the ones followed.",
+                "The ghost line now updates right after such a merge or delete instead of waiting for the next stroke."
+            )
+        ),
+        ReleaseNote(
             95, "2026-11-27", "Unmerged-lines shimmer on the Brush tool, and more reliable",
             listOf(
                 "The shimmer that marks places where separate lines cross or touch without being merged now also shows with the Brush tool, not only the Selection tool.",

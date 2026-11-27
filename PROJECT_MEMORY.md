@@ -800,3 +800,6 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 ## 2026-11-27 — Unmerged-lines shimmer on the Brush tool
 - `vecGaps` (Canvas.kt) is computed for the Selection tool (as before) and for the Brush tool on a visible vector layer (`vecGapBrush`, strokes from `vecScope(cut, ed.refAll)`). Its `remember` keys must include the screen zoom and `cut.edits` / `tick`; the reach is `ed.vecMergeRadius / zoom` screen-to-document. `VectorGaps.find` works on the drawn curve (`VectorTessellator.centerline`), not the control polygon; the "merged" tests still use control points. Not compiled or run.
+
+## 2026-11-27 (2) — Selection merge / delete and the ghost
+- `AutoAnchors.refreshFor(layer, cel, strokes, sens, nextFirst, ed)` is the selection-bar counterpart of `Canvas.kt` `vecRefreshAnchors`: same changed-lines-only ids, `ensureEnds`, and `referenceLines(..., ed)` (picked reference frames). Keep the two in step. `ghostData` (Canvas.kt) must be keyed on the current cel object / `vecRev` / stroke count, because edits made outside `DrawingCanvas` (the selection bar) do not bump `tick`. Not compiled or run.
