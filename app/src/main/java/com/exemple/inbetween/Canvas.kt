@@ -780,7 +780,8 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     /** After a line was merged into others: its automatic anchors follow the new shape. */
-    fun vecRefreshAnchors(l: Layer, idx: Int, strokes: List<VectorStroke>): List<VectorStroke> {
+    fun vecRefreshAnchors(l: Layer, idx: Int, strokes0: List<VectorStroke>): List<VectorStroke> {
+        val (strokes, joinedIds) = VectorMerge.joinLinkedEnds(strokes0) // branches whose in-between part was erased become one line again
         if (!ed.vecAutoAnchor) return strokes
         // Only lines that really changed (a new line, or an old line whose end moved because another line was joined to it) are renumbered. Lines that merely cross or touch
         // another one only got a shared vertex: their numbers are not touched. Every open line keeps an anchor on each of its two end points.
@@ -791,7 +792,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             o == null || o.isClosed != s.isClosed || o.points.size < 2 || s.points.size < 2 ||
                 o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
-        }.map { it.id }.toSet()
+        }.map { it.id }.toSet() + joinedIds
         val avoid = AutoAnchors.neighbourNumbers(l, idx, ed)
         val refs = AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)
         // a ghost line that an erased / deleted line was following is free again: the line that took its place follows it now
@@ -1090,10 +1091,18 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
 
     fun vecApplyAll(sc: VecScope, edited: List<VectorStroke>) {
         val lives = vecLives ?: return
-        val parts = sc.split(edited)
+        val parts = sc.split(edited).mapIndexed { i, p -> VectorJunctions.follow(sc.perCel[i], p) } // a moved junction point drags its partners (branches stay attached)
         val inc = vecLiveCels
         lives.forEachIndexed { i, cel -> if (i < parts.size) { if (inc != null && i < inc.size) inc[i].apply(parts[i]) else vecApplyLive(cel, parts[i]) } }
         tick++ // the point overlay (vecShowStrokes) is rebuilt from the strokes just applied; without this it showed the strokes of the previous event
+    }
+
+    /** The keys of the points linked to the point [key] by a junction (same cel of the scope), so tapping one end of a branch picks the whole junction. */
+    fun vecJunctionKeys(sc: VecScope, key: Long): Set<Long> {
+        val si = vecKeyStroke(key)
+        val c = sc.cels.indices.firstOrNull { si >= sc.offsets[it] && si < sc.offsets[it + 1] } ?: return emptySet()
+        val local = sc.perCel[c]
+        return VectorJunctions.partners(local, si - sc.offsets[c], vecKeyPoint(key)).map { (ps, pp) -> vecKey(ps + sc.offsets[c], pp) }.toSet()
     }
 
     fun vecEditDown(l: Layer, d: Offset) {
@@ -1102,7 +1111,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         vecFinishLive()
         st.kind = 16; vecLives = null; vecOrig = null; vecBefore = null; vecSc = sc
         if (hit != null) {
-            if (hit !in ed.vecSel) ed.vecSel = setOf(hit)
+            if (hit !in ed.vecSel) ed.vecSel = setOf(hit) + vecJunctionKeys(sc, hit)
             vecDrag = 1; vecOrig = sc.strokes
         } else { vecDrag = 2; vecLasso = listOf(d) }
     }

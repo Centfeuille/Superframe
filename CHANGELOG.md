@@ -1,3 +1,13 @@
+## 2026-11-27 (10) — Junctions: move together, tap selects the whole junction, branches rejoin after an erase / delete
+- AI model: Claude
+- Category: Added (builds on entry 9; no format change)
+- Request: go ahead with the next steps of the branch links.
+- `Vector.kt` `VectorJunctions.follow(orig, edited)`: after an edit that kept the lines and points, a moved junction point drags its partners that sat on the same spot before (within 0.8 px) and did not move themselves; the rest of the partner's line stays. `Canvas.kt` `vecApplyAll` runs it per cel on every live edit (point drag, transform, warp), so the branch stays attached while it is moved. Duplicated pairs of lines with the same numbers at other spots are left alone.
+- `Canvas.kt` `vecEditDown` / `vecJunctionKeys`: tapping a point that has a junction selects its partners too (a lasso takes them anyway: they sit on the same spot).
+- `VectorMerge.joinLinkedEnds(strokes, sharp)`: two linked points that are both ends of open lines (typically after the part of a line between two branches was erased or deleted, which cuts exactly on the shared point) are joined like an end-to-end merge (`join` / `mid`: both ends' numbers kept, AutoAnchors.refresh relocates them), the link is gone, repeated until none is left. A junction with three or more members or an inside point stays. Called first thing in `Canvas.vecRefreshAnchors` (eraser, pen merge) and `AutoAnchors.refreshFor` (selection Delete / Merge), and in the Delete button when auto anchors are off; the joined lines count as changed for the anchor refresh.
+- Not done yet: interpolation reading a junction as one in-between anchor; points moved by tools that do not go through `vecApplyAll` (numeric / key nudges, alignment) do not drag partners; the numbers at the new joint after the join follow the existing join rules (the user may still see renumbering there, to be tuned next). Not compiled, not run.
+- Follow-up on the tablet: (a) drag / transform a line with a branch: the branch's end follows; (b) tap a ringed point: both points are selected; (c) merge the sole's two ends onto the boot, erase the boot between them: the pieces and the sole become one line; (d) Undo restores the branches.
+
 ## 2026-11-27 (9) — Junction links: branches between lines (storage + Merge creates them + shown on the canvas)
 - AI model: Claude
 - Category: Added (data model, `.inb` metadata without a version bump)

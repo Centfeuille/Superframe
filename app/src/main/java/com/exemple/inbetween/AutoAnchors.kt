@@ -943,7 +943,8 @@ object AutoAnchors {
      * With [ed] the reference frames picked in the timeline are used, exactly as the ghost shows them. Like the canvas merge (`vecRefreshAnchors`), only lines that really changed
      * (new, or an end that moved) are renumbered and every open line then keeps an anchor on each end, so a merge made with the selection tool behaves like one made with the pen.
      */
-    fun refreshFor(layer: Layer, cel: Cel, strokes: List<VectorStroke>, sens: Float, nextFirst: Boolean = false, ed: Editor? = null): List<VectorStroke> {
+    fun refreshFor(layer: Layer, cel: Cel, strokes0: List<VectorStroke>, sens: Float, nextFirst: Boolean = false, ed: Editor? = null): List<VectorStroke> {
+        val (strokes, joinedIds) = VectorMerge.joinLinkedEnds(strokes0) // branches whose in-between part was removed become one line again
         val idx = layer.cels.indexOfFirst { it === cel }
         if (idx < 0) return refresh(strokes, emptySet(), sens)
         val old = cel.vectorStrokes().associateBy { it.id }
@@ -952,7 +953,7 @@ object AutoAnchors {
             o == null || o.isClosed != s.isClosed || o.points.size < 2 || s.points.size < 2 ||
                 o.points.first().x != s.points.first().x || o.points.first().y != s.points.first().y ||
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
-        }.map { it.id }.toSet()
+        }.map { it.id }.toSet() + joinedIds
         val avoid = neighbourNumbers(layer, idx, ed)
         val refs = referenceLines(layer, idx, nextFirst, ed)
         // the selection merge: the longest piece decides the new ends

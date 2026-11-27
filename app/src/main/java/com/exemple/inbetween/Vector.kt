@@ -2395,6 +2395,41 @@ object VectorJunctions {
         return c
     }
 
+    /**
+     * Moving a junction point moves its partners: after an edit that kept the lines and their points ([orig] -> [edited], same shape), every point that carries a junction number and
+     * was moved drags the points of the same junction that sat on the same spot before (within 0.8 px) and were not moved themselves to where it went. The rest of the partner's line
+     * stays as it is. Returns [edited] itself when nothing needed to follow.
+     */
+    fun follow(orig: List<VectorStroke>, edited: List<VectorStroke>): List<VectorStroke> {
+        if (orig.size != edited.size || orig.none { s -> s.points.any { it.junction > 0 } }) return edited
+        val groups = groups(orig)
+        if (groups.isEmpty()) return edited
+        var out: MutableList<VectorStroke>? = null
+        val pts = HashMap<Int, MutableList<VectorPoint>>() // edited point lists being changed, by stroke index
+        fun cur(si: Int, pi: Int): VectorPoint = pts[si]?.get(pi) ?: edited[si].points[pi]
+        for ((_, members) in groups) {
+            val ok = members.filter { (si, pi) -> si in edited.indices && pi in edited[si].points.indices && edited[si].points.size == orig[si].points.size }
+            for ((ms, mp) in ok) {
+                val o = orig[ms].points[mp]; val e = edited[ms].points[mp]
+                if (hypot(e.x - o.x, e.y - o.y) < 1e-4f) continue // this one did not move
+                for ((ps, pp) in ok) {
+                    if (ps == ms && pp == mp) continue
+                    val po = orig[ps].points[pp]
+                    if (hypot(po.x - o.x, po.y - o.y) > 0.8f) continue // another junction spot (a duplicated pair of lines)
+                    val pe = edited[ps].points[pp]
+                    if (hypot(pe.x - po.x, pe.y - po.y) >= 1e-4f) continue // it moved by itself: leave it
+                    if (hypot(cur(ps, pp).x - e.x, cur(ps, pp).y - e.y) < 1e-4f) continue
+                    val l = pts.getOrPut(ps) { edited[ps].points.toMutableList() }
+                    l[pp] = l[pp].copy(x = e.x, y = e.y)
+                }
+            }
+        }
+        if (pts.isEmpty()) return edited
+        out = edited.toMutableList()
+        for ((si, l) in pts) out[si] = edited[si].copy(points = l)
+        return out
+    }
+
     /** Drops junction numbers that no longer link two different lines (a partner was deleted, erased or pasted alone). Returns [strokes] itself when nothing changed. */
     fun normalize(strokes: List<VectorStroke>): List<VectorStroke> {
         if (strokes.none { s -> s.points.any { it.junction > 0 } }) return strokes
@@ -2499,6 +2534,42 @@ object VectorMerge {
         if (d(s.points.first(), s.points.last()) < 0.05f) s.copy(points = s.points.dropLast(1), isClosed = true) else s.copy(isClosed = true)
     /** [byLength] (the Merge button of the point selection bar only): the longer line's numbers come first at the join. The pen merge keeps the drawing order. */
     private fun join(a: List<VectorPoint>, b: List<VectorPoint>, byLength: Boolean = false): List<VectorPoint> = a.dropLast(1) + mid(a.last(), b.first(), !byLength || length(a) >= length(b)) + b.drop(1)
+
+    /**
+     * Lines that meet end to end through a junction link become ONE line again: two linked points that are both the ends of open lines (typically after the part of a line between two
+     * branches was erased) are joined like any end-to-end merge (the numbers of both ends are kept through [mid], AutoAnchors.refresh then puts them on the right points) and the link
+     * is gone. A junction with three or more members, or one with an inside point, stays. Returns the new lines and the ids of the lines that were joined.
+     */
+    fun joinLinkedEnds(strokes: List<VectorStroke>, sharp: Float = 0f): Pair<List<VectorStroke>, Set<String>> {
+        if (strokes.none { s -> s.points.any { it.junction > 0 } }) return strokes to emptySet()
+        val st = strokes.toMutableList()
+        val ids = HashSet<String>()
+        var guard = 0
+        while (guard++ < 24) {
+            val g = VectorJunctions.groups(st).entries.firstOrNull { (_, m) ->
+                m.size == 2 && m[0].first != m[1].first && m.all { (si, pi) -> val s = st[si]; s.fill == 0 && !s.isClosed && s.points.size >= 2 && (pi == 0 || pi == s.points.size - 1) }
+            } ?: break
+            val (ia, pa) = g.value[0]; val (ib, pb) = g.value[1]
+            val sa = st[ia]; val sb = st[ib]
+            val aLast = pa == sa.points.size - 1; val bLast = pb == sb.points.size - 1
+            val first: List<VectorPoint>; val second: List<VectorPoint>
+            when {
+                aLast && !bLast -> { first = sa.points; second = sb.points }
+                aLast && bLast -> { first = sa.points; second = sb.points.reversed() }
+                !aLast && bLast -> { first = sb.points; second = sa.points }
+                else -> { first = sb.points.reversed(); second = sa.points }
+            }
+            val pts = join(first, second, true).toMutableList()
+            val ji = first.size - 1
+            pts[ji] = pts[ji].copy(junction = 0)
+            val keep = min(ia, ib); val drop = max(ia, ib)
+            val base = st[keep] // the older line's identity and look win
+            st[keep] = base.copy(points = pts, joinSharp = max(base.joinSharp, sharp))
+            ids.add(base.id)
+            st.removeAt(drop)
+        }
+        return st to ids
+    }
 
     /**
      * Where a line end at (x, y) would snap, by the same rules as [attach]: the nearest end of an open line first, else the nearest point on the body
