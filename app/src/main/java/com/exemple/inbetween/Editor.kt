@@ -1072,6 +1072,7 @@ class Editor : ViewModel() {
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())
     var vecDisplaceSelected by mutableIntStateOf(-1)
+    var vecShapeCel by mutableStateOf<Cel?>(null)       // shape flip bar (VectorShapes.kt): the other keyframe whose shapes are previewed on the selected lines; null = the current shapes. Session state, never saved
     var vecGuideSelected by mutableIntStateOf(-1)       // selected guide joint index on the active interpolation span
     var vecSel by mutableStateOf<Set<Long>>(emptySet()) // selected points (vecKey: stroke index, point index) across the cels of vecSelCels (see VecScope)
     var vecSelCels by mutableStateOf<List<Cel>>(emptyList()) // the keyframes the selection belongs to (observable, so the widget bar follows it)

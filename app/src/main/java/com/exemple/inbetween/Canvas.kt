@@ -1178,17 +1178,23 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val path = vecCutPath
         vecCutPath = emptyList()
         if (path.isEmpty()) return
-        val radius = max(8f / vecZoom(), ed.erasers[ed.eraserIdx].size * 0.5f)
-        val step = max(1f, radius * 0.5f)
+        // Finer eraser: the radius is the eraser size (the old floor of 8 screen px made anything under about 16 px erase as a 16 px eraser), and the pen path is sampled
+        // every 0.3 radius (at least a quarter of a screen px) so the erased stretch has no scallops. The step grows only so that a very long path still ends up with about
+        // 1500 samples; the whole path is always covered (it used to stop after 600 samples).
+        val radius = max(1.5f / vecZoom(), ed.erasers[ed.eraserIdx].size * 0.5f)
+        var pathLen = 0f
+        for (i in 1 until path.size) pathLen += hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y)
+        val step = max(max(0.25f / vecZoom(), radius * 0.3f), pathLen / 1500f)
         val samples = ArrayList<Offset>()
         samples.add(path[0])
         for (i in 1 until path.size) {
             val a = path[i - 1]; val b = path[i]
             val len = hypot(b.x - a.x, b.y - a.y)
+            if (len < 1e-4f) continue
             val k = (len / step).toInt()
             for (j in 1..k) samples.add(Offset(a.x + (b.x - a.x) * j / (k + 1f), a.y + (b.y - a.y) * j / (k + 1f)))
-            samples.add(b)
-            if (samples.size > 600) break
+            val last = samples.last()
+            if (i == path.size - 1 || hypot(b.x - last.x, b.y - last.y) >= step * 0.5f) samples.add(b) // dense batched pen points closer than half a step add nothing
         }
         // "All layers" (the toggle of the selection tool) lets the eraser work on every visible, unlocked vector layer at once; otherwise only on the layer being drawn
         val targets = if (ed.refAll) cut.layers.filter { it.vector && it.visible && !it.locked } else listOf(l)
@@ -1795,7 +1801,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             15 -> vecFeed(ev)
             16 -> vecEditMove(ev, d)
             24 -> vecBrushStep(d)
-            25 -> vecCutPath = vecCutPath + d
+            25 -> { // vector eraser: every batched pen sample is kept (a fast stroke used to be reduced to one point per frame, so the erased path was a coarse polyline)
+                val add = ArrayList<Offset>(ev.historySize + 1)
+                for (h in 0 until ev.historySize) add.add(toDoc(ev.getHistoricalX(h), ev.getHistoricalY(h)))
+                add.add(d)
+                vecCutPath = vecCutPath + add
+            }
             17 -> vecCutPath = vecCutPath + d
             18 -> vecXfMove(d)
             22 -> ed.setDragT((vecDragT0 + (ev.x - vecDragX0) / (260f * vecCtx.resources.displayMetrics.density)).coerceIn(0f, 1f)) // only the picked preview lines when there are any
@@ -2023,6 +2034,11 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
     }
     vecDisplaceRef[0] = vecDisplaceWarped
+    // selection tool, shape flip: the selected lines as they will look with the shapes of the other keyframe picked in the shape bar (Apply commits these same lines)
+    val vecShapeShow = remember(ed.vecShapeCel, ed.vecSel, vecShowStrokes, ed.tool, ed.vecMode) {
+        val sc = ed.vecShapeCel
+        if (sc == null || ed.tool != 2 || ed.vecMode == 3) emptyList<VectorStroke>() else VectorShapeFlip.preview(cut, ed, sc)
+    }
     val vecDisplaceShow = remember(vecDisplaceWarped) { vecDisplaceWarped.map { it.stroke } }
 
     // selection tool AND brush tool: places where separate lines cross or touch without being joined (they shimmer); not while a drag is running.
@@ -2553,6 +2569,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 }
             }
             if (vecDisplaceShow.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecDisplaceShow) VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = 0xFFFF9800.toInt() or (0xFF shl 24), opacity = (vs.opacity * 0.55f).coerceIn(0.2f, 1f)), pt) }
+            if (vecShapeShow.isNotEmpty()) drawIntoCanvas { cv -> val pt = android.graphics.Paint(); for (vs in vecShapeShow) VectorTessellator.draw(cv.nativeCanvas, vs.copy(color = 0xFF26C6DA.toInt() or (0xFF shl 24), opacity = (vs.opacity * 0.75f).coerceIn(0.2f, 1f)), pt) }
             if (ed.tool == 2 && ed.vecDisplace) ed.vecDisplaceJoints.forEachIndexed { i, g ->
                 val p = Offset(g.x, g.y)
                 drawCircle(Color.White, 9f * px1, p)
@@ -2962,6 +2979,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!cut.playing) VectorFillBar(cut, ed, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).zIndex(5f))
         if (!cut.playing) VectorInkBar(cut, ed, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = if (AppSettings.leftHanded) 0.dp else 14.dp, end = if (AppSettings.leftHanded) 14.dp else 0.dp, bottom = 14.dp).zIndex(6f))
         if (!cut.playing) VectorWobbleBar(cut, ed, Modifier.align(Alignment.TopCenter).padding(top = 14.dp).zIndex(6f))
+        if (!cut.playing) VectorShapeBar(cut, ed, Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 14.dp).zIndex(6f)) // shape flip: top right (VectorShapes.kt)
         ClipboardBar(ed, cut, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(start = if (AppSettings.leftHanded) 14.dp else 0.dp, end = if (AppSettings.leftHanded) 0.dp else 14.dp, bottom = 14.dp).zIndex(5f))
         // Selection widget bar: follows the selection (and its transform) instead of staying at the top of the screen
         if ((ed.sel != null || ed.xform != null) && !(ed.outOfPeg && ed.outOfPegSide != 0) && !cut.playing) {

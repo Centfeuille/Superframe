@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -108,6 +109,20 @@ private fun BarChip(label: String, on: Boolean, enabled: Boolean = true, onClick
 }
 
 /**
+ * One of the two bars shown side by side while the interpolation preview is up (the selection bar and the drag bar). With [both] the active bar is outlined
+ * and the other one is dimmed: a tap anywhere on the dimmed bar calls [onActivate] (it does not press the button under the finger) and makes it the active function.
+ * Without [both] the content is shown unchanged.
+ */
+@Composable
+private fun BarSwitch(both: Boolean, active: Boolean, onActivate: () -> Unit, content: @Composable () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(if (both) Modifier.clip(shape).border(1.5.dp, if (active) Color(0xFFD0BCFF) else Color.Transparent, shape).graphicsLayer { alpha = if (active) 1f else 0.55f } else Modifier) {
+        content()
+        if (both && !active) Box(Modifier.matchParentSize().clickable { onActivate() })
+    }
+}
+
+/**
  * The vector buttons on the timeline bar (shown while a vector layer is selected): Interpolation drag and Cutter. Vector drawing is the regular Brush tool and
  * point selection / editing is the regular Selection tool; their options are in [VectorWidgetBar].
  */
@@ -134,7 +149,9 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
 @Composable
 fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val layer = cut.layer?.takeIf { it.vector && it.visible } ?: return
-    val pointBar = ed.tool == 2
+    val selActive = ed.tool == 2
+    val bothBars = ed.vecMode == 3 && (ed.tool == 0 || ed.tool == 2) // the interpolation preview is up: the selection bar and the drag bar are both shown; the active one is outlined and a tap on the other one makes it the active function
+    val pointBar = selActive || bothBars
     val pointsMode = pointBar && ed.vecPoints && ed.vecMode != 3 // Selection tool, Points on: single points (the old Point edit); off: whole lines
     val dragBar = ed.vecMode == 3 && ed.tool == 0 // Interpolation drag
     val prevBar = pointBar && ed.vecMode == 3 // Selection tool while the interpolation preview is up: it picks and edits the PREVIEW lines
@@ -182,8 +199,9 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     }
     }
     Row(Modifier.align(Alignment.BottomCenter), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+    BarSwitch(bothBars, selActive, { ed.tool = 2 }) { // a tap on the dimmed selection bar makes the Selection tool the active function
     Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
-        if (dragBar && smoothBarOpen) InterpSmoothRow(ed)
+        if (dragBar && !bothBars && smoothBarOpen) InterpSmoothRow(ed)
         if (sess) VecXformRows(ed)
         if (prevBar && !sess && ed.vecDisplace) Row(verticalAlignment = Alignment.CenterVertically) {
             // Displace on the preview: guide joints on the in-between's lines (stored with the first keyframe's interpolation, so they are kept when it is made)
@@ -253,7 +271,6 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             } else if (prevBar) {
                 // Selection tool on the interpolation preview: the preview lines are picked with the pen (tap a line, or drag a rectangle over several)
                 Text(if (ed.vecPreSel.isEmpty()) "Preview · all lines (tap or drag over lines to pick some)" else "Preview · ${ed.vecPreSel.size} line${if (ed.vecPreSel.size == 1) "" else "s"} picked", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
-                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; ed.vecGuideSelected = -1 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 IconBtn(Icons.Filled.Refresh, tip = "Undo every transform / warp made on the preview and pick nothing") { ed.vecPlaceAll = Aff.ID; ed.vecPlaceLines = emptyMap(); ed.vecPlaceSteps = emptyList(); ed.vecPreSel = emptySet() }
             } else if (pointBar) {
@@ -267,7 +284,6 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     }) { ed.vecPointView = (ed.vecPointView + 1) % 3 }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
                 VIconBtn(Icons.Filled.ContentCut, on = ed.vecSelCut, tip = if (ed.vecSelCut) "Cut: on. Draw across lines to slice them; each cut makes new end anchors, the other ends keep theirs" else "Cut: draw across lines to slice them (new end anchors where cut)") { ed.vecSelCut = !ed.vecSelCut; if (ed.vecSelCut) { ed.vecDisplace = false; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 } }
-                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; if (ed.vecDisplace) ed.vecSelCut = false; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
                 if (pointsMode) {
                     IconBtn(Icons.Filled.SwapVert, on = ed.vecRaise, tip = "Raise / lower points: drag up or down") { ed.vecRaise = !ed.vecRaise }
@@ -324,9 +340,12 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             }
         }
     }
-    if (prevBar && !sess) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) { // Selection tool while the interpolation preview is up: the drag controls stay next to the selection bar
+    }
+    if (prevBar && !sess) BarSwitch(bothBars, !selActive, { ed.vecXfCancel(); ed.tool = 0 }) { // the drag controls stay next to the selection bar; a tap on the dimmed drag bar makes Interpolation drag the active function
+    Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
         if (smoothBarOpen) InterpSmoothRow(ed)
         Row(verticalAlignment = Alignment.CenterVertically) { InterpDragContent(cut, ed, layer, idx, cel, ctx, smoothBarOpen) { smoothBarOpen = !smoothBarOpen } }
+    }
     }
     }
     }
@@ -920,6 +939,49 @@ fun VecXformRows(ed: Editor) {
             val shown = pin?.r ?: x.pinRadius
             SliderRow(if (pin != null) "Radius (pin ${x.pinSel + 1})" else "Radius (new pins)", shown, 0f..PIN_RADIUS_MAX, if (shown < 1f) "Off" else "${shown.roundToInt()} px") { v -> x.applyPinRadius((v / 5f).roundToInt() * 5f) }
             Text("How far the selected pin reaches: the bend fades out that far from it (Off = every line follows). Tap a pin to select it.", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.width(300.dp).padding(4.dp))
+        }
+    }
+}
+
+/**
+ * Shape flip bar, top right of the canvas (Selection tool, vector layers): shown while the selection holds lines with end anchors. The arrows flip through the other
+ * keyframes of the layer that have lines with the same end anchor numbers (earlier ones to the left, later ones to the right of "Current"); the canvas previews the shapes
+ * of that keyframe on the selected lines. The group is not moved or scaled as a whole, only the lines' shapes and their positions to each other change (see [VectorShapeFlip]).
+ * Apply keeps what is shown (one undo step); Reset goes back to the current shapes. Selecting something else, another frame or another tool also drops the preview.
+ */
+@Composable
+fun VectorShapeBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
+    androidx.compose.runtime.LaunchedEffect(ed.vecSel, ed.vecSelCels, cut.time, cut.drawLayer) { ed.vecShapeCel = null }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { ed.vecShapeCel = null } }
+    if (ed.tool != 2 || ed.vecMode == 3 || ed.vecXf != null) return
+    val androidCtx = LocalContext.current
+    val shape = VectorShapeFlip.context(cut, ed) ?: return
+    val celsKey = shape.layer.cels.toList()
+    val cands = remember(celsKey, ed.vecSel, shape.idx) { VectorShapeFlip.candidates(shape) }
+    val seq: List<VectorShapeFlip.Cand?> = cands.filter { it.index < shape.idx } + listOf<VectorShapeFlip.Cand?>(null) + cands.filter { it.index > shape.idx }
+    val here = seq.indexOf(null)
+    val pos = seq.indexOfFirst { it?.cel === ed.vecShapeCel }.let { if (it < 0) here else it }
+    fun go(to: Int) { ed.vecShapeCel = seq.getOrNull(to.coerceIn(0, seq.size - 1))?.cel }
+    val label = when {
+        pos < here -> "Previous ${here - pos} of $here"
+        pos > here -> "Next ${pos - here} of ${seq.size - 1 - here}"
+        else -> "Current shapes"
+    }
+    val n = shape.chosen.size
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.widthIn(min = 128.dp).padding(horizontal = 8.dp)) {
+            Text("Shapes · $n line${if (n == 1) "" else "s"}", fontSize = 11.sp, color = Color(0xFFB8B8C4))
+            Text(if (cands.isEmpty()) "No other keyframe has these end anchors" else label, fontSize = 12.sp, color = Color.White)
+        }
+        VIconBtn(Icons.Filled.NavigateBefore, enabled = pos > 0, tip = "Flip to the shapes of the previous keyframe that has lines with the same end anchors (the group keeps its place and size)") { go(pos - 1) }
+        VIconBtn(Icons.Filled.NavigateNext, enabled = pos < seq.size - 1, tip = "Flip to the shapes of the next keyframe that has lines with the same end anchors (the group keeps its place and size)") { go(pos + 1) }
+        VIconBtn(Icons.Filled.Refresh, enabled = ed.vecShapeCel != null, tip = "Reset: back to the current shapes") { ed.vecShapeCel = null }
+        VIconBtn(Icons.Filled.Check, enabled = ed.vecShapeCel != null, tip = "Apply the shown shapes to the selected lines (one undo step)") {
+            val cel = ed.vecShapeCel
+            if (cel != null && !VectorShapeFlip.apply(cut, ed, cel)) toastMessage(androidCtx, "Nothing to apply: that keyframe has no line with the same end anchors any more")
         }
     }
 }

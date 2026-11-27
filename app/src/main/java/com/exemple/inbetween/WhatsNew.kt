@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            103, "2026-11-28", "Shape flip bar, switchable selection / drag bars, finer vector eraser",
+            listOf(
+                "New bar at the top right of the canvas: select one or more vector lines that have anchors (Selection tool) and flip through the shapes the lines with the same end anchors have in the other keyframes. The group is not moved or scaled as a whole, only the lines' shapes and their positions to each other change. Apply keeps what is shown (one undo step), Reset goes back.",
+                "While the interpolation preview is up, the Selection bar and the Interpolation drag bar are both shown. The active one is outlined, the other is dimmed: tap it to make it the active function, and tap the other one to flip back.",
+                "The Displace button is gone from the Selection bar.",
+                "Vector eraser: it now follows the pen more closely. Every pen sample is used (a fast stroke is no longer reduced to one point per frame), the erased stretch is sampled more densely, a long stroke is erased all the way along, and a small eraser size is no longer rounded up to a 16 px eraser at normal zoom."
+            )
+        ),
+        ReleaseNote(
             102, "2026-11-27", "Merge onto the body of a line, anchors after an erase",
             listOf(
                 "Merge: an end merged onto another line is now linked to that spot as a junction (a branch), shown with a cyan ring. The other line stays whole and is not cut. Moving one of the two points moves the other, tapping one selects both, and when the part of a line between two branches is erased the rest becomes one line again, keeping the numbers of its outer ends. Selecting one line selects the lines linked to it.",
