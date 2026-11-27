@@ -793,7 +793,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
         val avoid = AutoAnchors.neighbourNumbers(l, idx, ed)
-        return AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)), avoid, ids)
+        val refs = AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)
+        // a ghost line that an erased / deleted line was following is free again: the line that took its place follows it now
+        return AutoAnchors.reclaimFreed(before, AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, refs), avoid, ids), refs, ed.vecTipSens)
     }
     /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
     fun vecWithEnds(l: Layer, stroke: VectorStroke): VectorStroke {

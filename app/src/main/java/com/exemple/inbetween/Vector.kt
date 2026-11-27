@@ -2383,6 +2383,60 @@ object VectorMerge {
     private fun length(p: List<VectorPoint>): Float { var l = 0f; for (i in 1 until p.size) l += d(p[i - 1], p[i]); return l }
 
     /**
+     * Where a point (x, y) touches the BODY of line [o], measured on the curve the line is DRAWN along (smooth through its control points), not on the control polygon: a line kept to
+     * few points bows far from its polygon, so a polygon test refused to merge onto any line that was not hit at one of its points. [seg] / [u] = place on the curve (segment, 0..1),
+     * [at] = index of an existing control point when the touch is on one (nothing to insert then), else -1. Null when no interior spot is within [lim]; the two ends of an open line are
+     * never offered (they join by the end rules).
+     */
+    class BodyHit(val seg: Int, val u: Float, val at: Int, val x: Float, val y: Float, val pressure: Float, val elevation: Float, val dist: Float)
+    fun onBody(o: VectorStroke, x: Float, y: Float, lim: Float): BodyHit? {
+        val src = o.points; val n = src.size
+        if (n < 2 || n > 6000) return null
+        val closed = o.isClosed && n >= 3
+        val segs = if (closed) n else n - 1
+        val tmp = FloatArray(2)
+        var bd = Float.MAX_VALUE; var bs = -1; var bu = 0f
+        for (i in 0 until segs) {
+            val a = src[i]; val b = src[(i + 1) % n]
+            val chord = hypot(b.x - a.x, b.y - a.y)
+            // a smooth curve bows only so far from its chord: skip segments that cannot be within reach
+            val cx = (a.x + b.x) / 2f; val cy = (a.y + b.y) / 2f
+            if (hypot(x - cx, y - cy) > lim + chord) continue
+            var lo = 0f; var hi = 1f
+            var segBest = Float.MAX_VALUE; var segU = 0f
+            for (q in 0..16) {
+                val u = q / 16f
+                VectorTessellator.curveAt(src, closed, i, u, tmp)
+                val dd = hypot(tmp[0] - x, tmp[1] - y)
+                if (dd < segBest) { segBest = dd; segU = u }
+            }
+            lo = (segU - 1f / 16f).coerceAtLeast(0f); hi = (segU + 1f / 16f).coerceAtMost(1f)
+            for (iter in 0 until 6) { // refine around the best sample
+                val u1 = lo + (hi - lo) / 3f; val u2 = hi - (hi - lo) / 3f
+                VectorTessellator.curveAt(src, closed, i, u1, tmp); val d1 = hypot(tmp[0] - x, tmp[1] - y)
+                VectorTessellator.curveAt(src, closed, i, u2, tmp); val d2 = hypot(tmp[0] - x, tmp[1] - y)
+                if (d1 < d2) hi = u2 else lo = u1
+                val m = (lo + hi) / 2f
+                VectorTessellator.curveAt(src, closed, i, m, tmp); val dm = hypot(tmp[0] - x, tmp[1] - y)
+                if (dm < segBest) { segBest = dm; segU = m }
+            }
+            if (segBest < bd) { bd = segBest; bs = i; bu = segU }
+        }
+        if (bs < 0 || bd > lim) return null
+        // on (or next to) a control point: use that point; an open line's own ends are not a body touch
+        val near0 = bu < 0.03f; val near1 = bu > 0.97f
+        if (near0 || near1) {
+            val k = if (near0) bs else (bs + 1) % n
+            if (!closed && (k == 0 || k == n - 1)) return null
+            val pk = src[k]
+            return BodyHit(bs, bu, k, pk.x, pk.y, pk.pressure, pk.elevationOffset, bd)
+        }
+        VectorTessellator.curveAt(src, closed, bs, bu, tmp)
+        val a = src[bs]; val b = src[(bs + 1) % n]
+        return BodyHit(bs, bu, -1, tmp[0], tmp[1], a.pressure + (b.pressure - a.pressure) * bu, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * bu, bd)
+    }
+
+    /**
      * An open line whose end comes back to its own start (self-merge) becomes a closed line that KEEPS both end points: nothing is moved, merged or dropped, so the first and last
      * point stay where they were, near each other, with their end anchors (see AutoAnchors.seamEnds); the short piece between them closes the outline. Only when the two ends lie
      * on one spot (no closing piece would be left) the last point is dropped instead, as a closed outline cannot repeat its first point.
@@ -2408,18 +2462,9 @@ object VectorMerge {
         }
         if (found) return floatArrayOf(bx, by)
         for (o in strokes) {
-            val src = if (o.isClosed && o.points.size >= 3) o.points + o.points.first() else o.points
-            if (src.size < 2) continue
-            val lim = max(tol, o.baseWidth * 0.5f)
-            for (i in 0 until src.size - 1) {
-                val a = src[i]; val b = src[i + 1]
-                val dx = b.x - a.x; val dy = b.y - a.y; val l2 = dx * dx + dy * dy
-                if (l2 < 1e-9f) continue
-                val t = (((x - a.x) * dx + (y - a.y) * dy) / l2).coerceIn(0f, 1f)
-                val qx = a.x + dx * t; val qy = a.y + dy * t
-                val dd = hypot(x - qx, y - qy)
-                if (dd <= lim && dd < bd && t > 0.02f && t < 0.98f) { bd = dd; bx = qx; by = qy; found = true }
-            }
+            if (o.points.size < 2) continue
+            val h = onBody(o, x, y, max(tol, o.baseWidth * 0.5f)) ?: continue // measured on the drawn curve (see onBody)
+            if (h.dist < bd) { bd = h.dist; bx = h.x; by = h.y; found = true }
         }
         return if (found) floatArrayOf(bx, by) else null
     }
@@ -2491,25 +2536,17 @@ object VectorMerge {
                 if (p.isEnd) joins.add(Join(strokes[p.si].id, pp.x, pp.y, strokes[endSi].id, e.x, e.y)) else moves.add(Move(p.si, p.pi, e.x, e.y))
                 used[i] = true; continue
             }
-            var bsi = -1; var bseg = 0; var bt = 0f; var bdd = Float.MAX_VALUE
+            // no end in reach: the nearest spot on the BODY of another line, on its drawn curve (a line with few points is far from its own control polygon)
+            var bsi = -1; var bh: BodyHit? = null
             for ((oi, o) in strokes.withIndex()) {
                 if (oi == p.si || o.fill != 0) continue
-                val src = if (o.isClosed && o.points.size >= 3) o.points + o.points.first() else o.points
-                val lim = max(tol, o.baseWidth * 0.5f)
-                for (k in 0 until src.size - 1) {
-                    val a = src[k]; val b = src[k + 1]
-                    val dx = b.x - a.x; val dy = b.y - a.y; val l2 = dx * dx + dy * dy
-                    if (l2 < 1e-9f) continue
-                    val t = (((pp.x - a.x) * dx + (pp.y - a.y) * dy) / l2).coerceIn(0f, 1f)
-                    val dd = hypot(pp.x - (a.x + dx * t), pp.y - (a.y + dy * t))
-                    if (dd <= lim && dd < bdd && t > 0.02f && t < 0.98f) { bdd = dd; bsi = oi; bseg = k; bt = t }
-                }
+                val h = onBody(o, pp.x, pp.y, max(tol, o.baseWidth * 0.5f)) ?: continue
+                if (bh == null || h.dist < bh.dist) { bh = h; bsi = oi }
             }
-            if (bsi >= 0) {
-                val o = strokes[bsi]; val src = if (o.isClosed && o.points.size >= 3) o.points + o.points.first() else o.points
-                val a = src[bseg]; val b = src[bseg + 1]
-                val q = VectorPoint(a.x + (b.x - a.x) * bt, a.y + (b.y - a.y) * bt, a.pressure + (b.pressure - a.pressure) * bt, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * bt)
-                moves.add(Move(p.si, p.pi, q.x, q.y)); ins.add(Ins(bsi, bseg, bt, q)); used[i] = true
+            if (bsi >= 0 && bh != null) {
+                moves.add(Move(p.si, p.pi, bh.x, bh.y))
+                if (bh.at < 0) ins.add(Ins(bsi, bh.seg, bh.u, VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)))
+                used[i] = true
             }
         }
         if (moves.isEmpty() && ins.isEmpty() && joins.isEmpty() && closes.isEmpty()) return null
@@ -2592,26 +2629,15 @@ object VectorMerge {
                 if ((end == 0 && !firstFree) || (end == 1 && !lastFree)) continue // only ends drawn now snap onto the body of another line
                 val pts = cur.points
                 val e = if (end == 0) pts.first() else pts.last()
-                var bo = -1; var bi = -1; var bt = 0f; var bd = Float.MAX_VALUE
+                var bo = -1; var bh: BodyHit? = null
                 for ((oi, o) in rest.withIndex()) {
-                    val src = if (o.isClosed && o.points.size >= 3) o.points + o.points.first() else o.points
-                    val lim = max(tol, o.baseWidth * 0.5f)
-                    for (i in 0 until src.size - 1) {
-                        val a = src[i]; val b = src[i + 1]
-                        val dx = b.x - a.x; val dy = b.y - a.y; val l2 = dx * dx + dy * dy
-                        if (l2 < 1e-9f) continue
-                        val t = (((e.x - a.x) * dx + (e.y - a.y) * dy) / l2).coerceIn(0f, 1f)
-                        val dd = hypot(e.x - (a.x + dx * t), e.y - (a.y + dy * t))
-                        if (dd <= lim && dd < bd && t > 0.02f && t < 0.98f) { bd = dd; bo = oi; bi = i; bt = t }
-                    }
+                    val h = onBody(o, e.x, e.y, max(tol, o.baseWidth * 0.5f)) ?: continue // on the drawn curve, not the control polygon (see onBody)
+                    if (bh == null || h.dist < bh.dist) { bh = h; bo = oi }
                 }
-                if (bo < 0) continue
+                if (bo < 0 || bh == null) continue
                 val o = rest[bo]
-                val src = if (o.isClosed && o.points.size >= 3) o.points + o.points.first() else o.points
-                val a = src[bi]; val b = src[bi + 1]
-                val q = VectorPoint(a.x + (b.x - a.x) * bt, a.y + (b.y - a.y) * bt, a.pressure + (b.pressure - a.pressure) * bt, a.elevationOffset + (b.elevationOffset - a.elevationOffset) * bt)
-                val ins = o.points.toMutableList(); ins.add((bi + 1).coerceAtMost(ins.size), q)
-                rest[bo] = o.copy(points = ins)
+                val q = VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)
+                if (bh.at < 0) { val ins = o.points.toMutableList(); ins.add((bh.seg + 1).coerceAtMost(ins.size), q); rest[bo] = o.copy(points = ins) }
                 val np = pts.toMutableList(); np[if (end == 0) 0 else np.size - 1] = q.copy(pressure = e.pressure)
                 cur = cur.copy(points = np)
                 changed = true

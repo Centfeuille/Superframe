@@ -284,7 +284,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                     }
                 }
 
-                if (pointsMode) VIconBtn(Icons.Filled.Link, enabled = has, tip = "Merge the selected points: two points join whatever the distance, one point close to another line snaps onto it (within the Merge radius)") {
+                VIconBtn(Icons.Filled.Link, enabled = has, tip = if (pointsMode) "Merge the selected points: two points join whatever the distance, one point close to another line snaps onto it (within the Merge radius)" else "Merge the selected lines: an end close to another line's end joins it, an end close to the body of a line snaps onto it (within the Merge radius)") {
                     if (sc != null) {
                         val tol = ed.vecMergeRadius / ed.vecDocZoom.coerceAtLeast(0.0001f)
                         val parts = sc.perCel.indices.map { c ->
@@ -295,7 +295,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                             ed.vecSel = emptySet()
                             applyScope(cut, sc, parts)
                             ed.vecSelCels = vecScope(cut, ed.refAll)?.cels ?: emptyList()
-                        } else android.widget.Toast.makeText(ctx, "Nothing to merge: select two points to merge them, or one point close to another line (within the Merge radius)", android.widget.Toast.LENGTH_SHORT).show()
+                        } else android.widget.Toast.makeText(ctx, if (pointsMode) "Nothing to merge: select two points to merge them, or one point close to another line (within the Merge radius)" else "Nothing to merge: no end of the selected lines is within the Merge radius of another line", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
 

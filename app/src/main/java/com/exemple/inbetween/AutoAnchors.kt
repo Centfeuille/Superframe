@@ -954,7 +954,57 @@ object AutoAnchors {
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
         val avoid = neighbourNumbers(layer, idx, ed)
-        return ensureEnds(refresh(strokes, avoid, sens, ids, referenceLines(layer, idx, nextFirst, ed), longest = true), avoid, ids) // the selection merge: the longest piece decides the new ends
+        val refs = referenceLines(layer, idx, nextFirst, ed)
+        // the selection merge: the longest piece decides the new ends
+        return reclaimFreed(cel.vectorStrokes(), ensureEnds(refresh(strokes, avoid, sens, ids, refs, longest = true), avoid, ids), refs, sens)
+    }
+
+    /**
+     * After lines were erased or deleted: a ghost line that the removed line was following (its end numbers were carried by lines of [before] and by no line of [after] any more) is free
+     * again, so the line that took the removed line's place follows it: the nearest line of [after] that follows no ghost line yet inherits the ghost's numbers by the usual trace rules
+     * (ends, then in-between numbers paired by position and bend, new numbers for apexes without a partner). Nothing happens when the edit freed no ghost line, when no unclaimed line
+     * lies near where the removed line was, or when the ghost cannot be followed. Returns [after] itself when nothing changed.
+     */
+    fun reclaimFreed(before: List<VectorStroke>, after: List<VectorStroke>, refs: List<VectorStroke>, sens: Float): List<VectorStroke> {
+        if (refs.isEmpty() || after.isEmpty()) return after
+        fun carries(s: VectorStroke, nums: Collection<Int>) = s.points.any { it.anchor in nums || it.endpointAliases.any { r -> r in nums } }
+        fun endNums(g: VectorStroke): List<Int> =
+            if (g.fill != 0 || g.points.size < 2 || (g.isClosed && !seamEnds(g))) emptyList()
+            else listOf(g.points.first().anchor, g.points.last().anchor).filter { it in 1..ANCHOR_MAX }.distinct()
+        fun segDist(px: Float, py: Float, pts: List<VectorPoint>): Float {
+            var best = Float.MAX_VALUE
+            for (i in 0 until pts.size - 1) {
+                val a = pts[i]; val b = pts[i + 1]
+                val dx = b.x - a.x; val dy = b.y - a.y; val l2 = dx * dx + dy * dy
+                val t = if (l2 < 1e-9f) 0f else (((px - a.x) * dx + (py - a.y) * dy) / l2).coerceIn(0f, 1f)
+                best = min(best, hypot(px - (a.x + dx * t), py - (a.y + dy * t)))
+            }
+            return if (pts.size == 1) hypot(px - pts[0].x, py - pts[0].y) else best
+        }
+        val allEnds = refs.flatMap { endNums(it) }.toSet()
+        val out = after.toMutableList()
+        var changed = false
+        for (g in refs) {
+            val nums = endNums(g)
+            if (nums.size < 2) continue
+            if (out.any { carries(it, nums) }) continue // still followed by a line
+            val carriers = before.filter { it.fill == 0 && it.points.isNotEmpty() && carries(it, nums) }
+            if (carriers.isEmpty()) continue // it was not followed before this edit: nothing was freed by it
+            val diag = carriers.maxOf { bboxDiag(it.points) }
+            var bi = -1; var bd = Float.MAX_VALUE
+            for ((i, c) in out.withIndex()) {
+                if (c.fill != 0 || c.points.size < 2 || (c.isClosed && !seamEnds(c)) || carries(c, allEnds)) continue
+                var sum = 0f
+                for (p in c.points) sum += carriers.minOf { segDist(p.x, p.y, it.points) }
+                val mean = sum / c.points.size
+                if (mean < bd) { bd = mean; bi = i }
+            }
+            if (bi < 0 || bd > 0.35f * diag + 10f) continue
+            val blocked = usedNumbers(out.filterIndexed { i, _ -> i != bi })
+            val r = inherit(out[bi], g, blocked, sens) ?: continue
+            out[bi] = r; changed = true
+        }
+        return if (changed) out else after
     }
 }
 

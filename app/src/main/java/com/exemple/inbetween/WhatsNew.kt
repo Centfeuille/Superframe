@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            102, "2026-11-27", "Merge onto the body of a line, anchors after an erase",
+            listOf(
+                "Merge: the end of a line now snaps onto the body of another line where the line is actually drawn. Before, only the control points were checked, so a smooth line with few points refused any merge except at its ends.",
+                "The Merge button is now also on the Selection bar with Points off: it merges the ends of the selected lines onto other lines.",
+                "After you erase or delete a line that was following a ghost line, the line that took its place now follows that ghost line: it inherits the numbers by position and bend, with new numbers where needed."
+            )
+        ),
+        ReleaseNote(
             101, "2026-11-27", "Live vector points, New frame, Select ghost line, timeline pinch, Pin Warp, pinch reset",
             listOf(
                 "Vector points and lines now follow the pen in real time while you drag, transform, warp or pin (they used to lag one step behind and stop short when the pen stopped).",

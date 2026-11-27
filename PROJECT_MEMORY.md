@@ -820,3 +820,7 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 ## 2026-11-27 (6) — Selection tool Cut, beside-bar, see CHANGELOG
 - `ed.vecSelCut` (Selection bar scissors) makes a pen stroke cut lines through the shared `vecCutUp`, which now gives new end anchors to the cut ends only (`AutoAnchors.ensureEnds` on the changed lines). With the interpolation preview up and the Selection tool picked, `VectorWidgetBar` shows the selection bar and the drag controls (`InterpDragContent`) side by side. No blue centreline with the Selection tool. Not compiled or run.
 
+## 2026-11-27 (8) — Merge on the drawn curve, Merge with Points off, ghost reclaim after erase (see CHANGELOG)
+- Body tests for Merge (`attach` T junction, `snapTarget`, `mergePoints`) use `VectorMerge.onBody` (distance to the DRAWN curve via `VectorTessellator.curveAt`, not to the control polygon; `BodyHit.at` >= 0 = the touch is on an existing control point, nothing is inserted; the ends of an open line are never a body hit). Any NEW body / snap test must use it: lines have few points, so their polygon is far from what is drawn. Crossings in `attach` still use the polygons.
+- The Selection bar Merge button (`mergePoints`) is shown with Points on and off.
+- `AutoAnchors.reclaimFreed(before, after, refs, sens)` runs at the end of `refreshFor` and `Canvas.kt` `vecRefreshAnchors`: a ghost line freed by an erase / delete is inherited (`inherit`) by the nearest line that follows no ghost line. Keep the two call sites in step. Not compiled or run.
