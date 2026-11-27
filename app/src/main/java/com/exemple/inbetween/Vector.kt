@@ -2623,55 +2623,24 @@ object VectorMerge {
         }
         // a line whose end comes back to its own start closes into a ring (also when it joined nothing else); a short scribble does not count
         if (cur.points.size >= 4 && d(cur.points.first(), cur.points.last()) <= tol && length(cur.points) > 4f * tol) { cur = closeOntoOwnStart(cur); changed = true; joined = true }
-        // T junctions: an end that lies on the body of another line joins it. The other (open) line is split at that spot and the new line becomes ONE stroke with the piece that
-        // continues most smoothly from it (like an end-to-end merge); the remaining piece stays a line of its own that starts on the same spot. A closed line, or one with too few
-        // points to split, only gets the shared vertex (the end snaps onto it).
+        // T junctions: an end that lies on the body of another line snaps onto it and the line gets the same vertex (the other line is never cut)
         if (!cur.isClosed) {
-            var pass = 0
-            while (pass++ < 3) {
-                var again = false
-                for (end in 0..1) {
-                    if ((end == 0 && !firstFree) || (end == 1 && !lastFree)) continue // only ends drawn now snap onto the body of another line
-                    val pts = cur.points
-                    val e = if (end == 0) pts.first() else pts.last()
-                    var bo = -1; var bh: BodyHit? = null
-                    for ((oi, o) in rest.withIndex()) {
-                        val h = onBody(o, e.x, e.y, max(tol, o.baseWidth * 0.5f)) ?: continue // on the drawn curve, not the control polygon (see onBody)
-                        if (bh == null || h.dist < bh.dist) { bh = h; bo = oi }
-                    }
-                    if (bo < 0 || bh == null) { if (end == 0) firstFree = false else lastFree = false; continue }
-                    val o = rest[bo]
-                    val q = VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)
-                    val tp = o.points.toMutableList()
-                    val k: Int
-                    if (bh.at < 0) { k = (bh.seg + 1).coerceAtMost(tp.size); tp.add(k, q) } else k = bh.at
-                    val splittable = !o.isClosed && o.fill == 0 && k >= 1 && k <= tp.size - 2 && pts.size >= 2
-                    if (!splittable) { // shared vertex only
-                        if (bh.at < 0) rest[bo] = o.copy(points = tp)
-                        val np = pts.toMutableList(); np[if (end == 0) 0 else np.size - 1] = q.copy(pressure = e.pressure)
-                        cur = cur.copy(points = np)
-                        if (end == 0) firstFree = false else lastFree = false
-                        changed = true
-                        continue
-                    }
-                    val sp = if (end == 1) pts else pts.reversed() // the end that lands on the line comes last
-                    val jp = tp[k]
-                    fun dir(a: VectorPoint, b: VectorPoint): FloatArray { val dx = b.x - a.x; val dy = b.y - a.y; val l = hypot(dx, dy); return if (l < 1e-6f) floatArrayOf(0f, 0f) else floatArrayOf(dx / l, dy / l) }
-                    val before = if (sp.size >= 2) sp[sp.size - 2] else sp.last()
-                    val dS = dir(before, jp); val dA = dir(jp, tp[k - 1]); val dB = dir(jp, tp[k + 1])
-                    val useA = dS[0] * dA[0] + dS[1] * dA[1] >= dS[0] * dB[0] + dS[1] * dB[1] // the piece that continues the new line most smoothly
-                    val joinedPts = if (useA) sp.dropLast(1) + tp.subList(0, k + 1).reversed() else sp.dropLast(1) + tp.subList(k, tp.size)
-                    val restPts = ArrayList(if (useA) tp.subList(k, tp.size) else tp.subList(0, k + 1))
-                    val ri = if (useA) 0 else restPts.size - 1
-                    restPts[ri] = restPts[ri].copy(anchor = 0, auto = false, endpoint = false, endpointAliases = emptyList()) // a new end of its own: it gets its own anchor
-                    rest[bo] = o.copy(id = newStrokeId(), points = restPts)
-                    val otherFree = if (end == 1) firstFree else lastFree // the new line's other end sits first in the joined line
-                    cur = o.copy(points = ArrayList(joinedPts)) // the older line's identity and look win
-                    firstFree = otherFree; lastFree = false
-                    changed = true; joined = true; again = true
-                    break
+            for (end in 0..1) {
+                if ((end == 0 && !firstFree) || (end == 1 && !lastFree)) continue // only ends drawn now snap onto the body of another line
+                val pts = cur.points
+                val e = if (end == 0) pts.first() else pts.last()
+                var bo = -1; var bh: BodyHit? = null
+                for ((oi, o) in rest.withIndex()) {
+                    val h = onBody(o, e.x, e.y, max(tol, o.baseWidth * 0.5f)) ?: continue // on the drawn curve, not the control polygon (see onBody)
+                    if (bh == null || h.dist < bh.dist) { bh = h; bo = oi }
                 }
-                if (!again) break
+                if (bo < 0 || bh == null) continue
+                val o = rest[bo]
+                val q = VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)
+                if (bh.at < 0) { val ins = o.points.toMutableList(); ins.add((bh.seg + 1).coerceAtMost(ins.size), q); rest[bo] = o.copy(points = ins) }
+                val np = pts.toMutableList(); np[if (end == 0) 0 else np.size - 1] = q.copy(pressure = e.pressure)
+                cur = cur.copy(points = np)
+                changed = true
             }
         }
         // crossings: where the body of this line crosses the body of another, both lines get the crossing as a shared vertex, so lines merge anywhere along them, not only at their ends
