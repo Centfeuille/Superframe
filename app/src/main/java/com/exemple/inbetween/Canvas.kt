@@ -1237,12 +1237,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         return rectBox(RectF(b[0] - 4f, b[1] - 4f, b[2] + 4f, b[3] + 4f))
     }
 
-    fun vecSelect(picked: Set<Long>, op: Int) {
-        var s = when (op) { 1 -> ed.vecSel + picked; 2 -> ed.vecSel - picked; else -> picked }
-        if (op != 2) vecEnsureScope()?.let { sc -> s = vecExpandLinked(sc, s) } // a selected line brings the lines linked to it by junctions
-        ed.vecSel = s
-    }
-
+    // Local function of DrawingCanvas: it must be declared BEFORE vecSelect, which calls it (Kotlin local functions cannot be used above their declaration).
     /** [sel] plus the whole lines linked (by junctions, through the whole tree) to its wholly selected lines, per cel of the scope. */
     fun vecExpandLinked(sc: VecScope, sel: Set<Long>): Set<Long> {
         var out = sel
@@ -1253,6 +1248,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             if (ex.size != lk.size) out = out + ex.map { vecKey(vecKeyStroke(it) + sc.offsets[c], vecKeyPoint(it)) }
         }
         return out
+    }
+
+    fun vecSelect(picked: Set<Long>, op: Int) {
+        var s = when (op) { 1 -> ed.vecSel + picked; 2 -> ed.vecSel - picked; else -> picked }
+        if (op != 2) vecEnsureScope()?.let { sc -> s = vecExpandLinked(sc, s) } // a selected line brings the lines linked to it by junctions
+        ed.vecSel = s
     }
 
     /** Selection tool on vector layers: handle drag of the selection box, else start a selection (rectangle / lasso / polygon / wand = whole stroke). */

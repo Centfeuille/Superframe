@@ -1,3 +1,12 @@
+## 2026-11-27 (12) — Build fix: `vecExpandLinked` declared before `vecSelect`
+- AI model: Claude
+- Category: Fixed (compile error; no behavior change, no format change)
+- Build log (GitHub Actions run, step "Build signed release APK", task `:app:compileReleaseKotlin`): `Canvas.kt:1242:56 Unresolved reference 'vecExpandLinked'.` It was the only error.
+- Cause: `vecSelect` and `vecExpandLinked` (entry 11) are local functions of the `DrawingCanvas` composable. A Kotlin local function cannot be called above its declaration, and `vecExpandLinked` was declared three lines below `vecSelect`.
+- Fix: in `Canvas.kt` the declaration of `vecExpandLinked` now stands directly above `vecSelect`; the bodies are unchanged (a pure move, plus a one-line comment). Protected infrastructure (workflow, Gradle, signing) untouched: the failure was in source code only.
+- Validation: read the build log and the code; the diff is the move only. Not compiled here (no Android SDK / Gradle), not run. The next CI build is the real check; entry 11's tablet follow-up is still open.
+- Rule for later work: in `DrawingCanvas` (Canvas.kt) a new local `fun` must be placed above every function that calls it.
+
 ## 2026-11-27 (11) — Linked lines are selected together; the join after an erase keeps the outer end numbers
 - AI model: Claude
 - Category: Fixed / Changed (junction links; no format change)
