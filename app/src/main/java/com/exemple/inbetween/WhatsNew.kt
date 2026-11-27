@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            97, "2026-11-27", "New Reshape tool: Shift, Smoothen and Distort",
+            listOf(
+                "Shift, Smoothen and Distort are now a tool of their own (the hand icon in the tool column and in the fullscreen tool wheel), no longer buttons on the Selection tool's vector bar. Shift is the default; tap the tool again to pick Smoothen or Distort and to set the brush Size and Strength.",
+                "Reshape works on vector lines. Drawing (raster) layers are not supported yet: the tool shows a message there."
+            )
+        ),
+        ReleaseNote(
             96, "2026-11-27", "Merging with the Selection tool keeps the ghost line in step",
             listOf(
                 "Merging or deleting points with the Selection tool now renumbers anchors the same way the pen merge does: only lines whose end really moved are touched, every open line keeps an anchor on each end, and the reference frames you picked in the timeline are the ones followed.",

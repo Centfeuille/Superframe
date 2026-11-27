@@ -293,6 +293,7 @@ fun ToolPanel(ed: Editor, cut: Cut, panel: Int, setPanel: (Int) -> Unit) {
             ToolBtn(ed.tool == 3, "Fill (tap again for options)", { tap(3) }) { Icon(Icons.Filled.FormatColorFill, null, tint = fg(3)) }
             ToolBtn(ed.tool == 4, "Line / shapes (tap again for options)", { tap(4) }) { Icon(Icons.Filled.HorizontalRule, null, tint = fg(4)) }
             ToolBtn(ed.tool == 5, "Eyedropper / color picker", { tap(5) }) { Text("◉", color = fg(5), fontSize = 22.sp) }
+            ToolBtn(ed.tool == 6, "Reshape: shift, smoothen or distort lines (tap again for the sub-tools, size and strength)", { tap(6) }) { Text("✋", color = fg(6), fontSize = 22.sp) }
             Tip("Brush size and stabilization") {
                 Column(Modifier.clip(RoundedCornerShape(10.dp)).clickable { setPanel(if (panel == 2) 0 else 2) }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size((ed.brush.size.coerceIn(4f, 30f)).dp).clip(CircleShape).background(LightGrey))
@@ -732,7 +733,7 @@ private fun PicRow(content: @Composable RowScope.() -> Unit) =
 /** Options of the selected tool. Brush / eraser: preset list (previews), then the chosen preset's detail page. */
 @Composable
 fun OptionsPanel(ed: Editor, detail: Boolean, setDetail: (Boolean) -> Unit) {
-    val brushDetail = detail && ed.tool !in 2..4
+    val brushDetail = detail && ed.tool !in 2..4 && ed.tool != 6
     val outerScroll = rememberScrollState()
     Column(
         Modifier.width(290.dp).clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
@@ -773,6 +774,18 @@ fun OptionsPanel(ed: Editor, detail: Boolean, setDetail: (Boolean) -> Unit) {
                     FilterChip(ed.lineShape == i, { ed.lineShape = i }, { Text(n) }, Modifier.fillMaxWidth())
                 }
                 Text("Uses the selected brush and its pressure curves. Circle: drag a corner to the opposite corner. Ellipse: drag the major axis, lift, move the pen to set the minor axis, tap to apply. Bezier curve: drag the end points, lift, move the pen to place the first handle and tap, then place the second handle and tap to apply.", fontSize = 12.sp)
+            }
+            6 -> {
+                Text("Reshape", fontSize = 14.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("Shift", "Smoothen", "Distort").forEachIndexed { i, n ->
+                        FilterChip(ed.reshapeMode == i, { ed.reshapeMode = i }, { Text(n, fontSize = 11.sp, maxLines = 1) }, Modifier.weight(1f))
+                    }
+                }
+                NumSlider("Size (radius, px)", ed.vecBrushRadius.roundToInt(), 4, 250) { ed.vecBrushRadius = it.toFloat() }
+                NumSlider("Strength (%)", (ed.vecBrushStrength * 100f).roundToInt(), 2, 100) { ed.vecBrushStrength = it / 100f }
+                Text("Shift pushes the points under the pen along with it, Smoothen relaxes a wobbly line, Distort bends it with a small wobble. The effect fades out smoothly toward the edge of the circle. Works on vector lines (the visible unlocked vector layers when \"All visible drawing layers\" is on, otherwise the active layer).", fontSize = 12.sp, color = Color.LightGray)
+                FilterChip(ed.refAll, { ed.refAll = !ed.refAll }, { Text("All visible drawing layers") }, Modifier.fillMaxWidth())
             }
             else -> if (!detail) BrushList(ed, ed.tool == 1) { setDetail(true) } else BrushDetail(ed, ed.tool == 1, { setDetail(false) }, Modifier.weight(1f, fill = false))
         }

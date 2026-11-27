@@ -1131,7 +1131,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val delta = d - vecBrushLast
         vecBrushLast = d
         vecBrushPhase++
-        val out = VectorBrush.apply(cur, ed.vecBrush, d.x, d.y, ed.vecBrushRadius, ed.vecBrushStrength, delta.x, delta.y, vecBrushPhase)
+        val out = VectorBrush.apply(cur, ed.reshapeMode + 1, d.x, d.y, ed.vecBrushRadius, ed.vecBrushStrength, delta.x, delta.y, vecBrushPhase)
         if (out === cur) return
         if (vecLives == null && !vecBeginLive(sc)) return
         vecBrushCur = out
@@ -1143,7 +1143,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         st.kind = 24; vecSc = sc; vecBrushCur = sc.strokes; vecBrushLast = d; vecBrushPhase = 0
         vecLives = null; vecOrig = null; vecBefore = null
         ed.vecSel = emptySet() // point numbers change when the brush adds points
-        if (ed.vecBrush != 1) vecBrushStep(d)
+        if (ed.reshapeMode != 0) vecBrushStep(d)
     }
 
     fun vecBrushUp() {
@@ -1614,6 +1614,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             st.kind = 0
             return
         }
+        if (tl == 6) { // Reshape tool: vector lines only for now
+            if (!l.vector) { android.widget.Toast.makeText(vecCtx, "Reshape works on vector layers for now; drawing layers are not supported yet", android.widget.Toast.LENGTH_SHORT).show(); return }
+            if (l.locked || !l.visible) return
+            vecBrushDown(d)
+            return
+        }
         if (l.vector) { // vector layer: the Brush tool draws vector strokes; point edit and cutter work on the strokes already there
             if (tl != 0 && tl != 1 && tl != 2 && tl != 3 && tl != 4) { android.widget.Toast.makeText(vecCtx, "Vector layers: Brush (draw, edit points, cut), Eraser, Fill, Selection and Line / shapes", android.widget.Toast.LENGTH_SHORT).show(); return }
             if (l.locked || !l.visible) return
@@ -1623,7 +1629,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     return
                 }
                 if (ed.vecDisplace) { vecDisplaceDown(l, d); return } // Displace: tap a selected line to add a joint, drag a joint to warp the selection
-                if (ed.vecPoints) { if (ed.vecBrush != 0) vecBrushDown(d) else vecEditDown(l, d) } else vecSelectDown(l, ev, d)
+                if (ed.vecPoints) vecEditDown(l, d) else vecSelectDown(l, ev, d)
                 return
             }
             if (tl == 1) { st.kind = 25; vecCutPath = listOf(d); return } // eraser: deletes a line up to its crossings when the pen lifts
@@ -2551,7 +2557,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if (vecCutPath.size > 1) { drawPoly(vecCutPath, false, Color.White, 3.5f * px1); drawPoly(vecCutPath, false, Color(0xFFEF4444), 2f * px1) }
             }
             if (ed.tool == 1 && vecCutPath.size > 1 && cut.layer?.vector == true) { drawPoly(vecCutPath, false, Color.White, 3.5f * px1); drawPoly(vecCutPath, false, Color(0xFFEF4444), 2f * px1) } // vector eraser path
-            if (vecLayerNow != null && ed.tool == 2 && ed.vecPoints && ed.vecBrush != 0) hover?.let { h -> // point-edit brush circle
+            if (ed.tool == 6 && !cut.playing) hover?.let { h -> // Reshape tool: the brush circle
                 val c = toDoc(h.x, h.y)
                 drawCircle(Color.White.copy(alpha = 0.9f), ed.vecBrushRadius, c, style = Stroke(2.5f * px1))
                 drawCircle(Color(0xFFFF9800), ed.vecBrushRadius, c, style = Stroke(1.2f * px1))

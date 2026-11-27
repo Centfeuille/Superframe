@@ -1,3 +1,14 @@
+## 2026-11-27 (3) — Reshape tool (Shift / Smoothen / Distort) as a tool of its own
+- AI model: Claude
+- Category: Changed / Added (tools, vector layers; no `.inb` format change)
+- Request: make the vector point brushes Shift, Smoothen and Distort a proper tool with Shift as the default and the others as sub-tools, with brush size and strength in its options, working on vector and drawing layers.
+- New tool id 6 ("Reshape"). `Editor.kt`: `vecBrush` (0 off / 1 / 2 / 3) replaced by `reshapeMode` (0 Shift default, 1 Smoothen, 2 Distort); `vecBrushRadius` / `vecBrushStrength` kept and now belong to the tool. `Panels.kt`: tool-column button (tap again opens the options) and an `OptionsPanel` branch with the three sub-tool chips, Size (radius, 4..250 px), Strength (2..100 %) and the "All visible drawing layers" scope toggle. `MainActivity.kt`: the fullscreen radial wheel has seven slots on a circle.
+- `VectorUi.kt`: the three brush buttons, the Size / Strength card and the `vecBrush` reset in Displace are gone from the Selection tool's vector bar. `Canvas.kt`: pen-down with tool 6 on a visible unlocked vector layer starts the existing brush session (`vecBrushDown`, pen kind 24, `VectorBrush.apply` with mode `reshapeMode + 1`); the Selection tool's Points mode only picks / drags points now; the brush circle is drawn for tool 6.
+- NOT done: drawing (raster) layers. Pen-down on a raster layer with the Reshape tool shows a message and does nothing. A raster version needs its own design (see follow-up). No keyboard shortcut was added.
+- `WhatsNew.kt` note 97, `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected files untouched; `.inb` format unchanged.
+- Validation: source review of every touched call site and a search for leftover `vecBrush` references only. Not compiled, not run on a device.
+- Follow-up: raster Shift / Distort could reuse the region-warp ink (kind 4: selection runs + mesh, replayed by `TileSet.drawMeshTiles`) with a live mesh overlay and a trimmed mesh committed at pen-up, so no format change; raster Smoothen has no equivalent replayable op and would need a new ink kind (format bump) or a different definition. Decide before building.
+
 ## 2026-11-27 (2) — Selection-tool merge / delete updates the ghost line consistently
 - AI model: Claude
 - Category: Fixed (vector anchors / line ghost; no `.inb` format change)

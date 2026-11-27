@@ -708,8 +708,8 @@ private fun BoxScope.TransformBars(ed: Editor, cut: Cut) {
 /** Fullscreen radial tool selector. Drag from the floating puck out of its circle and release toward a tool. */
 @Composable
 private fun BoxScope.FullscreenRadialTools(ed: Editor, setPanel: (Int) -> Unit) {
-    val tools = listOf(0 to "Brush", 1 to "Eraser", 2 to "Select", 3 to "Fill", 4 to "Shapes", 5 to "Eyedropper")
-    val centers = listOf(Offset(180f, 45f), Offset(280f, 95f), Offset(280f, 215f), Offset(180f, 265f), Offset(80f, 215f), Offset(80f, 95f))
+    val tools = listOf(0 to "Brush", 1 to "Eraser", 2 to "Select", 3 to "Fill", 4 to "Shapes", 5 to "Eyedropper", 6 to "Reshape")
+    val centers = List(7) { k -> val a = (-90.0 + k * 360.0 / 7.0) * PI / 180.0; Offset(180f + 112f * kotlin.math.cos(a).toFloat(), 155f + 112f * kotlin.math.sin(a).toFloat()) }
     val center = Offset(180f, 155f)
     var armed by remember { mutableStateOf(false) }
     var dragVector by remember { mutableStateOf(Offset.Zero) }
@@ -729,7 +729,7 @@ private fun BoxScope.FullscreenRadialTools(ed: Editor, setPanel: (Int) -> Unit) 
                     if (ed.tool == item.first) setPanel(1) else { ed.tool = item.first; setPanel(0) }
                 }, contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Text(listOf("✎", "⌫", "▧", "◉", "／", "⌕")[i], fontSize = 18.sp, color = Color.White)
+                    Text(listOf("✎", "⌫", "▧", "◉", "／", "⌕", "✋")[i], fontSize = 18.sp, color = Color.White)
                     Text(item.second, fontSize = 8.sp, color = Color.White)
                 }
             }

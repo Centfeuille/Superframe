@@ -795,7 +795,7 @@ class Editor : ViewModel() {
     val library = CutLibrary() // main-menu folders / layout (library.json)
     var open by mutableStateOf<Cut?>(null)
 
-    /** 0 brush, 1 eraser, 2 select, 3 fill, 4 line, 5 eyedropper */
+    /** 0 brush, 1 eraser, 2 select, 3 fill, 4 line, 5 eyedropper, 6 reshape (Shift / Smoothen / Distort) */
     private var storedTool by mutableIntStateOf(0)
     /** Choosing the Brush tool again (from another tool) means drawing: the vector Cutter / Interpolation drag modes end. */
     var tool: Int
@@ -1068,9 +1068,9 @@ class Editor : ViewModel() {
     var vecGhostNext by mutableStateOf(false)           // the ghost comes from the next keyframe instead of the previous one
     var vecGhostPin by mutableStateOf<String?>(null)    // id of the ghost line that stays shown (it is not left when a line is drawn over it, so it can be drawn in several strokes); null = the first untraced line
     var vecGhostPinKey by mutableLongStateOf(-1L)       // layer + keyframe the pin belongs to (a pin is ignored on any other keyframe)
-    var vecBrush by mutableIntStateOf(0)                // point edit brush: 0 off, 1 Shift, 2 Smoothen, 3 Distort
-    var vecBrushRadius by mutableFloatStateOf(40f)      // point edit brush radius, document px
-    var vecBrushStrength by mutableFloatStateOf(0.5f)   // point edit brush strength 0..1
+    var reshapeMode by mutableIntStateOf(0)             // Reshape tool (tool 6) sub-tool: 0 Shift (default), 1 Smoothen, 2 Distort
+    var vecBrushRadius by mutableFloatStateOf(40f)      // Reshape tool size (radius), document px
+    var vecBrushStrength by mutableFloatStateOf(0.5f)   // Reshape tool strength 0..1
     var vecFillLive by mutableStateOf(true)             // Fill tool on a vector layer: live fills (recomputable) instead of baked shapes
     var vecFillAcross by mutableStateOf(false)          // ... and the lines of every visible drawing layer count as walls
     var vecInkOpen by mutableStateOf(false)             // the Line weight bar (curvature, light and taper weight of vector lines)

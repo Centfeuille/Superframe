@@ -803,3 +803,6 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 ## 2026-11-27 (2) — Selection merge / delete and the ghost
 - `AutoAnchors.refreshFor(layer, cel, strokes, sens, nextFirst, ed)` is the selection-bar counterpart of `Canvas.kt` `vecRefreshAnchors`: same changed-lines-only ids, `ensureEnds`, and `referenceLines(..., ed)` (picked reference frames). Keep the two in step. `ghostData` (Canvas.kt) must be keyed on the current cel object / `vecRev` / stroke count, because edits made outside `DrawingCanvas` (the selection bar) do not bump `tick`. Not compiled or run.
+
+## 2026-11-27 (3) — Reshape tool
+- Tool id 6 = Reshape (tool column, fullscreen wheel with seven slots). Sub-tool `Editor.reshapeMode` (0 Shift default, 1 Smoothen, 2 Distort); size = `vecBrushRadius` (document px), strength = `vecBrushStrength`; both set in the tool's options panel (`OptionsPanel` branch 6). It runs the vector point-brush session (`Canvas.kt` `vecBrushDown` / `vecBrushStep` / `vecBrushUp`, pen kind 24, `VectorBrush.apply(mode = reshapeMode + 1)`); this SUPERSEDES the older notes about `Editor.vecBrush` and the brush buttons on the Selection tool's vector bar. Vector layers only: on a drawing layer the tool shows a message. Not compiled or run.

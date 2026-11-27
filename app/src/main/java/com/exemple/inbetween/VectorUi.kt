@@ -152,24 +152,9 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val sel = ed.vecSel; val selCels = ed.vecSelCels
     val sc = vecScope(cut, ed.refAll)
     val has = sc != null && sc.sameCels(selCels) && sel.isNotEmpty()
-    val brushRow = pointsMode
-    val brushMode = ed.vecBrush
     // Brush / Merge sliders flush with the left edge of the canvas, Auto anchors flush with the right edge, the button bar in the middle
     Box(modifier.fillMaxWidth()) {
     Column(Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    if (brushRow && brushMode != 0) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
-        Text("${listOf("", "Shift", "Smoothen", "Distort")[brushMode.coerceIn(1, 3)]} brush", fontSize = 11.sp, color = Color(0xFFB8B8C4))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Radius", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
-            Slider(value = ed.vecBrushRadius, onValueChange = { ed.vecBrushRadius = it.roundToInt().toFloat() }, valueRange = 4f..250f, modifier = Modifier.weight(1f).height(32.dp))
-            Text("${ed.vecBrushRadius.roundToInt()} px", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Strength", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
-            Slider(value = ed.vecBrushStrength, onValueChange = { ed.vecBrushStrength = it }, valueRange = 0.02f..1f, modifier = Modifier.weight(1f).height(32.dp))
-            Text("${(ed.vecBrushStrength * 100).roundToInt()}%", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
-        }
-    }
     if (((drawBar || lineBar) && ed.vecMerge) || (pointBar && pointsMode)) Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 4.dp).width(250.dp)) {
         Text("Merge", fontSize = 11.sp, color = Color(0xFFB8B8C4))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -282,13 +267,8 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         else -> "Points view: all points are shown (tap to show only the anchor points)"
                     }) { ed.vecPointView = (ed.vecPointView + 1) % 3 }
                 VIconBtn(Icons.Filled.Layers, on = ed.refAll, tip = if (ed.refAll) "All layers: on. The selection works on every visible, unlocked vector layer" else "All layers: off. The selection works on the active vector layer only") { ed.refAll = !ed.refAll }
-                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1; if (ed.vecDisplace) ed.vecBrush = 0 }
+                BarChip("Displace", ed.vecDisplace) { ed.vecDisplace = !ed.vecDisplace; ed.vecDisplaceJoints = emptyList(); ed.vecDisplaceSelected = -1 }
                 VIconBtn(Icons.Filled.LineWeight, on = ed.vecLockWeight, tip = if (ed.vecLockWeight) "Lock weight: on. Transforming keeps the line weight" else "Lock weight: off. Transforming scales the line weight too") { ed.vecLockWeight = !ed.vecLockWeight }
-                if (pointsMode) {
-                    VIconBtn(Icons.Filled.PanTool, on = brushMode == 1, tip = "Shift brush: push points along with the pen") { ed.vecBrush = if (brushMode == 1) 0 else 1 }
-                    VIconBtn(Icons.Filled.Gesture, on = brushMode == 2, tip = "Smoothen brush: smooth the points under the pen") { ed.vecBrush = if (brushMode == 2) 0 else 2 }
-                    VIconBtn(Icons.Filled.Transform, on = brushMode == 3, tip = "Distort brush: bend the points under the pen") { ed.vecBrush = if (brushMode == 3) 0 else 3 }
-                }
                 if (pointsMode) {
                     IconBtn(Icons.Filled.SwapVert, on = ed.vecRaise, tip = "Raise / lower points: drag up or down") { ed.vecRaise = !ed.vecRaise }
                     VIconBtn(Icons.Filled.Adjust, on = ed.vecFalloff >= 1f, tip = if (ed.vecFalloff < 1f) "Proportional falloff: off (tap to set the radius)" else "Proportional falloff: ${ed.vecFalloff.roundToInt()} px (tap to change)") { falloffOpen = true }
