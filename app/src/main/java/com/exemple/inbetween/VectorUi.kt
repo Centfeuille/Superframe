@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.SelectAll
@@ -244,6 +245,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
                         val done = l != null && LineGhost.unclaim(ed, cut, l)
                         android.widget.Toast.makeText(ctx, if (done) "Ghost line unclaimed" else "Nothing claims this ghost line", android.widget.Toast.LENGTH_SHORT).show()
                     }
+                    VIconBtn(Icons.Filled.TouchApp, on = ed.vecGhostPick, tip = if (ed.vecGhostPick) "Select ghost line: on. Tap the ghost line you want with the pen (tap here again to cancel)" else "Select ghost line: tap it on the canvas with the pen and it becomes the ghost line that is shown and traced, traced ones included") { ed.vecGhostPick = !ed.vecGhostPick }
                 }
                 VIconBtn(Icons.Filled.Tune, on = ed.vecAnchorOpen, tip = "Auto anchor options: how gentle a turn counts as a curve tip") { ed.vecAnchorOpen = !ed.vecAnchorOpen }
             } else if (eraseBar) {

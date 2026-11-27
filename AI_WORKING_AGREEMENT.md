@@ -70,6 +70,17 @@ When working on the animation editor:
 
 Changes to one interaction must not unintentionally break another.
 
+Vector line behavior (applies to every present and future feature that moves, warps, transforms, creates, merges, cuts or otherwise changes vector line geometry, e.g. Pin Warp, Warp, Displace, Reshape, Merge, Cut, the Cutter, interpolation and anything new):
+
+- Vector lines are smooth curves through as FEW points as their shape needs. A feature must never leave a line with a dense run of points that merely follow the geometry it produced, and must never bend a line into straight segments between sparse points. Where the shape bends the feature adds points (densify first if the shape changes between the existing points), and afterwards fits the line back with the same curve-aware fitter the Brush uses ("VectorSimplify.fit" / "fitIndices", tolerance "WARP_FIT_EPS" for edits of existing lines), so points sit where the curve bends and the line is a smooth curve between them. Do not write a second, different simplifier.
+- Points that carry meaning are never dropped, moved off their line or renumbered by that fitting: numbered anchors, structural end points ("endpoint" and end aliases) and hidden points. The two ends of an open line always keep an anchor; a new end made by a cut, merge or erase gets a new end anchor, and the ends that were not touched keep theirs (see "AutoAnchors").
+- What the person sees while dragging or previewing is what Apply keeps: use the same thinning for the live preview and the committed result, and rebuild the point overlay from the strokes just applied so the points follow in real time.
+- Selections of single points (Points mode) edit exactly those points and keep the point count (selection keys are point indices); the add-and-fit behavior above is for whole lines. Closed lines follow the same rules (fit as a ring: keep the seam point and its two neighbours).
+- Merging lines: the longest line's end anchors become the new ends in the selection merge; the pen merge has its own behavior that works and must not be changed by selection-merge work.
+- Every such change is one undo step and keeps ".inb" compatibility.
+
+When a new vector feature is added, say in the changelog how it follows these rules (or why a rule does not apply).
+
 5. Build failure procedure
 
 When a build fails:

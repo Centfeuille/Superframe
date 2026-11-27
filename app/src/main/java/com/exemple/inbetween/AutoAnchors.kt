@@ -1,5 +1,6 @@
 package com.example.inbetween
 
+import androidx.compose.ui.geometry.Offset
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
@@ -995,6 +996,27 @@ object LineGhost {
         if (r.points.isEmpty()) return false
         if (r.isClosed && !AutoAnchors.seamEnds(r)) return r.points.any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } } // a closed line that kept its two ends counts by its ends, like an open one
         return listOf(r.points.first(), r.points.last()).any { p -> (p.anchor > 0 && p.anchor in nums) || p.endpointAliases.any { it in nums } }
+    }
+
+    /** "Select ghost line": pins the ghost line (traced ones included) nearest to document point [p] within [radius] as the shown one. False when there is none that close. */
+    fun pick(ed: Editor, cut: Cut, layer: Layer, p: Offset, radius: Float): Boolean {
+        val idx = layer.indexAt(cut.time)
+        val ref = reference(layer, idx, ed.vecGhostNext, ed) ?: return false
+        var best: VectorStroke? = null; var bestD = radius
+        for (g in lines(ref)) {
+            val pts = if (g.isClosed && g.points.size > 2) g.points + g.points.first() else g.points
+            for (i in 0 until pts.size - 1) {
+                val a = pts[i]; val b = pts[i + 1]
+                val vx = b.x - a.x; val vy = b.y - a.y
+                val len2 = vx * vx + vy * vy
+                val t = if (len2 < 1e-9f) 0f else (((p.x - a.x) * vx + (p.y - a.y) * vy) / len2).coerceIn(0f, 1f)
+                val d = hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t))
+                if (d < bestD) { bestD = d; best = g }
+            }
+        }
+        val g = best ?: return false
+        ed.vecGhostPin = g.id; ed.vecGhostPinKey = key(layer, idx)
+        return true
     }
 
     /** The numbers that make the ghost line [r] count as traced when a line of the current keyframe carries one of them (see [isClaimed]): its end numbers and their aliases (a closed ghost: all its numbers). */

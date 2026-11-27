@@ -553,7 +553,26 @@ class Cut(name: String, fps: Int, w: Int, h: Int, dpi: Int, val id: Long = Syste
     }
 
     // ----- frames of the active layer -----
-    fun addFrame() { val l = frameLayer ?: return; record { ensureCel(l); val i = l.indexAt(time); l.cels.add(i + 1, Cel(1)); time = l.startOf(i + 1); selAll = -1 } }
+    /**
+     * New frame: an empty frame right AFTER the playhead, and the playhead moves onto it. When the playhead is inside a hold (a frame that lasts several frames) and not on its last
+     * frame, the hold is split after the playhead: the part before keeps the drawing, the new frame comes next, and the rest of the hold continues after it as a linked copy of the
+     * same drawing, so everything after is only pushed one frame later (it used to be put after the whole hold, far from the playhead).
+     */
+    fun addFrame() {
+        val l = frameLayer ?: return
+        record {
+            ensureCel(l)
+            val i = l.indexAt(time)
+            val c = l.cels[i]
+            val k = time - l.startOf(i)
+            if (k in 0 until c.dur - 1) {
+                val rest = c.cloneLinked(); rest.dur = c.dur - k - 1
+                c.dur = k + 1
+                l.cels.add(i + 1, Cel(1)); l.cels.add(i + 2, rest)
+            } else l.cels.add(i + 1, Cel(1))
+            time = l.startOf(i + 1); selAll = -1
+        }
+    }
     /** Copy frame: regular (unique) copies of the [selected] frames, in order, placed after the last of them (three-dot "Select all": every frame). With nothing selected: the current frame. */
     fun duplicateFrame(selected: List<Cel> = emptyList()) {
         val l = frameLayer ?: return
@@ -1048,6 +1067,7 @@ class Editor : ViewModel() {
     fun resetPlace() { vecFixedAll.clear(); vecFixedLines.clear(); vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
     fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecPlaceSteps.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
         InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps, vecFixedAll, vecFixedLines) else null
+    var vecGhostPick by mutableStateOf(false)           // "Select ghost line": the next pen tap on a vector layer picks the ghost line nearest to it (it is pinned as the shown one)
     var vecSelCut by mutableStateOf(false)              // selection tool "Cut": a stroke across lines slices them (new end anchors where cut)
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between
     var vecDisplaceJoints by mutableStateOf<List<VectorGuideJoint>>(emptyList())

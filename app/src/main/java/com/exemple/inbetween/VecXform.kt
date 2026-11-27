@@ -144,7 +144,7 @@ private fun densified(s: VectorStroke): List<VectorPoint> {
 /**
  * Carries the [sel]ected points of [strokes] (keys as in [VectorEdit]) through [d]. A line whose points are all selected also scales its width with the
  * matrix (unless [lockWeight]) and, when [d] has a mesh, is densified first so that it bends smoothly; with [thin] it is fitted back to few points afterwards
- * (curve-aware, 0.5 px; anchors, ends and hidden points are kept), otherwise the dense line is kept (for a live preview). Lines with only some points
+ * (curve-aware, 0.5 px; anchors, ends and hidden points are kept; closed lines too), otherwise the dense line is kept. Lines with only some points
  * selected move just those points. Untouched lines keep their instance.
  */
 fun vecDeform(strokes: List<VectorStroke>, sel: Set<Long>, d: VecDeform, lockWeight: Boolean, thin: Boolean): List<VectorStroke> {
@@ -166,11 +166,20 @@ fun vecDeform(strokes: List<VectorStroke>, sel: Set<Long>, d: VecDeform, lockWei
         val mapped = densified(s).map { p -> d.map(p.x, p.y, xy); p.copy(x = xy[0], y = xy[1], elevationOffset = p.elevationOffset * area) }
         val closed = s.isClosed && mapped.size > 2
         var out = mapped
-        if (thin && !closed) {
+        if (thin) {
+            // The warped line is fitted back to as few points as its shape needs (curve-aware: the points sit where the curve bends and the line is a smooth curve between them).
+            // Numbered anchors, structural ends and hidden points are never dropped.
             val protect = HashSet<Int>()
-            for (i in mapped.indices) { val q = mapped[i]; if (i == 0 || i == mapped.lastIndex || q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.hidden) protect.add(i) }
-            val keep = VectorSimplify.fitIndices(mapped, WARP_FIT_EPS, s.baseWidth * area, protect)
-            out = keep.map { mapped[it] }
+            for (i in mapped.indices) { val q = mapped[i]; if ((!closed && (i == 0 || i == mapped.lastIndex)) || q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.hidden) protect.add(i) }
+            if (!closed) out = VectorSimplify.fitIndices(mapped, WARP_FIT_EPS, s.baseWidth * area, protect).map { mapped[it] }
+            else {
+                // a ring is fitted as an open run that starts and ends at its first point; that point and its two neighbours stay so the seam keeps its tangent
+                val n = mapped.size
+                val ring = mapped + mapped.first()
+                protect.add(0); protect.add(n); protect.add(1); protect.add(n - 1)
+                val keep = VectorSimplify.fitIndices(ring, WARP_FIT_EPS, s.baseWidth * area, protect).filter { it < n }
+                if (keep.size >= 3) out = keep.map { mapped[it] }
+            }
         }
         s.copy(points = out, baseWidth = s.baseWidth * area)
     }

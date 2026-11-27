@@ -91,6 +91,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.ui.platform.LocalContext
@@ -1850,6 +1852,8 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
     val cell = with(dens) { cellPxUi.toDp() }
     val rowPxUi = with(dens) { rowH.toPx() }
     val cellPxNow by rememberUpdatedState(cellPxUi)
+    /** The whole-pixel cell width the timeline uses at a zoom [scale] (the same rule as [cellPxUi]). */
+    fun pxForScale(scale: Float): Float = minOf(with(dens) { (38f * scale).dp.toPx() }.roundToInt().coerceAtLeast(1).toFloat(), maxTimelineWidthPx / (cut.total().toLong() + cut.tail().toLong()).coerceAtLeast(1L)).roundToInt().coerceAtLeast(1).toFloat()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val its = if (mode == 2) miniItems(cut) else items(cut)
@@ -1940,6 +1944,19 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
     }
 
     var trackW by remember { mutableIntStateOf(0) }
+    var pinchRootX by remember { mutableFloatStateOf(0f) }   // window x of the whole timeline panel (the pinch positions are relative to it)
+    var pinchTrackX by remember { mutableFloatStateOf(0f) }  // window x of the frame track (after the layer names): the scrolled content starts there
+    var pendingScroll by remember { mutableStateOf<Float?>(null) } // the scroll position a pinch wants; applied once the new cell width has been laid out
+    LaunchedEffect(Unit) {
+        snapshotFlow { pendingScroll }.collect { want ->
+            if (want != null) {
+                withFrameNanos { }; withFrameNanos { }
+                val t = pendingScroll ?: return@collect
+                hs.scrollTo(t.roundToInt().coerceIn(0, hs.maxValue))
+                if (pendingScroll == t) pendingScroll = null
+            }
+        }
+    }
     var handledPan by remember { mutableIntStateOf(ed.tlPanRequest) }
     var handledFit by remember { mutableIntStateOf(ed.tlFitRequest) }
     LaunchedEffect(ed.tlPanRequest) {
@@ -2018,7 +2035,7 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
     }
 
     Column(
-        modifier.background(Color(0xFF26262C)).pointerInput(Unit) {
+        modifier.background(Color(0xFF26262C)).onGloballyPositioned { pinchRootX = it.positionInWindow().x }.pointerInput(Unit) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 do {
@@ -2033,22 +2050,21 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
                         val newScale = (oldScale * zoom).coerceIn(0.008f, 2.5f)
                         val actualZoom = newScale / oldScale
                         var handled = false
-
-                        if (actualZoom.isFinite() && actualZoom > 0f &&
-                            kotlin.math.abs(actualZoom - 1f) > 0.002f) {
-                            // Scroll by the amount needed to keep the content point beneath
-                            // the pinch centroid at the same screen position.
-                            val anchorScroll = hs.value + centroid.x
-                            val zoomScrollDelta = anchorScroll * (actualZoom - 1f)
+                        // The frame under the fingers stays under them while zooming (and the timeline follows a two-finger pan): the wanted scroll is worked out from the cell
+                        // widths before / after (they are whole pixels), measured from the left edge of the frame track, and applied after the new width has been laid out.
+                        val trackLeft = pinchTrackX - pinchRootX
+                        val cx = centroid.x - trackLeft
+                        var target = pendingScroll ?: hs.value.toFloat()
+                        if (actualZoom.isFinite() && actualZoom > 0f && kotlin.math.abs(actualZoom - 1f) > 0.002f) {
+                            val oldPx = pxForScale(oldScale); val newPx = pxForScale(newScale)
+                            target = (target + (cx - pan.x)) / oldPx * newPx - cx
                             timelineScale = newScale
-                            if (zoomScrollDelta.isFinite()) hs.dispatchRawDelta(zoomScrollDelta)
+                            handled = true
+                        } else if (pan.x.isFinite() && kotlin.math.abs(pan.x) > 0.5f) {
+                            target -= pan.x
                             handled = true
                         }
-
-                        if (pan.x.isFinite() && kotlin.math.abs(pan.x) > 0.5f) {
-                            hs.dispatchRawDelta(-pan.x)
-                            handled = true
-                        }
+                        if (handled && target.isFinite()) pendingScroll = target.coerceAtLeast(0f)
 
                         if (handled) event.changes.forEach { it.consume() }
                     }
@@ -2076,7 +2092,7 @@ fun Timeline(ed: Editor, cut: Cut, modifier: Modifier = Modifier, mode: Int = 0)
             if (mode != 2) {
                 TimelineLayerColumn(ed, cut, its, rows, rowH, rulerH, rowPxUi, vs, dens, ui, onPickLayers)
             }
-            Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { trackW = it.width }) {
+            Column(Modifier.weight(1f).fillMaxHeight().onSizeChanged { trackW = it.width }.onGloballyPositioned { pinchTrackX = it.positionInWindow().x }) {
                 TimelineRuler(cut, cell, rulerH, hs, cellPxUi)
                 TimelineTrackRows(ed, cut, its, cell, rowH, hs, vs, cellPxUi, rowPxUi, ui, onPickGrid, onKeyBulk)
             }

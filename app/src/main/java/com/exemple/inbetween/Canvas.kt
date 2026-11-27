@@ -163,6 +163,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     var vecLive by remember { mutableIntStateOf(0) } // bumped whenever vecPts changes: redraws the live vector stroke
     var vecLiveCels by remember { mutableStateOf<List<VecLiveCel>?>(null) } // incremental editors of the cels being dragged
     var vecLastApply by remember { mutableLongStateOf(0L) }                    // drag throttle: time of the last applied edit
+    val vecFlushHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     var vecPending by remember { mutableStateOf<(() -> Unit)?>(null) }          // the newest edit skipped by the throttle, applied on release
     var vecOrig by remember { mutableStateOf<List<VectorStroke>?>(null) } // strokes when a point drag began
     var vecLives by remember { mutableStateOf<List<Cel>?>(null) }           // the cels being edited in place during a drag (one per cel of the scope)
@@ -1068,7 +1069,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     /** Applies an edit now, or (when the last one was applied less than 14 ms ago) keeps only the newest one for later: pen events arrive faster than frames. */
     fun vecThrottled(edit: () -> Unit) {
         val now = android.os.SystemClock.uptimeMillis()
-        if (now - vecLastApply < 14L) { vecPending = edit; return }
+        if (now - vecLastApply < 14L) {
+            vecPending = edit
+            // the skipped edit is applied a frame later even when the pen stops (it used to wait for the next pen event or the release, so the points and lines stayed behind)
+            vecFlushHandler.removeCallbacksAndMessages(null)
+            vecFlushHandler.postDelayed({ vecPending?.let { p -> vecPending = null; vecLastApply = android.os.SystemClock.uptimeMillis(); p() } }, 16L)
+            return
+        }
+        vecFlushHandler.removeCallbacksAndMessages(null)
         vecLastApply = now; vecPending = null; edit()
     }
 
@@ -1083,6 +1091,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val parts = sc.split(edited)
         val inc = vecLiveCels
         lives.forEachIndexed { i, cel -> if (i < parts.size) { if (inc != null && i < inc.size) inc[i].apply(parts[i]) else vecApplyLive(cel, parts[i]) } }
+        tick++ // the point overlay (vecShowStrokes) is rebuilt from the strokes just applied; without this it showed the strokes of the previous event
     }
 
     fun vecEditDown(l: Layer, d: Offset) {
@@ -1445,7 +1454,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (vx.onPreview) return
         val sc = vecXfSc ?: return; val orig = vecXfOrig ?: return
         if (vecLives == null) { if (vx.isIdentity) return; if (!vecBeginLive(sc)) return }
-        vecApplyAll(sc, vecDeform(orig, vx.sel, vx.frozen(), ed.vecLockWeight, false))
+        vecApplyAll(sc, vecDeform(orig, vx.sel, vx.frozen(), ed.vecLockWeight, true)) // thinned as it is applied: what is seen while pinning / warping is what Apply keeps
     }
 
     fun vecXfEnd() { ed.vecXf = null; vecXfOrig = null; vecXfSc = null; vecXfPrev = null; vecLives = null; vecBefore = null }
@@ -1629,6 +1638,13 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (l.vector) { // vector layer: the Brush tool draws vector strokes; point edit and cutter work on the strokes already there
             if (tl != 0 && tl != 1 && tl != 2 && tl != 3 && tl != 4) { android.widget.Toast.makeText(vecCtx, "Vector layers: Brush (draw, edit points, cut), Eraser, Fill, Selection and Line / shapes", android.widget.Toast.LENGTH_SHORT).show(); return }
             if (l.locked || !l.visible) return
+            if (ed.vecGhostPick) { // Select ghost line: this pen tap picks the ghost line nearest to it instead of drawing / selecting
+                ed.vecGhostPick = false
+                if (ed.vecGhost) {
+                    if (!LineGhost.pick(ed, cut, l, d, 28f / vecZoom())) android.widget.Toast.makeText(vecCtx, "No ghost line there", android.widget.Toast.LENGTH_SHORT).show()
+                    return
+                }
+            }
             if (tl == 2) { // Selection tool: Points on = pick / drag single points (and the point brushes), off = select whole lines
                 if (ed.vecMode == 3) { // the interpolation preview is up: the Selection tool works on the PREVIEW lines
                     if (ed.vecDisplace) vecJointDown(l, d) else { st.kind = 29; preSel = listOf(d) } // Displace: joints on the preview; otherwise tap a line / drag a rectangle to pick
@@ -2141,6 +2157,9 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                             if (pair.size == 2 && ed.xform == null && cut.layer?.kind != 2 && !(cut.layer?.kind == 5 && cut.layer?.visible == true && cut.layer?.locked == false) && AppSettings.pinchReset && (pair[0].position - pair[1].position).getDistance() <= RESET_PINCH_DP.dp.toPx()) {
                                 resetArmed = true
                                 resetCue = true
+                            } else if (resetArmed && pair.size == 2 && (pair[0].position - pair[1].position).getDistance() > RESET_PINCH_DP.dp.toPx() * 1.6f) {
+                                resetArmed = false // the fingers were spread apart again: the reset is disengaged, lifting the fingers now leaves the view as it is
+                                resetCue = false
                             }
                         }
                         if (n > 0) {

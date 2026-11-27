@@ -38,6 +38,17 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            101, "2026-11-27", "Live vector points, New frame, Select ghost line, timeline pinch, Pin Warp, pinch reset",
+            listOf(
+                "Vector points and lines now follow the pen in real time while you drag, transform, warp or pin (they used to lag one step behind and stop short when the pen stopped).",
+                "New frame now puts the new frame right after the playhead and moves you onto it. On a frame that lasts several frames, the frame is split after the playhead and the rest continues after the new frame.",
+                "New Select ghost line button (hand icon) next to the ghost controls: tap it, then tap the ghost line you want with the pen; it becomes the ghost line that is shown and traced.",
+                "Pinch zoom on the timeline now zooms around the point between your fingers and follows a two-finger drag.",
+                "Pin Warp and Warp on whole vector lines: the line is fitted to as few points as its shape needs, with smooth curves between them, while you pin (not just when you apply), and closed shapes too. Anchors, ends and hidden points are kept.",
+                "Canvas pinch-to-reset: after bringing two fingers together, spreading them apart again cancels the reset."
+            )
+        ),
+        ReleaseNote(
             100, "2026-11-27", "Selection tool: Cut button, no blue hairline, interpolation bar beside it",
             listOf(
                 "Selection tool: the thin blue line along the vector lines is no longer drawn.",
