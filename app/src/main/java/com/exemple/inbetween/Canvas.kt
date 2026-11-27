@@ -795,7 +795,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val avoid = AutoAnchors.neighbourNumbers(l, idx, ed)
         val refs = AutoAnchors.referenceLines(l, idx, ed.vecGhostNext, ed)
         // a ghost line that an erased / deleted line was following is free again: the line that took its place follows it now
-        return AutoAnchors.reclaimFreed(before, AutoAnchors.pinJunctions(AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, refs), avoid, ids), ids), refs, ed.vecTipSens)
+        return AutoAnchors.reclaimFreed(before, VectorJunctions.normalize(AutoAnchors.ensureEnds(AutoAnchors.refresh(strokes, avoid, ed.vecTipSens, ids, refs), avoid, ids)), refs, ed.vecTipSens)
     }
     /** A stroke that is not merged keeps the anchors it has and gets the missing ones on its two end points. */
     fun vecWithEnds(l: Layer, stroke: VectorStroke): VectorStroke {
@@ -2570,6 +2570,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                         if (vp.hidden) { // invisible point: a hollow ring (orange when selected), its anchor number is still shown
                             drawCircle(if (picked) Color(0xFFFF9800) else Color(0xFF9CA3AF), r, Offset(vp.x, vp.y), style = Stroke(1.6f * px1))
                         } else drawCircle(tint, r, Offset(vp.x, vp.y))
+                        if (vp.junction > 0) drawCircle(Color(0xFF22D3EE), r + 3.2f * px1, Offset(vp.x, vp.y), style = Stroke(1.5f * px1)) // a junction: this point is linked to a point of another line (a branch)
                         if (vp.anchor > 0) drawIntoCanvas { cv -> // the number sits on the outside of the point (up and to the right)
                             val label = vp.anchor.toString()
                             val tx = vp.x + r * 0.8f + 2f * px1; val ty = vp.y - r * 0.8f - 1f * px1

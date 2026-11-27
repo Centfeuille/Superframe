@@ -46,7 +46,12 @@ data class VectorPoint(
     /** Structural endpoint identity. Unlike automatic curve-tip anchors, this identity may only be reassigned to an outer endpoint after a merge. */
     val endpoint: Boolean = false,
     /** Additional structural endpoint identities temporarily carried through a merged join until AutoAnchors.refresh relocates them. */
-    val endpointAliases: List<Int> = emptyList()
+    val endpointAliases: List<Int> = emptyList(),
+    /**
+     * Junction link: points of DIFFERENT lines that carry the same number (> 0) are one junction (a branch: the end of one line sprouts from a point inside another, or lines meet end to end).
+     * The link is only a record: it lets the app treat the lines as one connected line even though each line is still one path (see [VectorJunctions]). 0 = none.
+     */
+    val junction: Int = 0
 )
 
 /**
@@ -92,6 +97,8 @@ const val AUTO_FLAG_OFFSET = 1_000_000
 const val ENDPOINT_FLAG_OFFSET = 2_000_000
 /** Sparse Ink metadata for extra endpoint identities carried at a merged join until refresh relocates them. */
 const val ENDPOINT_ALIAS_OFFSET = 3_000_000
+/** Sparse Ink metadata for a junction link: JUNCTION_OFFSET + point index, then the junction number (older builds ignore it: out of range for them). */
+const val JUNCTION_OFFSET = 4_000_000
 
 data class VectorStroke(
     /** Persistent id: the same line is matched across keyframes by it (and a cut gives the new half a new id). */
@@ -214,6 +221,7 @@ fun VectorStroke.toInk(): Ink {
     points.forEachIndexed { i, pt -> if (pt.anchor > 0 || pt.hidden) { m.add(i.toFloat()); m.add(encodeAnchorRank(pt.anchor, pt.hidden).toFloat()) } } // sparse anchors: point index, rank (see encodeAnchorRank: +128 = hidden point for 0..99)
     points.forEachIndexed { i, pt -> if (pt.auto && pt.anchor > 0) { m.add((AUTO_FLAG_OFFSET + i).toFloat()); m.add(1f) } } // automatic anchors: AUTO_FLAG_OFFSET + point index
     points.forEachIndexed { i, pt -> if (pt.endpoint && pt.anchor > 0) { m.add((ENDPOINT_FLAG_OFFSET + i).toFloat()); m.add(1f) }; pt.endpointAliases.forEach { r -> if (r in 1..ANCHOR_MAX) { m.add((ENDPOINT_ALIAS_OFFSET + i).toFloat()); m.add(r.toFloat()) } } } // structural endpoint identities, including aliases carried through a join
+    points.forEachIndexed { i, pt -> if (pt.junction > 0) { m.add((JUNCTION_OFFSET + i).toFloat()); m.add(pt.junction.toFloat()) } } // junction links: JUNCTION_OFFSET + point index, junction number
     return Ink(p, color, VECTOR_BRUSH, 5, null, m.toFloatArray(), (if (hasStyle()) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed|$hardness|$texId|$texAmt|$texScale|${if (texInvert) 1 else 0}|$texImg|$tipShape|$roundness|$tipAngle|${if (tipFollow) 1 else 0}|$fill|$fillGap|$fillGrow|${if (fillAcross) 1 else 0}|$fillSeedX|$fillSeedY|$inkCurve|$inkLight|$inkAngle|$taperIn|$taperOut|$inkIrr|$inkIrrScale|$aaSoft|$joinSharp"
         else if (wobble > 0.01f) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed" else if (aa < 0.999f) "$id|$brushId|$aa" else "$id|$brushId").toByteArray(Charsets.UTF_8))
 }
@@ -240,6 +248,7 @@ fun Ink.toVectorStroke(): VectorStroke? {
     while (k + 1 < mm.size) {
         val i = mm[k].toInt(); val r = mm[k + 1].toInt()
         when {
+            i >= JUNCTION_OFFSET && i - JUNCTION_OFFSET in pts.indices -> { val pi = i - JUNCTION_OFFSET; pts[pi] = pts[pi].copy(junction = r.coerceAtLeast(0)) }
             i >= ENDPOINT_ALIAS_OFFSET && i - ENDPOINT_ALIAS_OFFSET in pts.indices -> { val pi = i - ENDPOINT_ALIAS_OFFSET; pts[pi] = pts[pi].copy(endpointAliases = pts[pi].endpointAliases + r.coerceIn(1, ANCHOR_MAX)) }
             i >= ENDPOINT_FLAG_OFFSET && i - ENDPOINT_FLAG_OFFSET in pts.indices -> { val pi = i - ENDPOINT_FLAG_OFFSET; pts[pi] = pts[pi].copy(endpoint = true) }
             i >= AUTO_FLAG_OFFSET && i - AUTO_FLAG_OFFSET in pts.indices -> { val pi = i - AUTO_FLAG_OFFSET; pts[pi] = pts[pi].copy(auto = true) }
@@ -901,7 +910,7 @@ object VectorSimplify {
         // making anchor samples non-removable and keeping their order / identities.
         val protected = pts.indices.filterTo(HashSet()) { i ->
             val p = pts[i]
-            p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty()
+            p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty() || p.junction > 0
         }
         val fitted = fitKeeping(pts, epsilon, widthScale, protected)
         return if (fitted.size == pts.size) stroke else stroke.copy(points = fitted)
@@ -1702,7 +1711,7 @@ fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
     if (a <= 0.001f || n < 3 || s.fill != 0) return s
     val closed = s.isClosed && n > 2
     val xs = FloatArray(n) { s.points[it].x }; val ys = FloatArray(n) { s.points[it].y }
-    val fixed = BooleanArray(n) { i -> val p = s.points[i]; (!closed && (i == 0 || i == n - 1)) || p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty() || p.hidden }
+    val fixed = BooleanArray(n) { i -> val p = s.points[i]; (!closed && (i == 0 || i == n - 1)) || p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty() || p.junction > 0 || p.hidden }
     val nx = FloatArray(n); val ny = FloatArray(n)
     repeat(1 + (a * 14f).toInt()) {
         for (k in 0..1) {
@@ -1839,7 +1848,7 @@ fun warpStroke(stroke: VectorStroke, joints: List<VectorGuideJoint>): Warped {
             if (closed) return Warped(stroke.copy(points = pts), arcs)
             val protect = HashSet<Int>()
             for ((index, _) in guideIndices) protect.add(index)
-            for (i in pts.indices) { val q = pts[i]; if (q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.hidden) protect.add(i) }
+            for (i in pts.indices) { val q = pts[i]; if (q.anchor > 0 || q.endpoint || q.endpointAliases.isNotEmpty() || q.junction > 0 || q.hidden) protect.add(i) }
             val keep = VectorSimplify.fitIndices(pts, WARP_FIT_EPS, stroke.baseWidth, protect)
             return Warped(stroke.copy(points = keep.map { pts[it] }), FloatArray(keep.size) { arcs[keep[it]] })
 }
@@ -2356,6 +2365,51 @@ class VecPen(val brush: Brush) {
 }
 
 /**
+ * Junction links between lines (branches). A line is one path with two ends, so a line that sprouts from the middle of another cannot be one path; instead the point where it
+ * starts and the point of the other line it sprouts from carry the same [VectorPoint.junction] number. Together the linked lines form a tree / network: the groups below.
+ * Only records and queries live here; what the app does with the links (moving them together, joining lines when the part between two junctions is erased) builds on this.
+ */
+object VectorJunctions {
+    /** Junction number -> its members as (stroke index, point index), for the numbers shared by points of at least two different lines. */
+    fun groups(strokes: List<VectorStroke>): Map<Int, List<Pair<Int, Int>>> {
+        val all = HashMap<Int, MutableList<Pair<Int, Int>>>()
+        for ((si, s) in strokes.withIndex()) for ((pi, p) in s.points.withIndex()) if (p.junction > 0) all.getOrPut(p.junction) { ArrayList() }.add(si to pi)
+        return all.filter { (_, m) -> m.map { it.first }.distinct().size >= 2 }
+    }
+
+    /** The other members of the junction of point [pi] of line [si] (empty when it has none). */
+    fun partners(strokes: List<VectorStroke>, si: Int, pi: Int): List<Pair<Int, Int>> {
+        val j = strokes.getOrNull(si)?.points?.getOrNull(pi)?.junction ?: return emptyList()
+        if (j <= 0) return emptyList()
+        val out = ArrayList<Pair<Int, Int>>()
+        for ((oi, o) in strokes.withIndex()) for ((opi, p) in o.points.withIndex()) if (p.junction == j && !(oi == si && opi == pi)) out.add(oi to opi)
+        return out
+    }
+
+    /** A junction number no point of [strokes] uses (and none of [taken]). Kept below 2^23 so it survives the float storage exactly. */
+    fun newId(strokes: List<VectorStroke>, taken: Set<Int> = emptySet()): Int {
+        val used = HashSet<Int>(taken)
+        for (s in strokes) for (p in s.points) if (p.junction > 0) used.add(p.junction)
+        var c = (System.nanoTime() % 8_000_000L).toInt().coerceAtLeast(1)
+        while (c in used) c = if (c >= (1 shl 23) - 1) 1 else c + 1
+        return c
+    }
+
+    /** Drops junction numbers that no longer link two different lines (a partner was deleted, erased or pasted alone). Returns [strokes] itself when nothing changed. */
+    fun normalize(strokes: List<VectorStroke>): List<VectorStroke> {
+        if (strokes.none { s -> s.points.any { it.junction > 0 } }) return strokes
+        val live = groups(strokes).keys
+        var out: MutableList<VectorStroke>? = null
+        for ((si, s) in strokes.withIndex()) {
+            if (s.points.none { it.junction > 0 && it.junction !in live }) continue
+            if (out == null) out = strokes.toMutableList()
+            out[si] = s.copy(points = s.points.map { if (it.junction > 0 && it.junction !in live) it.copy(junction = 0) else it })
+        }
+        return out ?: strokes
+    }
+}
+
+/**
  * Merge: a freshly drawn line whose end touches an existing line becomes attached to it. End to end: the two (or three) lines become ONE
  * stroke (the older stroke's id / colour / width are kept; touching ends of one chain close it into a ring). End on the body of another
  * line: the end snaps onto that line and the junction point is added to it, so both lines share the vertex.
@@ -2494,9 +2548,10 @@ object VectorMerge {
         }
         class Join(val aId: String, val ax: Float, val ay: Float, val bId: String, val bx: Float, val by: Float)
         class Close(val id: String)
-        class Move(val si: Int, val pi: Int, val x: Float, val y: Float)
+        class Move(val si: Int, val pi: Int, val x: Float, val y: Float, val junction: Int = 0)
+        class Tag(val si: Int, val pi: Int, val junction: Int)
         class Ins(val si: Int, val seg: Int, val t: Float, val pt: VectorPoint)
-        val joins = ArrayList<Join>(); val closes = ArrayList<Close>(); val moves = ArrayList<Move>(); val ins = ArrayList<Ins>()
+        val joins = ArrayList<Join>(); val closes = ArrayList<Close>(); val moves = ArrayList<Move>(); val ins = ArrayList<Ins>(); val tags = ArrayList<Tag>(); val newIds = HashSet<Int>()
         val used = BooleanArray(el.size)
         fun width(si: Int) = strokes[si].baseWidth * 0.5f
         for (i in el.indices) {
@@ -2544,14 +2599,19 @@ object VectorMerge {
                 if (bh == null || h.dist < bh.dist) { bh = h; bsi = oi }
             }
             if (bsi >= 0 && bh != null) {
-                moves.add(Move(p.si, p.pi, bh.x, bh.y))
-                if (bh.at < 0) ins.add(Ins(bsi, bh.seg, bh.u, VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)))
+                // the end and the spot it lands on become one junction (a branch): the line it is on keeps its shape, nothing is cut
+                val had = if (bh.at >= 0) strokes[bsi].points[bh.at].junction else 0
+                val jid = if (had > 0) had else VectorJunctions.newId(strokes, newIds).also { newIds.add(it) }
+                moves.add(Move(p.si, p.pi, bh.x, bh.y, jid))
+                if (bh.at < 0) ins.add(Ins(bsi, bh.seg, bh.u, VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation, junction = jid)))
+                else if (had <= 0) tags.add(Tag(bsi, bh.at, jid))
                 used[i] = true
             }
         }
         if (moves.isEmpty() && ins.isEmpty() && joins.isEmpty() && closes.isEmpty()) return null
         val st = strokes.toMutableList()
-        for (m in moves) { val s = st[m.si]; val pts = s.points.toMutableList(); pts[m.pi] = pts[m.pi].copy(x = m.x, y = m.y); st[m.si] = s.copy(points = pts) }
+        for (m in moves) { val s = st[m.si]; val pts = s.points.toMutableList(); pts[m.pi] = pts[m.pi].copy(x = m.x, y = m.y, junction = if (m.junction > 0) m.junction else pts[m.pi].junction); st[m.si] = s.copy(points = pts) }
+        for (t in tags) { val s = st[t.si]; val pts = s.points.toMutableList(); pts[t.pi] = pts[t.pi].copy(junction = t.junction); st[t.si] = s.copy(points = pts) }
         for ((si, list) in ins.groupBy { it.si }) {
             val pts = st[si].points.toMutableList()
             for (q in list.sortedWith(compareByDescending<Ins> { it.seg }.thenByDescending { it.t })) pts.add((q.seg + 1).coerceAtMost(pts.size), q.pt)
@@ -2636,8 +2696,12 @@ object VectorMerge {
                 }
                 if (bo < 0 || bh == null) continue
                 val o = rest[bo]
-                val q = VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation)
+                // the end and the spot it lands on become one junction (a branch): the line it is on keeps its shape, nothing is cut
+                val had = if (bh.at >= 0) o.points[bh.at].junction else 0
+                val jid = if (had > 0) had else VectorJunctions.newId(rest + cur)
+                val q = VectorPoint(bh.x, bh.y, bh.pressure, bh.elevation, junction = jid)
                 if (bh.at < 0) { val ins = o.points.toMutableList(); ins.add((bh.seg + 1).coerceAtMost(ins.size), q); rest[bo] = o.copy(points = ins) }
+                else if (had <= 0) { val tp = o.points.toMutableList(); tp[bh.at] = tp[bh.at].copy(junction = jid); rest[bo] = o.copy(points = tp) }
                 val np = pts.toMutableList(); np[if (end == 0) 0 else np.size - 1] = q.copy(pressure = e.pressure)
                 cur = cur.copy(points = np)
                 changed = true

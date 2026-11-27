@@ -911,14 +911,9 @@ object AutoAnchors {
             val s = cur[si]
             if (!eligible(s)) continue
             val others = HashSet<Int>()
-            // a number that another line carries exactly where this line ends is the same anchor seen from the other line (see [pinJunctions]), not a clash
-            val myEnds = if (!s.isClosed && s.points.size >= 2) listOf(s.points.first(), s.points.last()) else emptyList()
             for ((oi, o) in cur.withIndex()) {
                 if (oi == si) continue
-                for (p in o.points) {
-                    if (myEnds.any { hypot(p.x - it.x, p.y - it.y) < 0.6f }) continue
-                    if (p.anchor > 0) others.add(p.anchor); for (r in p.endpointAliases) if (r > 0) others.add(r)
-                }
+                for (p in o.points) { if (p.anchor > 0) others.add(p.anchor); for (r in p.endpointAliases) if (r > 0) others.add(r) }
             }
             var plan: Plan? = null
             val g = ghostFor(s, refs, longest)
@@ -961,45 +956,7 @@ object AutoAnchors {
         val avoid = neighbourNumbers(layer, idx, ed)
         val refs = referenceLines(layer, idx, nextFirst, ed)
         // the selection merge: the longest piece decides the new ends
-        return reclaimFreed(cel.vectorStrokes(), pinJunctions(ensureEnds(refresh(strokes, avoid, sens, ids, refs, longest = true), avoid, ids), ids), refs, sens)
-    }
-
-    /**
-     * Merged ends become anchors of the line they were merged onto: where an end of an open line [only] (all when null) that carries an anchor number lies exactly on an INSIDE point of
-     * another line (the shared vertex a Merge leaves), that point takes the same number as an in-between anchor of its line. The anchor is a fixed (manual) one, so it stays on the junction
-     * and is never moved to a curve tip; when the line is later cut or erased right there it simply becomes the end of the piece and keeps its number, and the same number in the previous /
-     * next keyframe pairs the two junctions for the interpolation. A point that already has an anchor is left alone. Returns [strokes] itself when nothing changed.
-     */
-    fun pinJunctions(strokes: List<VectorStroke>, only: Set<String>? = null): List<VectorStroke> {
-        val work = strokes.toMutableList()
-        var changed = false
-        for (si in strokes.indices) {
-            val s = strokes[si]
-            if (s.fill != 0 || s.isClosed || s.points.size < 2) continue
-            if (only != null && s.id !in only) continue
-            for (e in intArrayOf(0, s.points.size - 1)) {
-                val ep = s.points[e]
-                if (ep.anchor !in 1..ANCHOR_MAX) continue
-                for (oi in work.indices) {
-                    if (oi == si) continue
-                    val o = work[oi]
-                    if (o.fill != 0 || o.points.size < 3) continue
-                    val lo = if (o.isClosed) 0 else 1
-                    val hi = if (o.isClosed) o.points.size - 1 else o.points.size - 2
-                    var hit = -1
-                    for (v in lo..hi) if (hypot(o.points[v].x - ep.x, o.points[v].y - ep.y) < 0.6f) { hit = v; break }
-                    if (hit < 0) continue
-                    val op = o.points[hit]
-                    if (op.anchor > 0) continue
-                    val pts = o.points.toMutableList()
-                    pts[hit] = op.copy(anchor = ep.anchor, auto = false, endpoint = false, endpointAliases = emptyList())
-                    work[oi] = o.copy(points = pts)
-                    changed = true
-                    break
-                }
-            }
-        }
-        return if (changed) work else strokes
+        return reclaimFreed(cel.vectorStrokes(), VectorJunctions.normalize(ensureEnds(refresh(strokes, avoid, sens, ids, refs, longest = true), avoid, ids)), refs, sens)
     }
 
     /**
