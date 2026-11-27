@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            95, "2026-11-27", "Unmerged-lines shimmer on the Brush tool, and more reliable",
+            listOf(
+                "The shimmer that marks places where separate lines cross or touch without being merged now also shows with the Brush tool, not only the Selection tool.",
+                "The marks are found on the line as it is drawn (the smoothed curve) instead of on its control points, follow zoom changes, update after every stroke and undo, and no longer disappear on dense drawings."
+            )
+        ),
+        ReleaseNote(
             94, "2026-11-26", "Interpolation drag, points view, timeline curves and a sturdier pen calibration",
             listOf(
                 "Interpolation drag: the preview is drawn in its own colour and the keyframes it comes from show as onion skins (previous red, next green). Pick one or two reference frames in the timeline (the current frame needs no selection) and those are the ends, the result lands in the current frame, and the line ghost follows them too (previous or next, as set on the Ghost bar). With one picked frame, the nearest keyframe on the other side of the current frame is the other end. With the Selection tool the current frame no longer shows its points.",

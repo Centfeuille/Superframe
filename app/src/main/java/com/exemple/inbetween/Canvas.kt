@@ -1970,9 +1970,14 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     vecDisplaceRef[0] = vecDisplaceWarped
     val vecDisplaceShow = remember(vecDisplaceWarped) { vecDisplaceWarped.map { it.stroke } }
 
-    // selection tool: places where separate lines cross or touch without being joined (they shimmer); not while a drag is running
-    val vecGaps = remember(vecShowStrokes, ed.vecMergeRadius, ed.tool, vecLives != null, ed.vecMode) {
-        if (ed.tool != 2 || vecLayerNow == null || vecLives != null || ed.vecMode == 3) FloatArray(0) else VectorGaps.find(vecShowStrokes, (ed.vecMergeRadius / vecZoom()).coerceAtLeast(2f))
+    // selection tool AND brush tool: places where separate lines cross or touch without being joined (they shimmer); not while a drag is running.
+    // The key holds the screen zoom (the reach is in screen pixels) and the edit counter, so the marks follow zoom and every committed stroke / undo.
+    val vecGapBrush = ed.tool == 0 && ed.vecMode == 0 && !cut.playing && cut.layer?.let { it.vector && it.visible } == true
+    val vecGapStrokes = remember(vecShowStrokes, vecGapBrush, cut.layerId, cut.time, ed.refAll, tick, cut.edits) {
+        if (vecGapBrush) vecScope(cut, ed.refAll)?.strokes ?: emptyList<VectorStroke>() else vecShowStrokes
+    }
+    val vecGaps = remember(vecGapStrokes, ed.vecMergeRadius, ed.tool, vecLives != null, ed.vecMode, fit * ed.vScale, vecGapBrush) {
+        if (!vecGapBrush && (ed.tool != 2 || vecLayerNow == null || vecLives != null || ed.vecMode == 3)) FloatArray(0) else VectorGaps.find(vecGapStrokes, (ed.vecMergeRadius / vecZoom()).coerceAtLeast(2f))
     }
 
     // line order onion skin: the next untraced line of the previous / next keyframe shimmers, with its anchors; a new line drawn over it takes those anchors

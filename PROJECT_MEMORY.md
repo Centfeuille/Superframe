@@ -798,3 +798,5 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 - Vector layers with `hasInterpolation()` get the expand arrow (reuses `Layer.expanded`) and `VectorCurveEditor` (`VectorCurveView.kt`).
 - AI model: Claude. Not compiled or device-tested; see CHANGELOG (6).
 
+## 2026-11-27 — Unmerged-lines shimmer on the Brush tool
+- `vecGaps` (Canvas.kt) is computed for the Selection tool (as before) and for the Brush tool on a visible vector layer (`vecGapBrush`, strokes from `vecScope(cut, ed.refAll)`). Its `remember` keys must include the screen zoom and `cut.edits` / `tick`; the reach is `ed.vecMergeRadius / zoom` screen-to-document. `VectorGaps.find` works on the drawn curve (`VectorTessellator.centerline`), not the control polygon; the "merged" tests still use control points. Not compiled or run.

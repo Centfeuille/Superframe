@@ -1,3 +1,14 @@
+## 2026-11-27 — Unmerged-lines shimmer on the Brush tool; detection on the drawn curve
+- AI model: Claude
+- Category: Changed / Fixed (vector layers; no `.inb` format change)
+- Request: the visualizer of superimposed, non-merged vector lines was inconsistent and should also show with the Brush tool.
+- `Canvas.kt`: the gap shimmer (`vecGaps`) is also computed for the Brush tool on a visible vector layer (`vecGapBrush`: `ed.tool == 0 && ed.vecMode == 0`, not playing), using `vecScope(cut, ed.refAll)` strokes (`vecGapStrokes`). Cache keys now include the screen zoom (`fit * ed.vScale`; the reach is in screen pixels and was read inside `remember` without being a key, so marks went stale after zooming) and `cut.edits` / `tick` / layer / time (marks went stale after a committed stroke or undo).
+- `Vector.kt` `VectorGaps.find`: crossings and end-to-line distances are measured on `VectorTessellator.centerline` (the curve that is drawn) instead of the control polygon, which differed from what is seen; segment-level bounding-box rejection added; the silent give-up limit rose from 5000 to 20000 control points. The merged tests (shared vertex within 0.6 px, end on a body vertex) still use the control points.
+- `WhatsNew.kt` note 95, `CHANGELOG.md`.
+- Protected files untouched (`.github/workflows/**`, Gradle files, `gradle.properties`, manifest, signing). `.inb` format unchanged.
+- Validation: source review of the diff and call sites only. Not compiled, not run on a device.
+- Follow-up (tablet): check that marks appear with the Brush tool on a vector layer, move correctly while zooming, appear / vanish right after drawing, merging and undo, and that dense layers stay responsive (the computation runs in composition after each change). The shimmer is not shown with the Line / shapes tool.
+
 ## 2026-11-26 (7) — Reference frames: one or two picked frames, the current frame needs no selection
 - AI model: Claude
 - Category: Changed (vector interpolation drag / line ghost; no `.inb` format change)

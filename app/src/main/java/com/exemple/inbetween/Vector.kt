@@ -2194,9 +2194,11 @@ fun applyScope(cut: Cut, sc: VecScope, parts: List<List<VectorStroke>>) {
 object VectorGaps {
     fun find(strokes: List<VectorStroke>, reach: Float): FloatArray {
         val ls = strokes.filter { it.fill == 0 && it.points.size >= 2 }
-        if (ls.size < 2 || ls.sumOf { it.points.size } > 5000) return FloatArray(0)
-        val bb = ls.map { s -> var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
-            for (p in s.points) { l = min(l, p.x); r = max(r, p.x); t = min(t, p.y); b = max(b, p.y) }
+        if (ls.size < 2 || ls.sumOf { it.points.size } > 20000) return FloatArray(0)
+        // the DRAWN curve of each line (what the ribbon is built around), so crossings are found where the lines visibly cross, not on the control polygon
+        val cl = ls.map { s -> if (s.points.size >= 3) VectorTessellator.centerline(s.points, s.isClosed) else FloatArray(s.points.size * 2) { if (it % 2 == 0) s.points[it / 2].x else s.points[it / 2].y } }
+        val bb = ls.indices.map { k -> val a = cl[k]; val s = ls[k]; var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+            for (i in 0 until a.size / 2) { l = min(l, a[i * 2]); r = max(r, a[i * 2]); t = min(t, a[i * 2 + 1]); b = max(b, a[i * 2 + 1]) }
             val pad = reach + s.baseWidth; floatArrayOf(l - pad, t - pad, r + pad, b + pad) }
         val xs = ArrayList<Float>(); val ys = ArrayList<Float>()
         fun add(x: Float, y: Float) {
@@ -2205,38 +2207,41 @@ object VectorGaps {
             for (i in xs.indices) { val dx = xs[i] - x; val dy = ys[i] - y; if (dx * dx + dy * dy < r2) return }
             xs.add(x); ys.add(y)
         }
-        fun segs(s: VectorStroke) = if (s.isClosed && s.points.size > 2) s.points.size else s.points.size - 1
+        fun segs(k: Int) = if (ls[k].isClosed && ls[k].points.size > 2) cl[k].size / 2 else cl[k].size / 2 - 1
         for (a in ls.indices) for (b in a + 1 until ls.size) {
             val u = bb[a]; val v = bb[b]
             if (u[2] < v[0] || v[2] < u[0] || u[3] < v[1] || v[3] < u[1]) continue
-            val sa = ls[a]; val sb = ls[b]
-            // crossings of the two centre lines
-            for (i in 0 until segs(sa)) {
-                val p0 = sa.points[i]; val p1 = sa.points[(i + 1) % sa.points.size]
-                for (j in 0 until segs(sb)) {
-                    val q0 = sb.points[j]; val q1 = sb.points[(j + 1) % sb.points.size]
-                    val rx = p1.x - p0.x; val ry = p1.y - p0.y; val sx = q1.x - q0.x; val sy = q1.y - q0.y
+            val sa = ls[a]; val sb = ls[b]; val ca = cl[a]; val cb = cl[b]; val na = ca.size / 2; val nb = cb.size / 2
+            // crossings of the two drawn centre lines
+            for (i in 0 until segs(a)) {
+                val p0x = ca[i * 2]; val p0y = ca[i * 2 + 1]; val p1x = ca[((i + 1) % na) * 2]; val p1y = ca[((i + 1) % na) * 2 + 1]
+                val loX = min(p0x, p1x) - 0.01f; val hiX = max(p0x, p1x) + 0.01f; val loY = min(p0y, p1y) - 0.01f; val hiY = max(p0y, p1y) + 0.01f
+                for (j in 0 until segs(b)) {
+                    val q0x = cb[j * 2]; val q0y = cb[j * 2 + 1]; val q1x = cb[((j + 1) % nb) * 2]; val q1y = cb[((j + 1) % nb) * 2 + 1]
+                    if (max(q0x, q1x) < loX || min(q0x, q1x) > hiX || max(q0y, q1y) < loY || min(q0y, q1y) > hiY) continue
+                    val rx = p1x - p0x; val ry = p1y - p0y; val sx = q1x - q0x; val sy = q1y - q0y
                     val den = rx * sy - ry * sx
                     if (abs(den) < 1e-9f) continue
-                    val tt = ((q0.x - p0.x) * sy - (q0.y - p0.y) * sx) / den
-                    val uu = ((q0.x - p0.x) * ry - (q0.y - p0.y) * rx) / den
+                    val tt = ((q0x - p0x) * sy - (q0y - p0y) * sx) / den
+                    val uu = ((q0x - p0x) * ry - (q0y - p0y) * rx) / den
                     if (tt in 0f..1f && uu in 0f..1f) {
-                        val x = p0.x + rx * tt; val y = p0.y + ry * tt
+                        val x = p0x + rx * tt; val y = p0y + ry * tt
                         // a crossing where both lines have a vertex (Merge puts one there) is merged: no shimmer
                         if (!(sa.points.any { hypot(it.x - x, it.y - y) < 0.6f } && sb.points.any { hypot(it.x - x, it.y - y) < 0.6f })) add(x, y)
                     }
                 }
             }
             // an end of one line near the other line
-            fun ends(s: VectorStroke, o: VectorStroke) {
+            fun ends(s: VectorStroke, o: VectorStroke, oc: FloatArray, ok: Int) {
                 if (s.isClosed) return
                 for (e in listOf(s.points.first(), s.points.last())) {
                     var best = Float.MAX_VALUE
-                    for (j in 0 until segs(o)) {
-                        val q0 = o.points[j]; val q1 = o.points[(j + 1) % o.points.size]
-                        val dx = q1.x - q0.x; val dy = q1.y - q0.y; val l2 = dx * dx + dy * dy
-                        val k = if (l2 < 1e-9f) 0f else (((e.x - q0.x) * dx + (e.y - q0.y) * dy) / l2).coerceIn(0f, 1f)
-                        best = min(best, hypot(e.x - (q0.x + dx * k), e.y - (q0.y + dy * k)))
+                    val on = oc.size / 2
+                    for (j in 0 until segs(ok)) {
+                        val q0x = oc[j * 2]; val q0y = oc[j * 2 + 1]; val q1x = oc[((j + 1) % on) * 2]; val q1y = oc[((j + 1) % on) * 2 + 1]
+                        val dx = q1x - q0x; val dy = q1y - q0y; val l2 = dx * dx + dy * dy
+                        val k = if (l2 < 1e-9f) 0f else (((e.x - q0x) * dx + (e.y - q0y) * dy) / l2).coerceIn(0f, 1f)
+                        best = min(best, hypot(e.x - (q0x + dx * k), e.y - (q0y + dy * k)))
                     }
                     if (best <= reach) {
                         // an end that sits on a vertex in the BODY of the other line (what Merge does) is merged; an end that meets an end of another line is still two lines
@@ -2246,7 +2251,7 @@ object VectorGaps {
                     }
                 }
             }
-            ends(sa, sb); ends(sb, sa)
+            ends(sa, sb, cb, b); ends(sb, sa, ca, a)
         }
         val out = FloatArray(xs.size * 2)
         for (i in xs.indices) { out[i * 2] = xs[i]; out[i * 2 + 1] = ys[i] }
