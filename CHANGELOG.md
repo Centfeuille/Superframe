@@ -1,3 +1,12 @@
+## 2026-11-27 (11) — Linked lines are selected together; the join after an erase keeps the outer end numbers
+- AI model: Claude
+- Category: Fixed / Changed (junction links; no format change)
+- Request (after a tablet screenshot): selecting one line must select the lines linked to it (moving one displaced the linked line at the link point only); interpolation broke after erasing the line between the linked points.
+- `Vector.kt` `VectorJunctions.expandSelection`: every wholly selected line brings in the whole lines on the other side of its junctions, through the whole tree (lines with only some points selected bring in nothing). `Canvas.kt` `vecSelect` (tap / lasso of the Selection tool, add and replace; not subtract) applies it through `vecExpandLinked` per cel, so the lines move as one and `follow` finds the partners already moved.
+- Cause found by reading for the interpolation: `joinLinkedEnds` used `mid`, which keeps both ends' numbers on the joint as an end identity and lets AutoAnchors.refresh hand the second one to the new OUTER ends. The outer ends were renumbered, so the joined line no longer shared its numbers with the lines of the other keyframe (`pairAuto` / `pairSelected` pair by shared numbers). Now the joint is a plain in-between point with ONE number (an in-between number of either side first, else the first line's end number); the other side's number is dropped and nothing is passed on to the outer ends.
+- Known limit: lines are paired one to one. When the other keyframe still has the branched lines (the part between the junctions not erased there), the joined line pairs with only one of them and the other one fades; erase the same part in both keyframes. Not compiled, not run.
+- Follow-up on the tablet: (a) tap one line of a branch: all linked lines are selected and move rigidly; (b) erase the part between two branches in two keyframes: the inbetween between them does not break and the outer end numbers did not change; (c) tap a single point (Points mode): only the linked points follow.
+
 ## 2026-11-27 (10) — Junctions: move together, tap selects the whole junction, branches rejoin after an erase / delete
 - AI model: Claude
 - Category: Added (builds on entry 9; no format change)

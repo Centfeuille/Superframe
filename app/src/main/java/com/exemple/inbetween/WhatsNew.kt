@@ -40,7 +40,7 @@ object WhatsNew {
         ReleaseNote(
             102, "2026-11-27", "Merge onto the body of a line, anchors after an erase",
             listOf(
-                "Merge: an end merged onto another line is now linked to that spot as a junction (a branch), shown with a cyan ring. The other line stays whole and is not cut. Moving one of the two points moves the other, tapping one selects both, and when the part of a line between two branches is erased the rest becomes one line again.",
+                "Merge: an end merged onto another line is now linked to that spot as a junction (a branch), shown with a cyan ring. The other line stays whole and is not cut. Moving one of the two points moves the other, tapping one selects both, and when the part of a line between two branches is erased the rest becomes one line again, keeping the numbers of its outer ends. Selecting one line selects the lines linked to it.",
                 "Merge: the end of a line now snaps onto the body of another line where the line is actually drawn. Before, only the control points were checked, so a smooth line with few points refused any merge except at its ends.",
                 "The Merge button is now also on the Selection bar with Points off: it merges the ends of the selected lines onto other lines. The Merge radius and Sharp joins sliders are shown there too, so the reach can be widened.",
                 "After you erase or delete a line that was following a ghost line, the line that took its place now follows that ghost line: it inherits the numbers by position and bend, with new numbers where needed."

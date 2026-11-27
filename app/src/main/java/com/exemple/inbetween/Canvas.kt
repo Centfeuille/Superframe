@@ -1238,7 +1238,21 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     fun vecSelect(picked: Set<Long>, op: Int) {
-        ed.vecSel = when (op) { 1 -> ed.vecSel + picked; 2 -> ed.vecSel - picked; else -> picked }
+        var s = when (op) { 1 -> ed.vecSel + picked; 2 -> ed.vecSel - picked; else -> picked }
+        if (op != 2) vecEnsureScope()?.let { sc -> s = vecExpandLinked(sc, s) } // a selected line brings the lines linked to it by junctions
+        ed.vecSel = s
+    }
+
+    /** [sel] plus the whole lines linked (by junctions, through the whole tree) to its wholly selected lines, per cel of the scope. */
+    fun vecExpandLinked(sc: VecScope, sel: Set<Long>): Set<Long> {
+        var out = sel
+        for (c in sc.cels.indices) {
+            val lk = sc.localKeys(sel, c)
+            if (lk.isEmpty()) continue
+            val ex = VectorJunctions.expandSelection(sc.perCel[c], lk)
+            if (ex.size != lk.size) out = out + ex.map { vecKey(vecKeyStroke(it) + sc.offsets[c], vecKeyPoint(it)) }
+        }
+        return out
     }
 
     /** Selection tool on vector layers: handle drag of the selection box, else start a selection (rectangle / lasso / polygon / wand = whole stroke). */

@@ -2396,6 +2396,32 @@ object VectorJunctions {
     }
 
     /**
+     * Selecting one line selects the lines linked to it: every line that is wholly selected in [sel] (keys of [strokes]) brings in the whole lines at the other side of its junctions,
+     * and so on through the whole tree. Lines that are only partly selected (single points) bring in nothing. Returns [sel] itself when nothing was added.
+     */
+    fun expandSelection(strokes: List<VectorStroke>, sel: Set<Long>): Set<Long> {
+        if (sel.isEmpty() || strokes.none { s -> s.points.any { it.junction > 0 } }) return sel
+        val perStroke = HashMap<Int, Int>()
+        for (k in sel) perStroke[vecKeyStroke(k)] = (perStroke[vecKeyStroke(k)] ?: 0) + 1
+        val whole = ArrayDeque<Int>()
+        val inSet = HashSet<Int>()
+        for ((si, c) in perStroke) if (si in strokes.indices && strokes[si].points.isNotEmpty() && c >= strokes[si].points.size) { whole.add(si); inSet.add(si) }
+        if (whole.isEmpty()) return sel
+        val groups = groups(strokes)
+        val byStroke = HashMap<Int, MutableList<Int>>() // stroke index -> junction numbers it takes part in
+        for ((j, m) in groups) for ((si, _) in m) byStroke.getOrPut(si) { ArrayList() }.add(j)
+        val added = HashSet<Int>()
+        while (whole.isNotEmpty()) {
+            val si = whole.removeFirst()
+            for (j in byStroke[si] ?: continue) for ((os, _) in groups.getValue(j)) if (os !in inSet) { inSet.add(os); added.add(os); whole.add(os) }
+        }
+        if (added.isEmpty()) return sel
+        val out = HashSet<Long>(sel)
+        for (si in added) for (pi in strokes[si].points.indices) out.add(vecKey(si, pi))
+        return out
+    }
+
+    /**
      * Moving a junction point moves its partners: after an edit that kept the lines and their points ([orig] -> [edited], same shape), every point that carries a junction number and
      * was moved drags the points of the same junction that sat on the same spot before (within 0.8 px) and were not moved themselves to where it went. The rest of the partner's line
      * stays as it is. Returns [edited] itself when nothing needed to follow.
@@ -2559,9 +2585,12 @@ object VectorMerge {
                 !aLast && bLast -> { first = sb.points; second = sa.points }
                 else -> { first = sb.points.reversed(); second = sa.points }
             }
-            val pts = join(first, second, true).toMutableList()
-            val ji = first.size - 1
-            pts[ji] = pts[ji].copy(junction = 0)
+            // The joint is an ordinary in-between point of the new line with ONE number (an in-between number of either side first, else the first line's end number); the other side's number
+            // is dropped, not passed on to the outer ends, so the outer ends keep the numbers they have and the line still pairs with the same lines of the other keyframe.
+            val ja = first.last(); val jb = second.first()
+            val pick = when { ja.anchor > 0 && !ja.endpoint -> ja; jb.anchor > 0 && !jb.endpoint -> jb; ja.anchor > 0 -> ja; else -> jb }
+            val joint = VectorPoint(ja.x, ja.y, (ja.pressure + jb.pressure) / 2f, (ja.elevationOffset + jb.elevationOffset) / 2f, pick.anchor, ja.hidden && jb.hidden, pick.anchor > 0, false, emptyList(), 0)
+            val pts = (first.dropLast(1) + joint + second.drop(1)).toMutableList()
             val keep = min(ia, ib); val drop = max(ia, ib)
             val base = st[keep] // the older line's identity and look win
             st[keep] = base.copy(points = pts, joinSharp = max(base.joinSharp, sharp))
