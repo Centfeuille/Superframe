@@ -2363,16 +2363,13 @@ class VecPen(val brush: Brush) {
  */
 object VectorMerge {
     private fun d(a: VectorPoint, b: VectorPoint) = hypot(a.x - b.x, a.y - b.y)
-    private fun mid(a: VectorPoint, b: VectorPoint): VectorPoint {
+    private fun mid(a: VectorPoint, b: VectorPoint, aLonger: Boolean = true): VectorPoint {
         // This helper only combines stroke endpoints (or closes a stroke). Keep every
         // anchored identity from both sides until refresh() moves the correct endpoint
         // pair back to the new outer ends; never let a larger number erase one side.
-        val endpointIds = buildList {
-            if (a.anchor in 1..ANCHOR_MAX) add(a.anchor)
-            addAll(a.endpointAliases.filter { it in 1..ANCHOR_MAX })
-            if (b.anchor in 1..ANCHOR_MAX) add(b.anchor)
-            addAll(b.endpointAliases.filter { it in 1..ANCHOR_MAX })
-        }.distinct()
+        // The numbers of the LONGER of the two lines come first: the first one is the join point's own number and AutoAnchors.refresh gives the longer line's end numbers to the ends of the merged line.
+        fun idsOf(p: VectorPoint) = buildList { if (p.anchor in 1..ANCHOR_MAX) add(p.anchor); addAll(p.endpointAliases.filter { it in 1..ANCHOR_MAX }) }
+        val endpointIds = (if (aLonger) idsOf(a) + idsOf(b) else idsOf(b) + idsOf(a)).distinct()
         val chosen = endpointIds.firstOrNull() ?: max(a.anchor, b.anchor)
         return VectorPoint(
             (a.x + b.x) / 2f, (a.y + b.y) / 2f,
@@ -2392,7 +2389,8 @@ object VectorMerge {
      */
     private fun closeOntoOwnStart(s: VectorStroke): VectorStroke =
         if (d(s.points.first(), s.points.last()) < 0.05f) s.copy(points = s.points.dropLast(1), isClosed = true) else s.copy(isClosed = true)
-    private fun join(a: List<VectorPoint>, b: List<VectorPoint>): List<VectorPoint> = a.dropLast(1) + mid(a.last(), b.first()) + b.drop(1)
+    /** [byLength] (the Merge button of the point selection bar only): the longer line's numbers come first at the join. The pen merge keeps the drawing order. */
+    private fun join(a: List<VectorPoint>, b: List<VectorPoint>, byLength: Boolean = false): List<VectorPoint> = a.dropLast(1) + mid(a.last(), b.first(), !byLength || length(a) >= length(b)) + b.drop(1)
 
     /**
      * Where a line end at (x, y) would snap, by the same rules as [attach]: the nearest end of an open line first, else the nearest point on the body
@@ -2536,10 +2534,10 @@ object VectorMerge {
             val bLast = hypot(sb.points.last().x - j.bx, sb.points.last().y - j.by) <= hypot(sb.points.first().x - j.bx, sb.points.first().y - j.by)
             if (ia == ib) { if (aLast != bLast) closeRing(ia); continue }
             val pts = when {
-                aLast && !bLast -> join(sa.points, sb.points)
-                aLast && bLast -> join(sa.points, sb.points.reversed())
-                !aLast && bLast -> join(sb.points, sa.points)
-                else -> join(sb.points.reversed(), sa.points)
+                aLast && !bLast -> join(sa.points, sb.points, true)
+                aLast && bLast -> join(sa.points, sb.points.reversed(), true)
+                !aLast && bLast -> join(sb.points, sa.points, true)
+                else -> join(sb.points.reversed(), sa.points, true)
             }
             val keep = min(ia, ib); val drop = max(ia, ib)
             val base = st[keep] // the older line's identity and look win

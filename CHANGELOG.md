@@ -1,3 +1,16 @@
+## 2026-11-27 (5) — Selection merge: the longest line's end anchors become the new ends
+- AI model: Claude
+- Category: Fixed (vector anchors on merge; no `.inb` format change)
+- Request: a merge of two points was still not reflected on the ghost line; suspected conflict over which anchor becomes the new end. Rule requested: the largest line's end anchors go to the ends of the merged line.
+- Found by reading: line length played no part. `AutoAnchors.selfPlan` chose the two end numbers of a merged line by cost (a number shared with a neighbouring keyframe first, then the end's own number, then how close the number's old position was to the end), and `ghostFor` returned the FIRST ghost line sharing any number, so a short stub or the list order could decide. `VectorMerge.mid` listed the join's numbers in drawing order.
+- Scope (your correction): ONLY the Merge button of the point selection bar. The pen merge (`attach`, `vecRefreshAnchors`) keeps its previous behaviour, which works.
+- `Vector.kt`: `join(..., byLength)` is opt-in; only `mergePoints` passes `true`, so the longer line's numbers come first at its joins. `attach` keeps drawing order.
+- `AutoAnchors.kt`: `piecesOf` / `Pieces` split a merged open line at its join points (points that carry end aliases until the next refresh). `refresh(..., longest = true)` is passed only by `refreshFor` (selection merge / delete); `Canvas.kt` `vecRefreshAnchors` does not. `selfPlan`: the two numbers bounding the LONGEST piece become the end numbers of the merged line (its own far end keeps its number, the number at its join moves to the new far end); the old cost search still decides an end for which the longest piece has no number. `ghostFor`: among the ghost lines whose numbers the line carries, the one matched by the longest piece wins; ties keep the first, as before.
+- Not changed: `ghostPlan` (the ghost-following case) still gives the ghost's end numbers by orientation; only the choice of WHICH ghost changed.
+- `WhatsNew.kt` note 99, `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected files untouched. `.inb` format unchanged.
+- Validation: source review of the diff only. Not compiled, not run on a device; I could not reproduce your case, so it is unconfirmed that this is the cause.
+- Follow-up: on the tablet, merge two traced pieces (long + short) with Merge on selected points and with the pen, with the ghost on, and check the merged line carries the long piece's numbers and the ghost line turns yellow-orange. Also try merging a piece that followed ghost line X onto a longer piece that followed ghost line Y. If it still fails, note the anchor numbers of both lines and of the ghost line before and after.
+
 ## 2026-11-27 (4) — Ghost lines wrongly shown as traced: cause narrowed, manual Unclaim button
 - AI model: Claude
 - Category: Fixed / Added (vector line ghost; no `.inb` format change)

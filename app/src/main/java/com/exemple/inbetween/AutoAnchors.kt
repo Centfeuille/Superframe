@@ -563,8 +563,8 @@ object AutoAnchors {
     }
 
     /** The plan of a line that keeps its own numbers: its ends and tips as they are now (used after a merge or a deletion, and for a line with no ghost). */
-    private fun selfPlan(s: VectorStroke, avoid: Set<Int>): Plan {
-        if (seamEnds(s)) return selfPlan(s.copy(isClosed = false), avoid)
+    private fun selfPlan(s: VectorStroke, avoid: Set<Int>, longest: Boolean = false): Plan {
+        if (seamEnds(s)) return selfPlan(s.copy(isClosed = false), avoid, longest)
         val pts = s.points
         val n = pts.size
         val ring = s.isClosed && n >= 3
@@ -610,6 +610,25 @@ object AutoAnchors {
                     c += hypot(y.x - l.x, y.y - l.y).toDouble()
                 }
                 if (c < best) { best = c; a = x?.num ?: 0; b = y?.num ?: 0 }
+            }
+        }
+        // A line made by merging lines: the numbers at the two ends of its LONGEST piece go to the ends of the merged line (a piece's own far end keeps its number; the number at the
+        // join it was merged at moves to the new far end). A short stub never takes the ends away from the long line.
+        if (longest && !ring && n >= 2) {
+            val pc = piecesOf(pts)
+            if (pc.lens.size >= 2) {
+                val k = pc.lens.indices.maxByOrNull { pc.lens[it] } ?: 0
+                fun joinNum(j: Int, ours: Double, other: Double): Int {
+                    val ids = ArrayList<Int>()
+                    if (pts[j].anchor in 1..ANCHOR_MAX) ids.add(pts[j].anchor)
+                    for (r in pts[j].endpointAliases) if (r in 1..ANCHOR_MAX && r !in ids) ids.add(r)
+                    return if (ours >= other) ids.getOrNull(0) ?: 0 else ids.getOrNull(1) ?: 0
+                }
+                val left = if (k == 0) (if (pts.first().auto && pts.first().anchor > 0) pts.first().anchor else 0) else joinNum(pc.bounds[k], pc.lens[k], pc.lens[k - 1])
+                val right = if (k == pc.lens.size - 1) (if (pts.last().auto && pts.last().anchor > 0) pts.last().anchor else 0) else joinNum(pc.bounds[k + 1], pc.lens[k], pc.lens[k + 1])
+                if (left > 0) a = left
+                if (right > 0 && right != a) b = right
+                if (a == b) b = 0
             }
         }
         return Plan(a, b, tips, true)
@@ -830,15 +849,44 @@ object AutoAnchors {
         return if (changed) out else strokes
     }
 
-    /** The ghost line (of [refs]) a line is following: one of whose end numbers (or, for a closed ghost, any number) the line carries. Null when it follows none. */
-    private fun ghostFor(s: VectorStroke, refs: List<VectorStroke>): VectorStroke? {
+    /**
+     * The pieces a merged open line was made of: a join leaves a point that carries [VectorPoint.endpointAliases] until the next refresh. [bounds] = point indices where a piece
+     * starts / ends (first point, every join point, last point); [lens] = path length of each piece. The numbers at a join are ordered longer line first (see `VectorMerge.mid`).
+     */
+    private class Pieces(val bounds: IntArray, val lens: DoubleArray) {
+        /** Length of the piece a number at point [i] belongs to; at a join the longer of its two neighbours. */
+        fun weightAt(i: Int): Double {
+            val k = bounds.indexOf(i)
+            if (k >= 0) return if (k == 0) lens[0] else if (k == lens.size) lens[k - 1] else max(lens[k - 1], lens[k])
+            for (j in lens.indices) if (i > bounds[j] && i < bounds[j + 1]) return lens[j]
+            return 0.0
+        }
+    }
+    private fun piecesOf(pts: List<VectorPoint>): Pieces {
+        val cum = DoubleArray(pts.size)
+        for (i in 1 until pts.size) cum[i] = cum[i - 1] + hypot((pts[i].x - pts[i - 1].x).toDouble(), (pts[i].y - pts[i - 1].y).toDouble())
+        val b = ArrayList<Int>(); b.add(0)
+        for (i in 1 until pts.size - 1) if (pts[i].endpointAliases.isNotEmpty()) b.add(i)
+        b.add(pts.size - 1)
+        return Pieces(b.toIntArray(), DoubleArray(b.size - 1) { cum[b[it + 1]] - cum[b[it]] })
+    }
+
+    /**
+     * The ghost line (of [refs]) a line is following: one of whose end numbers (or, for a closed ghost, any number) the line carries. When the line was made by merging lines that
+     * followed different ghost lines, the ghost line followed by the LONGEST piece wins (not the first ghost line in the list). Null when it follows none.
+     */
+    private fun ghostFor(s: VectorStroke, refs: List<VectorStroke>, longest: Boolean = false): VectorStroke? {
+        val pc = if (longest && !s.isClosed && s.points.size >= 2) piecesOf(s.points) else null
+        var best: VectorStroke? = null; var bestW = -1.0
         for (g in refs) {
             if (g.fill != 0 || g.points.size < 2) continue
             val nums = if (g.isClosed && !seamEnds(g)) g.points.map { it.anchor }.filter { it > 0 } else listOf(g.points.first().anchor, g.points.last().anchor).filter { it > 0 }
             if (nums.isEmpty()) continue
-            if (s.points.any { it.anchor in nums || it.endpointAliases.any { r -> r in nums } }) return g
+            var w = -1.0
+            for ((i, p) in s.points.withIndex()) if (p.anchor in nums || p.endpointAliases.any { r -> r in nums }) w = max(w, pc?.weightAt(i) ?: 1.0)
+            if (w > bestW) { bestW = w; best = g }
         }
-        return null
+        return best
     }
 
     /**
@@ -848,7 +896,7 @@ object AutoAnchors {
      * the ghost's in-between numbers. Other lines keep their own numbers (ends first, then tips in order); new apexes get new numbers avoiding this keyframe and [avoid].
      * Returns [strokes] itself when nothing changed.
      */
-    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null, refs: List<VectorStroke> = emptyList()): List<VectorStroke> {
+    fun refresh(strokes: List<VectorStroke>, avoid: Set<Int>, sens: Float, only: Set<String>? = null, refs: List<VectorStroke> = emptyList(), longest: Boolean = false): List<VectorStroke> {
         fun hasAuto(s: VectorStroke) = s.points.any { (it.auto && it.anchor > 0) || it.endpointAliases.isNotEmpty() }
         fun hasAny(s: VectorStroke) = s.points.any { it.anchor > 0 || it.endpointAliases.isNotEmpty() }
         fun eligible(s: VectorStroke): Boolean {
@@ -867,7 +915,7 @@ object AutoAnchors {
                 for (p in o.points) { if (p.anchor > 0) others.add(p.anchor); for (r in p.endpointAliases) if (r > 0) others.add(r) }
             }
             var plan: Plan? = null
-            val g = ghostFor(s, refs)
+            val g = ghostFor(s, refs, longest)
             if (g != null) {
                 val hint: Boolean? = if (g.isClosed && !seamEnds(g)) null else {
                     val f = s.points.first(); val l = s.points.last()
@@ -881,7 +929,7 @@ object AutoAnchors {
                 }
                 plan = ghostPlan(s, g, hint, others)
             }
-            if (plan == null) plan = selfPlan(s, avoid)
+            if (plan == null) plan = selfPlan(s, avoid, longest)
             val taken = HashSet<Int>(others); taken.addAll(avoid)
             val r = layout(s, plan, sens, taken)
             if (r !== s) { cur[si] = r; changed = true }
@@ -905,7 +953,7 @@ object AutoAnchors {
                 o.points.last().x != s.points.last().x || o.points.last().y != s.points.last().y
         }.map { it.id }.toSet()
         val avoid = neighbourNumbers(layer, idx, ed)
-        return ensureEnds(refresh(strokes, avoid, sens, ids, referenceLines(layer, idx, nextFirst, ed)), avoid, ids)
+        return ensureEnds(refresh(strokes, avoid, sens, ids, referenceLines(layer, idx, nextFirst, ed), longest = true), avoid, ids) // the selection merge: the longest piece decides the new ends
     }
 }
 

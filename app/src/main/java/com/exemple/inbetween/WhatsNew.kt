@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            99, "2026-11-27", "Merge on selected points: the longest line decides the new end anchors",
+            listOf(
+                "When lines are merged with Merge on selected points, the end numbers of the longest of the merged lines now become the end numbers of the new line, instead of a short stub taking them over. The number at the join moves to the new far end.",
+                "A merged line that was made from lines that followed different ghost lines now follows the ghost line of its longest part, so that ghost line is marked as traced. The pen merge is unchanged. Not yet tested on a device."
+            )
+        ),
+        ReleaseNote(
             98, "2026-11-27", "Unclaim button for the ghost line; fewer wrong claims",
             listOf(
                 "New Unclaim button (broken-link icon) in the ghost controls: if the ghost line now shown is yellow-orange (counted as traced) when it should not be, tap it and the anchor numbers that paired it with your lines are replaced, so the next stroke traces it again. One undo step.",
