@@ -134,10 +134,12 @@ data class VectorStroke(
     /** Extra edge softness in px on top of anti-aliasing (0 = the crisp anti-aliased edge). */
     val aaSoft: Float = 0f,
     /** Corner sharpness 0..1 (0 = the usual softly rounded turns). Set by Merge: above 0 the turns of the line are not filleted and bends past about 30-55 degrees stay crisp corners instead of being smoothed into a curve. */
-    val joinSharp: Float = 0f
+    val joinSharp: Float = 0f,
+    /** End point variation 0..0.5 (Line filtering): each end of an open line is moved along the line by a random amount of up to this fraction of its length (shorter or longer), a different one on every keyframe ([endSeed]). Applied only when the outline is drawn; the points are untouched. Interpolated in-betweens carry none. */
+    val endVar: Float = 0f, val endSeed: Int = 0
 ) {
     fun hasInk() = inkCurve > 0.001f || inkLight > 0.001f || taperIn > 0.001f || taperOut > 0.001f || inkIrr > 0.001f
-    fun hasStyle() = hasInk() || aaSoft > 0.001f || joinSharp > 0.001f || fill != 0 || hardness < 0.999f || texId != 0 || texImg != 0 || tipShape != 0 || roundness < 0.999f || tipAngle != 0f || tipFollow
+    fun hasStyle() = hasInk() || aaSoft > 0.001f || joinSharp > 0.001f || endVar > 0.001f || fill != 0 || hardness < 0.999f || texId != 0 || texImg != 0 || tipShape != 0 || roundness < 0.999f || tipAngle != 0f || tipFollow
     fun tipActive() = tipShape == 1 || tipShape == 2 || roundness < 0.99f
     /** Takes the brush's look (anti-aliasing, hardness, texture, tip shape / roundness / angle). */
     fun withBrush(b: Brush) = copy(aa = b.aa, hardness = b.hardness.coerceIn(0f, 1f), texId = b.textureId, texAmt = b.textureAmt, texScale = b.texScale, texInvert = b.texInvert, texImg = b.texImg,
@@ -222,7 +224,7 @@ fun VectorStroke.toInk(): Ink {
     points.forEachIndexed { i, pt -> if (pt.auto && pt.anchor > 0) { m.add((AUTO_FLAG_OFFSET + i).toFloat()); m.add(1f) } } // automatic anchors: AUTO_FLAG_OFFSET + point index
     points.forEachIndexed { i, pt -> if (pt.endpoint && pt.anchor > 0) { m.add((ENDPOINT_FLAG_OFFSET + i).toFloat()); m.add(1f) }; pt.endpointAliases.forEach { r -> if (r in 1..ANCHOR_MAX) { m.add((ENDPOINT_ALIAS_OFFSET + i).toFloat()); m.add(r.toFloat()) } } } // structural endpoint identities, including aliases carried through a join
     points.forEachIndexed { i, pt -> if (pt.junction > 0) { m.add((JUNCTION_OFFSET + i).toFloat()); m.add(pt.junction.toFloat()) } } // junction links: JUNCTION_OFFSET + point index, junction number
-    return Ink(p, color, VECTOR_BRUSH, 5, null, m.toFloatArray(), (if (hasStyle()) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed|$hardness|$texId|$texAmt|$texScale|${if (texInvert) 1 else 0}|$texImg|$tipShape|$roundness|$tipAngle|${if (tipFollow) 1 else 0}|$fill|$fillGap|$fillGrow|${if (fillAcross) 1 else 0}|$fillSeedX|$fillSeedY|$inkCurve|$inkLight|$inkAngle|$taperIn|$taperOut|$inkIrr|$inkIrrScale|$aaSoft|$joinSharp"
+    return Ink(p, color, VECTOR_BRUSH, 5, null, m.toFloatArray(), (if (hasStyle()) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed|$hardness|$texId|$texAmt|$texScale|${if (texInvert) 1 else 0}|$texImg|$tipShape|$roundness|$tipAngle|${if (tipFollow) 1 else 0}|$fill|$fillGap|$fillGrow|${if (fillAcross) 1 else 0}|$fillSeedX|$fillSeedY|$inkCurve|$inkLight|$inkAngle|$taperIn|$taperOut|$inkIrr|$inkIrrScale|$aaSoft|$joinSharp|$endVar|$endSeed"
         else if (wobble > 0.01f) "$id|$brushId|$aa|$wobble|$wobbleScale|$wobbleSeed" else if (aa < 0.999f) "$id|$brushId|$aa" else "$id|$brushId").toByteArray(Charsets.UTF_8))
 }
 
@@ -261,7 +263,7 @@ fun Ink.toVectorStroke(): VectorStroke? {
         texInvert = pi(9) == 1, texImg = pi(10), tipShape = pi(11).coerceIn(0, TIP_NAMES.size - 1), roundness = pf(12, 1f).coerceIn(0.1f, 1f), tipAngle = pf(13, 0f), tipFollow = pi(14) == 1,
         fill = pi(15).coerceIn(0, 2), fillGap = pi(16), fillGrow = pi(17), fillAcross = pi(18) == 1, fillSeedX = pf(19, 0f), fillSeedY = pf(20, 0f),
         inkCurve = pf(21, 0f).coerceIn(0f, 1f), inkLight = pf(22, 0f).coerceIn(0f, 1f), inkAngle = pf(23, 315f), taperIn = pf(24, 0f).coerceIn(0f, 0.5f), taperOut = pf(25, 0f).coerceIn(0f, 0.5f),
-        inkIrr = pf(26, 0f).coerceIn(0f, 3f), inkIrrScale = pf(27, 40f).coerceIn(0.5f, 400f), aaSoft = pf(28, 0f).coerceIn(0f, 4f), joinSharp = pf(29, 0f).coerceIn(0f, 1f))
+        inkIrr = pf(26, 0f).coerceIn(0f, 3f), inkIrrScale = pf(27, 40f).coerceIn(0.5f, 400f), aaSoft = pf(28, 0f).coerceIn(0f, 4f), joinSharp = pf(29, 0f).coerceIn(0f, 1f), endVar = pf(30, 0f).coerceIn(0f, 0.5f), endSeed = pi(31))
 }
 
 fun Cel.vectorStrokes(): List<VectorStroke> = strokes.mapNotNull { it.toVectorStroke() }
@@ -440,6 +442,50 @@ object VectorTessellator {
     }
 
     /**
+     * End point variation: each end of an open line moves along the line by a random amount (up to [VectorStroke.endVar] of the line's length, drawn from
+     * [VectorStroke.endSeed]): a negative amount trims the line (at most 40 % of it per end), a positive one extends it straight along the end tangent.
+     */
+    private fun endVaryDense(d: Dense, s: VectorStroke): Dense {
+        val n = d.m
+        if (n < 2) return d
+        val cum = FloatArray(n)
+        for (i in 1 until n) cum[i] = cum[i - 1] + hypot(d.xs[i] - d.xs[i - 1], d.ys[i] - d.ys[i - 1])
+        val total = cum[n - 1]
+        if (total < 1e-3f) return d
+        val v = s.endVar.coerceIn(0f, 0.5f)
+        val d0 = wHash(s.endSeed, 1) * v * total // > 0 longer, < 0 shorter
+        val d1 = wHash(s.endSeed, 2) * v * total
+        val from = if (d0 < 0f) min(-d0, total * 0.4f) else 0f
+        val to = total - (if (d1 < 0f) min(-d1, total * 0.4f) else 0f)
+        if (to - from < 1e-2f) return d
+        val ox = FloatArray(n + 6); val oy = FloatArray(n + 6); val orr = FloatArray(n + 6)
+        var c = 0
+        fun add(x: Float, y: Float, r: Float) { ox[c] = x; oy[c] = y; orr[c] = r; c++ }
+        fun addAt(a: Float) {
+            var k = 0
+            while (k < n - 2 && cum[k + 1] < a) k++
+            val l = cum[k + 1] - cum[k]
+            val u = if (l > 1e-6f) ((a - cum[k]) / l).coerceIn(0f, 1f) else 0f
+            add(d.xs[k] + (d.xs[k + 1] - d.xs[k]) * u, d.ys[k] + (d.ys[k + 1] - d.ys[k]) * u, d.rs[k] + (d.rs[k + 1] - d.rs[k]) * u)
+        }
+        if (d0 > 0f) { // longer at the start: straight on, away from the line
+            var j = 1; while (j < n - 1 && hypot(d.xs[0] - d.xs[j], d.ys[0] - d.ys[j]) < 1e-3f) j++
+            val ex = d.xs[0] - d.xs[j]; val ey = d.ys[0] - d.ys[j]; val el = hypot(ex, ey)
+            if (el > 1e-6f) add(d.xs[0] + ex / el * d0, d.ys[0] + ey / el * d0, d.rs[0])
+        }
+        addAt(from)
+        for (i in 0 until n) if (cum[i] > from + 1e-3f && cum[i] < to - 1e-3f) add(d.xs[i], d.ys[i], d.rs[i])
+        addAt(to)
+        if (d1 > 0f) { // longer at the end
+            val e = n - 1
+            var j = n - 2; while (j > 0 && hypot(d.xs[e] - d.xs[j], d.ys[e] - d.ys[j]) < 1e-3f) j--
+            val ex = d.xs[e] - d.xs[j]; val ey = d.ys[e] - d.ys[j]; val el = hypot(ex, ey)
+            if (el > 1e-6f) add(d.xs[e] + ex / el * d1, d.ys[e] + ey / el * d1, d.rs[e])
+        }
+        return Dense(ox, oy, orr, c)
+    }
+
+    /**
      * "Boil": the drawn curve is cut into pieces shorter than the wavelength and every piece point is pushed by smooth noise along the line
      * (different noise for x and y), so each keyframe wobbles differently while the stored points stay clean.
      */
@@ -611,7 +657,7 @@ object VectorTessellator {
         if (closed && m >= 3 && hypot(xs[0] - xs[m - 1], ys[0] - ys[m - 1]) < 1e-3f) m-- // last point repeats the first
         if (m < 2) return null
         if (m < 3) closed = false
-        smoothThrough(xs, ys, rs, m, closed, s.joinSharp).let { d0 -> val d = if (s.wobble > 0.01f) wobbleDense(d0, closed, s.wobble, s.wobbleScale, s.wobbleSeed) else d0; xs = d.xs; ys = d.ys; rs = d.rs; m = d.m }
+        smoothThrough(xs, ys, rs, m, closed, s.joinSharp).let { d0 -> val dw = if (s.wobble > 0.01f) wobbleDense(d0, closed, s.wobble, s.wobbleScale, s.wobbleSeed) else d0; val d = if (!closed && s.fill == 0 && s.endVar > 0.001f) endVaryDense(dw, s) else dw; xs = d.xs; ys = d.ys; rs = d.rs; m = d.m }
         val segs = if (closed) m else m - 1
         val dx = FloatArray(segs); val dy = FloatArray(segs); val len = FloatArray(segs)
         for (k in 0 until segs) {
@@ -756,14 +802,16 @@ object VectorTessellator {
     fun bounds(s: VectorStroke): FloatArray {
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
         var w = 0f
+        var plen = 0f // length of the control polygon: the End point variation can extend an end by a share of the line's length
         for (i in s.points.indices) {
             val p = s.points[i]
             l = min(l, p.x); t = min(t, p.y); r = max(r, p.x); b = max(b, p.y)
             w = max(w, halfWidth(s, i))
+            if (i > 0) plen += hypot(p.x - s.points[i - 1].x, p.y - s.points[i - 1].y)
         }
         if (s.hasInk()) w *= INK_MAX
         if (s.points.isEmpty()) return floatArrayOf(0f, 0f, 0f, 0f)
-        val g = w * 2f + 3f + (if (s.fill != 0) 8f else 0f) + s.wobble * 1.5f + s.aaSoft * 3f + (1f - s.hardness.coerceIn(0f, 1f)) * max(w, 1f) * 2.5f // miter spikes are bounded by the 0.25 limit (<= 4 r); 2 r is enough for bevelled joins
+        val g = w * 2f + 3f + (if (s.fill != 0) 8f else 0f) + s.wobble * 1.5f + s.endVar * plen * 1.6f + s.aaSoft * 3f + (1f - s.hardness.coerceIn(0f, 1f)) * max(w, 1f) * 2.5f // miter spikes are bounded by the 0.25 limit (<= 4 r); 2 r is enough for bevelled joins
         return floatArrayOf(l - g, t - g, r + g, b + g)
     }
 
@@ -3178,44 +3226,39 @@ object VectorEraser {
 }
 
 
-/**
- * Sets (amount > 0) or clears (amount == 0) the wobble of every line of the [targets] keyframes of [layer], one undo step. Every keyframe gets
- * its own noise seed (kept when it already has one, unless [reseed]), and every line in it a seed of its own, so no two look alike.
- * Returns the keyframes that now are on the timeline in place of [targets] (same positions).
- */
-fun setVectorWobble(cut: Cut, layer: Layer, targets: List<Cel>, amount: Float, scale: Float, reseed: Boolean): List<Cel> {
-    val idxs = targets.map { t -> layer.cels.indexOfFirst { it === t } }.filter { it >= 0 }.distinct()
-    if (idxs.isEmpty()) return targets
-    val rnd = java.util.Random()
-    cut.record {
-        for (i in idxs) {
-            val cel = layer.cels.getOrNull(i) ?: continue
-            val strokes = cel.vectorStrokes()
-            if (strokes.isEmpty()) continue
-            val base = strokes.firstOrNull { it.wobbleSeed != 0 }?.wobbleSeed?.takeIf { !reseed } ?: rnd.nextInt()
-            val out = strokes.mapIndexed { si, st -> if (amount <= 0.01f) st.copy(wobble = 0f) else st.copy(wobble = amount, wobbleScale = scale, wobbleSeed = base + si * 7919) }
-            swapVectorCel(layer, cel, out)
-        }
-    }
-    return idxs.mapNotNull { layer.cels.getOrNull(it) }
-}
+/** A texture laid over the lines (the same fields the brush's texture section sets): [id] built-in texture (0 = none), [img] imported texture (0 = built-in), strength, scale, invert. */
+data class TexLook(val id: Int = 0, val img: Int = 0, val amt: Float = 0.7f, val scale: Float = 1f, val invert: Boolean = false)
 
-/** Everything the Line weight bar sets. [aa] null = leave the anti-aliasing of the lines alone; otherwise 0 (hard, aliased edge) or 1 (anti-aliased) with [soft] extra edge softness in px. */
+/**
+ * Everything the Line filtering window sets. [aa] null = leave the anti-aliasing of the lines alone; otherwise 0 (hard, aliased edge) or 1 (anti-aliased) with [soft]
+ * extra edge softness in px. [tex] null = leave the texture of the lines alone. [wobble] (px, 0 = off) with [wobbleScale] (px) and [endVar] (0..0.5 of the line's
+ * length, 0 = off) get a random look per keyframe and line: the seeds come from [seed], the keyframe's index and the line's index, so the preview and Apply look alike;
+ * with [keepSeeds] a line that already has a seed keeps it (changing the amount does not change the look), otherwise every line takes the new one.
+ */
 data class InkParams(
     val curve: Float = 0f, val light: Float = 0f, val angle: Float = 315f, val tIn: Float = 0f, val tOut: Float = 0f,
-    val irr: Float = 0f, val irrScale: Float = 40f, val aa: Float? = null, val soft: Float = 0f
+    val irr: Float = 0f, val irrScale: Float = 40f, val aa: Float? = null, val soft: Float = 0f,
+    val wobble: Float = 0f, val wobbleScale: Float = 60f, val endVar: Float = 0f, val seed: Int = 0, val keepSeeds: Boolean = true, val tex: TexLook? = null
 ) {
-    /** [s] with these settings (fills are left alone). */
-    fun applyTo(s: VectorStroke): VectorStroke {
+    /** [s] with these settings (fills are left alone). [salt] tells keyframes and lines apart (see above). */
+    fun applyTo(s: VectorStroke, salt: Int = 0): VectorStroke {
         if (s.fill != 0) return s
-        val w = s.copy(inkCurve = curve, inkLight = light, inkAngle = angle, taperIn = tIn, taperOut = tOut, inkIrr = irr, inkIrrScale = irrScale)
+        var w = s.copy(inkCurve = curve, inkLight = light, inkAngle = angle, taperIn = tIn, taperOut = tOut, inkIrr = irr, inkIrrScale = irrScale,
+            wobble = if (wobble > 0.01f) wobble else 0f, wobbleScale = wobbleScale, endVar = if (endVar > 0.001f) endVar.coerceAtMost(0.5f) else 0f)
+        val base = seed * 31 + salt
+        if (w.wobble > 0f) w = w.copy(wobbleSeed = if (keepSeeds && s.wobbleSeed != 0) s.wobbleSeed else (base or 1))
+        if (w.endVar > 0f) w = w.copy(endSeed = if (keepSeeds && s.endSeed != 0) s.endSeed else ((base + 17) or 1))
+        if (tex != null) w = w.copy(texId = tex.id, texImg = tex.img, texAmt = tex.amt, texScale = tex.scale, texInvert = tex.invert)
         return if (aa != null) w.copy(aa = aa, aaSoft = soft) else w
     }
 }
 
+/** The [salt] of line [lineIndex] of keyframe [celIndex] (see [InkParams]). */
+fun inkSalt(celIndex: Int, lineIndex: Int): Int = celIndex * 1000003 + lineIndex * 7919
+
 /**
- * Sets the designed line weight and anti-aliasing (see [InkParams]) on every line of the [targets] keyframes of [layer], one undo step.
- * Fills are left alone. Returns the keyframes that now are on the timeline in place of [targets].
+ * Sets the Line filtering settings (designed line weight, wobble, end point variation, texture, anti-aliasing; see [InkParams]) on every line of the [targets]
+ * keyframes of [layer], one undo step. Fills are left alone. Returns the keyframes that now are on the timeline in place of [targets].
  */
 fun setVectorInk(cut: Cut, layer: Layer, targets: List<Cel>, p: InkParams): List<Cel> {
     val idxs = targets.map { t -> layer.cels.indexOfFirst { it === t } }.filter { it >= 0 }.distinct()
@@ -3225,7 +3268,7 @@ fun setVectorInk(cut: Cut, layer: Layer, targets: List<Cel>, p: InkParams): List
             val cel = layer.cels.getOrNull(i) ?: continue
             val strokes = cel.vectorStrokes()
             if (strokes.none { it.fill == 0 }) continue
-            swapVectorCel(layer, cel, strokes.map { p.applyTo(it) })
+            swapVectorCel(layer, cel, strokes.mapIndexed { si, st -> p.applyTo(st, inkSalt(i, si)) })
         }
     }
     return idxs.mapNotNull { layer.cels.getOrNull(it) }
@@ -3285,20 +3328,21 @@ object VectorInkPreview {
             OnionWarmup.request(hit.cel.strokes, urgent = true)
             return hit.prev?.takeIf { TileCache.peekReady(it.strokes) != null } ?: cel
         }
-        if (!readOnly) return build(key, sig, cel, p)
+        val ci = layer.cels.indexOfFirst { it === cel }
+        if (!readOnly) return build(key, sig, cel, p, ci)
         if (pending.add(key)) main.post {
-            synchronized(this) { try { build(key, sig, cel, p) } catch (_: Throwable) { } finally { pending.remove(key) } }
+            synchronized(this) { try { build(key, sig, cel, p, ci) } catch (_: Throwable) { } finally { pending.remove(key) } }
             ready += 1
         }
         return hit?.cel?.takeIf { TileCache.peekReady(it.strokes) != null } ?: cel
     }
 
-    private fun build(key: Int, sig: List<Any?>, cel: Cel, p: InkParams): Cel {
+    private fun build(key: Int, sig: List<Any?>, cel: Cel, p: InkParams, ci: Int): Cel {
         val old = cache[key]
         if (old != null && old.sig == sig) return old.cel
         old?.prev?.let { TileCache.invalidate(it.strokes) }
         val c = Cel(1)
-        cel.vectorStrokes().forEach { c.strokes.add(p.applyTo(it).toInk()) }
+        cel.vectorStrokes().forEachIndexed { si, st -> c.strokes.add(p.applyTo(st, inkSalt(ci, si)).toInk()) }
         cache[key] = Entry(sig, c, old?.cel)
         return c
     }

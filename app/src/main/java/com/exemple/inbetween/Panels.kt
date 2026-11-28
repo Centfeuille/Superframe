@@ -629,6 +629,40 @@ private fun CurveSection(title: String, pts: List<Float>, saved: List<Float>?, o
     }
 }
 
+/**
+ * Texture choice with its sliders, used by the Line filtering window; it works like the brush's "Texture and grain" section: none (∅), the built-in textures,
+ * the imported ones (hold one to remove it from the library) and + to import an image (bright = ink); once a texture is chosen, Texture strength, Texture scale and
+ * Invert texture appear.
+ */
+@Composable
+fun TextureChoice(look: TexLook, onChange: (TexLook) -> Unit) {
+    val ctx = LocalContext.current
+    val pickTex = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val id = BrushAssets.importImage(ctx, uri, BrushAssets.TEXTURE)
+            if (id == null) android.widget.Toast.makeText(ctx, "Could not read that image", android.widget.Toast.LENGTH_SHORT).show() else onChange(look.copy(img = id))
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        PicRow {
+            PicButton(null, look.id == 0 && look.img == 0, label = "∅") { onChange(look.copy(id = 0, img = 0)) }
+            for (t in 1 until TEXTURE_NAMES.size) {
+                PicButton(remember(t, look.invert) { stampPreview(previewBrush(textureId = t).copy(texInvert = look.invert)) }, look.img == 0 && look.id == t) { onChange(look.copy(id = t, img = 0)) }
+            }
+            for (id in BrushAssets.texIds.toList()) {
+                PicButton(remember(id, look.invert) { BrushAssets.mask(id)?.let { stampPreview(previewBrush(texImg = id).copy(texInvert = look.invert)) } }, look.img == id, onLong = { BrushAssets.forget(id) }) { onChange(look.copy(img = id)) }
+            }
+            PicButton(null, false, label = "+") { pickTex.launch(arrayOf("image/*")) }
+        }
+        Text("+ imports an image as a texture (bright = ink). Hold a texture to remove it from the library.", fontSize = 11.sp, color = Color.Gray)
+        if (look.id > 0 || look.img != 0) {
+            Pct("Texture strength", look.amt) { v -> onChange(look.copy(amt = v)) }
+            NumSlider("Texture scale (%)", (look.scale * 100).roundToInt(), 25, 400) { v -> onChange(look.copy(scale = v / 100f)) }
+            FilterChip(look.invert, { onChange(look.copy(invert = !look.invert)) }, { Text("Invert texture") }, Modifier.fillMaxWidth())
+        }
+    }
+}
+
 @Composable
 private fun BrushDetail(ed: Editor, forE: Boolean, back: () -> Unit, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current

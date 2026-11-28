@@ -135,8 +135,7 @@ fun VectorToolStrip(cut: Cut, ed: Editor, buttonSize: Dp, @Suppress("UNUSED_PARA
         ed.vecXfCancel(); ed.tool = 0; ed.vecMode = if (here) 0 else 3; ed.vecGuideSelected = -1
     }
     IconBtn(Icons.Filled.LinearScale, size = buttonSize, on = ed.vecInterpOpen, tip = "Interpolation settings of the selected keyframes (every keyframe after Select all): lines, curve, bake, and Off") { ed.vecInterpOpen = true }
-    IconBtn(Icons.Filled.Waves, size = buttonSize, on = ed.vecWobbleOpen, tip = "Wobble: a different organic boil on each selected keyframe (or the current one)") { ed.vecWobbleOpen = !ed.vecWobbleOpen; if (ed.vecWobbleOpen) ed.vecInkOpen = false }
-    IconBtn(Icons.Filled.Edit, size = buttonSize, on = ed.vecInkOpen, tip = "Line weight: curvature, light direction and tapers for the selected keyframes (or the current one)") { ed.vecInkOpen = !ed.vecInkOpen; if (ed.vecInkOpen) ed.vecWobbleOpen = false }
+    IconBtn(Icons.Filled.Edit, size = buttonSize, on = ed.vecInkOpen, tip = "Line filtering: line weight, wobble, end point variation and texture for the selected keyframes (or the current one)") { ed.vecInkOpen = !ed.vecInkOpen }
     IconBtn(Icons.Filled.ContentCut, size = buttonSize, on = ed.vecMode == 2 && ed.tool == 0, tip = "Cutter: draw across strokes to slice them. Tap again to go back to drawing") {
         val on = ed.vecMode == 2 && ed.tool == 0; ed.tool = 0; ed.vecMode = if (on) 0 else 2
     }
@@ -443,44 +442,6 @@ fun VectorInterpolationHost(cut: Cut, ed: Editor) {
     VectorInterpolationDialog(cut, ed, layer, vecInterpTargets(cut, ed, layer)) // the selected keyframes, every keyframe after Select all, else the span at the playhead
 }
 
-/** The Wobble bar (bottom centre): sets the boil of the selected keyframes, or of the current keyframe when none is selected. Each keyframe gets its own noise. */
-@Composable
-fun VectorWobbleBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
-    val layer = cut.layer?.takeIf { it.vector && it.visible } ?: return
-    if (!ed.vecWobbleOpen) return
-    val idx = layer.indexAt(cut.time)
-    val picked = ed.selCels.filter { c -> layer.cels.any { it === c } }
-    val targets = picked.ifEmpty { listOfNotNull(layer.cels.getOrNull(idx)) }
-    val cur = targets.firstOrNull()?.vectorStrokes()?.firstOrNull { it.wobble > 0f }
-    // the sliders are quadratic (fine steps at the low end): amount 0.05..12 px, scale 2..200 px
-    val aMin = 0.05f; val aMax = 12f; val sMin = 2f; val sMax = 200f
-    var amount by remember(targets.firstOrNull()) { mutableStateOf((cur?.wobble ?: 3f).coerceIn(aMin, aMax)) }
-    var scale by remember(targets.firstOrNull()) { mutableStateOf((cur?.wobbleScale ?: 60f).coerceIn(sMin, sMax)) }
-    fun run(a: Float, reseed: Boolean) {
-        val now = setVectorWobble(cut, layer, targets, a, scale, reseed)
-        if (picked.isNotEmpty()) { ed.selCels.clear(); ed.selCels.addAll(now) }
-    }
-    Column(modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(horizontal = 12.dp, vertical = 6.dp).widthIn(min = 300.dp, max = 380.dp)) {
-        Text("Wobble · ${targets.size} keyframe${if (targets.size == 1) "" else "s"}${if (cur != null) " (on)" else ""}", fontSize = 11.sp, color = Color(0xFFB8B8C4))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Amount", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
-            Slider(value = kotlin.math.sqrt((amount - aMin) / (aMax - aMin)), onValueChange = { amount = ((aMin + (aMax - aMin) * it * it) * 100f).roundToInt() / 100f }, valueRange = 0f..1f, modifier = Modifier.weight(1f).height(32.dp))
-            Text(if (amount < 1f) "%.2f px".format(amount) else "%.1f px".format(amount), fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Scale", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(62.dp))
-            Slider(value = kotlin.math.sqrt((scale - sMin) / (sMax - sMin)), onValueChange = { scale = (sMin + (sMax - sMin) * it * it).roundToInt().toFloat() }, valueRange = 0f..1f, modifier = Modifier.weight(1f).height(32.dp))
-            Text("${scale.roundToInt()} px", fontSize = 11.sp, color = Color.White, modifier = Modifier.width(52.dp))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { run(amount, false) }, enabled = targets.isNotEmpty(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Apply", fontSize = 12.sp) }
-            TextButton(onClick = { run(amount, true) }, enabled = targets.isNotEmpty(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("New look", fontSize = 12.sp) }
-            TextButton(onClick = { run(0f, false) }, enabled = cur != null, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Off", fontSize = 12.sp) }
-            TextButton(onClick = { ed.vecWobbleOpen = false }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Close", fontSize = 12.sp) }
-        }
-    }
-}
-
 /** A circle with a line and an arrow: the direction the light comes FROM. Tap or drag anywhere on it; snaps to 15 degrees. 0 = right, 90 = below, 180 = left, 270 = above. */
 @Composable
 private fun LightDial(angle: Float, onChange: (Float) -> Unit, modifier: Modifier = Modifier) {
@@ -525,8 +486,9 @@ private fun aaToSlider(aa: Float, soft: Float): Float = if (aa <= 0.02f) 0.05f e
 private fun aaLabel(v: Float): String = aaFromSlider(v).let { (aa, soft) -> if (aa == 0f) "Off" else if (soft < 0.05f) "Standard" else "+%.1f px".format(soft) }
 
 /**
- * The Line weight bar (bottom left, drawn at 75% size): designed anime-style weight of vector lines, stored per line and applied when the outline is drawn (live,
- * non-destructive). Preview shows the current settings on the canvas without changing the drawing; Apply / All frames write them (one undo step).
+ * The Line filtering window (bottom left, drawn at 75% size; it holds the former Line weight bar and Wobble bar): designed anime-style weight of vector lines, wobble,
+ * End point variation (a random change of the length of the line ends, different on every keyframe) and a texture, stored per line and applied when the outline is drawn
+ * (live, non-destructive). Preview shows the current settings on the canvas without changing the drawing; Apply / All frames write them (one undo step).
  */
 @Composable
 fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
@@ -536,7 +498,7 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     val idx = layer.indexAt(cut.time)
     val picked = ed.selCels.filter { c -> layer.cels.any { it === c } }
     val targets = picked.ifEmpty { listOfNotNull(layer.cels.getOrNull(idx)) }
-    val cur = targets.firstOrNull()?.vectorStrokes()?.firstOrNull { it.fill == 0 && it.hasInk() }
+    val cur = targets.firstOrNull()?.vectorStrokes()?.firstOrNull { it.fill == 0 && (it.hasInk() || it.wobble > 0.01f || it.endVar > 0.001f) }
     val first = targets.firstOrNull()?.vectorStrokes()?.firstOrNull { it.fill == 0 }
     var curve by remember(targets.firstOrNull()) { mutableStateOf(cur?.inkCurve ?: 0.5f) }
     var light by remember(targets.firstOrNull()) { mutableStateOf(cur?.inkLight ?: 0f) }
@@ -546,9 +508,19 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
     var irrScale by remember(targets.firstOrNull()) { mutableStateOf(cur?.inkIrrScale ?: 40f) }
     var aaV by remember(targets.firstOrNull()) { mutableStateOf(aaToSlider(first?.aa ?: 1f, first?.aaSoft ?: 0f)) }
     var aaTouched by remember(targets.firstOrNull()) { mutableStateOf(false) }
+    var wob by remember(targets.firstOrNull()) { mutableStateOf(first?.wobble ?: 0f) }
+    var wobScale by remember(targets.firstOrNull()) { mutableStateOf(first?.wobbleScale ?: 60f) }
+    var endVar by remember(targets.firstOrNull()) { mutableStateOf(first?.endVar ?: 0f) }
+    var look by remember(targets.firstOrNull()) { mutableStateOf(TexLook(first?.texId ?: 0, first?.texImg ?: 0, first?.texAmt ?: 0.7f, first?.texScale ?: 1f, first?.texInvert ?: false)) }
+    var texTouched by remember(targets.firstOrNull()) { mutableStateOf(false) } // the lines keep the texture of their brush until one is chosen here
+    var seed by remember { mutableStateOf(java.util.Random().nextInt()) }
+    var keepSeeds by remember { mutableStateOf(true) }
     var angle by remember { mutableStateOf(ed.inkAngleCut) }
     var preview by remember { mutableStateOf(false) }
-    fun params(): InkParams { val (aa, soft) = aaFromSlider(aaV); return InkParams(curve, light, angle, tIn, tOut, irr, irrScale, if (aaTouched) aa else null, soft) }
+    fun params(): InkParams {
+        val (aa, soft) = aaFromSlider(aaV)
+        return InkParams(curve, light, angle, tIn, tOut, irr, irrScale, if (aaTouched) aa else null, soft, wobble = wob, wobbleScale = wobScale, endVar = endVar, seed = seed, keepSeeds = keepSeeds, tex = if (texTouched) look else null)
+    }
     // The preview follows every change; it only draws, nothing is written to the document until Apply.
     androidx.compose.runtime.SideEffect { if (preview && !cut.playing) VectorInkPreview.set(layer.id, targets, params()) else VectorInkPreview.clear() }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { VectorInkPreview.clear() } }
@@ -558,7 +530,7 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         VectorInkPreview.clear() // the real lines take over; the preview is switched on again by the effect while Preview stays on
         val now = setVectorInk(cut, layer, set, p)
         if (!all && picked.isNotEmpty()) { ed.selCels.clear(); ed.selCels.addAll(now) }
-        if (all) android.widget.Toast.makeText(ctx, "Line weight set on ${now.size} keyframes", android.widget.Toast.LENGTH_SHORT).show()
+        if (all) android.widget.Toast.makeText(ctx, "Line filtering set on ${now.size} keyframes", android.widget.Toast.LENGTH_SHORT).show()
     }
     @Composable
     fun row(label: String, value: Float, range: ClosedFloatingPointRange<Float>, text: String, set: (Float) -> Unit) {
@@ -574,7 +546,7 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             .heightIn(max = 420.dp).verticalScroll(rememberScrollState())
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Line weight · ${targets.size} keyframe${if (targets.size == 1) "" else "s"}${if (cur != null) " (on)" else ""}", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.weight(1f))
+            Text("Line filtering · ${targets.size} keyframe${if (targets.size == 1) "" else "s"}${if (cur != null) " (on)" else ""}", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.weight(1f))
             ToggleChip("Preview", preview) { preview = !preview }
         }
         row("Curvature", curve, 0f..1f, "${(curve * 100).roundToInt()}%") { curve = it }
@@ -582,6 +554,13 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         row("Irreg. scale", kotlin.math.sqrt((irrScale - 0.5f) / 199.5f), 0f..1f, if (irrScale < 10f) "${"%.1f".format(irrScale)} px" else "${irrScale.roundToInt()} px") { irrScale = ((0.5f + 199.5f * it * it) * 10f).roundToInt() / 10f }
         row("Taper in", tIn, 0f..0.5f, "${(tIn * 100).roundToInt()}%") { tIn = it }
         row("Taper out", tOut, 0f..0.5f, "${(tOut * 100).roundToInt()}%") { tOut = it }
+        // End point variation: each end of an open line gets a random length change (shorter or longer) of up to this share of the line, different on every keyframe
+        row("End variation", endVar, 0f..0.5f, if (endVar < 0.005f) "Off" else "${(endVar * 100).roundToInt()}%") { endVar = it }
+        // Wobble (the former Wobble bar): the sliders are quadratic (fine steps at the low end): amount 0..12 px, scale 2..200 px
+        row("Wobble", kotlin.math.sqrt((wob / 12f).coerceIn(0f, 1f)), 0f..1f, if (wob < 0.05f) "Off" else if (wob < 1f) "%.2f px".format(wob) else "%.1f px".format(wob)) { wob = ((12f * it * it) * 20f).roundToInt() / 20f }
+        row("Wobble scale", kotlin.math.sqrt(((wobScale - 2f) / 198f).coerceIn(0f, 1f)), 0f..1f, "${wobScale.roundToInt()} px") { wobScale = (2f + 198f * it * it).roundToInt().toFloat() }
+        Text("Texture", fontSize = 11.sp, color = Color(0xFFB8B8C4), modifier = Modifier.padding(top = 4.dp))
+        TextureChoice(look) { look = it; texTouched = true }
         row("Anti-alias", aaV, 0f..1f, aaLabel(aaV)) { aaV = it; aaTouched = true }
         Row(verticalAlignment = Alignment.CenterVertically) {
             LightDial(angle, { angle = it }, Modifier.padding(vertical = 4.dp))
@@ -594,6 +573,7 @@ fun VectorInkBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { run(params(), false) }, enabled = targets.isNotEmpty(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Apply", fontSize = 12.sp) }
             TextButton(onClick = { run(params(), true) }, enabled = layer.cels.isNotEmpty(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("All frames", fontSize = 12.sp) }
+            TextButton(onClick = { seed = java.util.Random().nextInt(); keepSeeds = false }, enabled = wob > 0.01f || endVar > 0.001f, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("New look", fontSize = 12.sp) } // new random wobble / end variation
             TextButton(onClick = { run(InkParams(angle = angle), false) }, enabled = cur != null, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Off", fontSize = 12.sp) }
             TextButton(onClick = { ed.vecInkOpen = false }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Close", fontSize = 12.sp) }
         }

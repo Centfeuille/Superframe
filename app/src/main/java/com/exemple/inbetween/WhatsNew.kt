@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            109, "2026-11-28", "Line filtering: wobble and line weight in one window, End variation, texture",
+            listOf(
+                "The Wobble and Line weight windows are now one window, Line filtering (the pencil button on the vector timeline bar). Wobble has its own sliders in it, and Preview now shows the wobble too. New look gives a new random wobble.",
+                "New End variation slider: the ends of each open line get a random change of length, shorter or longer by up to that share of the line, different on every keyframe. The line's points do not change, only how it is drawn.",
+                "New Texture choice in the window, like the brush's texture options: pick none or a texture (or import one with +), then set its strength and scale, and invert it if you like. Until you pick one, the lines keep the texture of their brush.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             108, "2026-11-28", "Bezier curve: one or two handles; icon-only tool options",
             listOf(
                 "Line tool, Bezier curve: a new option chooses one curve handle or two. With one handle the curve is an arch that bends toward the handle from both ends, and the tap that places the handle applies it. Two handles work as before.",

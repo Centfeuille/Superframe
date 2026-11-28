@@ -2978,7 +2978,6 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         if (!cut.playing) VectorInterpolationHost(cut, ed)
         if (!cut.playing) VectorFillBar(cut, ed, Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp).zIndex(5f))
         if (!cut.playing) VectorInkBar(cut, ed, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomEnd else Alignment.BottomStart).padding(start = if (AppSettings.leftHanded) 0.dp else 14.dp, end = if (AppSettings.leftHanded) 14.dp else 0.dp, bottom = 14.dp).zIndex(6f))
-        if (!cut.playing) VectorWobbleBar(cut, ed, Modifier.align(Alignment.TopCenter).padding(top = 14.dp).zIndex(6f))
         if (!cut.playing) VectorShapeBar(cut, ed, Modifier.align(Alignment.TopEnd).padding(top = 14.dp, end = 14.dp).zIndex(6f)) // shape flip: top right (VectorShapes.kt)
         ClipboardBar(ed, cut, Modifier.align(if (AppSettings.leftHanded) Alignment.BottomStart else Alignment.BottomEnd).padding(start = if (AppSettings.leftHanded) 14.dp else 0.dp, end = if (AppSettings.leftHanded) 0.dp else 14.dp, bottom = 14.dp).zIndex(5f))
         // Selection widget bar: follows the selection (and its transform) instead of staying at the top of the screen

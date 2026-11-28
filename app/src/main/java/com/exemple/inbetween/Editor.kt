@@ -1097,9 +1097,8 @@ class Editor : ViewModel() {
     var vecBrushStrength by mutableFloatStateOf(0.5f)   // Reshape tool strength 0..1
     var vecFillLive by mutableStateOf(true)             // Fill tool on a vector layer: live fills (recomputable) instead of baked shapes
     var vecFillAcross by mutableStateOf(false)          // ... and the lines of every visible drawing layer count as walls
-    var vecInkOpen by mutableStateOf(false)             // the Line weight bar (curvature, light and taper weight of vector lines)
+    var vecInkOpen by mutableStateOf(false)             // the Line filtering window (weight, wobble, end point variation, texture of vector lines)
     var inkAngleCut by mutableFloatStateOf(315f)       // light direction used by the Line weight bar (session; stored per line when applied)
-    var vecWobbleOpen by mutableStateOf(false)          // the Wobble bar (per-keyframe boil of vector lines)
     var vecInterpOpen by mutableStateOf(false)          // the interpolation detail menu of the selected keyframes
     var vecPointView by mutableIntStateOf(0)            // Selection tool on a vector layer: which points are drawn, 0 = all, 1 = only the anchor points, 2 = none (the lines stay; hit tests are unchanged). Session only
     var outOfPegSide by mutableIntStateOf(0)          // 0 idle, -1 previous, +1 following
