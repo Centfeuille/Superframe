@@ -842,7 +842,8 @@ class Editor : ViewModel() {
     var paintInSel by mutableStateOf(true)    // brush, eraser, shapes and fill only change the pixels inside the selection
     var fillAuto by mutableStateOf(true)      // Fill closes the gaps of an imperfectly closed outline by itself (smartFlood)
     var refAll by mutableStateOf(true)    // wand / fill look at all visible layers instead of the active one
-    var lineShape by mutableIntStateOf(0) // 0 line, 1 rectangle, 2 circle, 3 ellipse
+    var lineShape by mutableIntStateOf(0) // 0 line, 1 rectangle, 2 circle, 3 ellipse, 4 Bezier curve
+    var bezHandles by mutableIntStateOf(2) // Line tool, Bezier curve: 2 = two handles (cubic, default), 1 = one handle (quadratic); session only
     var sel by mutableStateOf<Sel?>(null)
     var xform by mutableStateOf<Xform?>(null)
     var xfLock by mutableStateOf(false)   // transform handles keep the aspect ratio (selection, camera)

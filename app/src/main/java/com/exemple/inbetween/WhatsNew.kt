@@ -38,6 +38,14 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            108, "2026-11-28", "Bezier curve: one or two handles; icon-only tool options",
+            listOf(
+                "Line tool, Bezier curve: a new option chooses one curve handle or two. With one handle the curve is an arch that bends toward the handle from both ends, and the tap that places the handle applies it. Two handles work as before.",
+                "The options of the Selection, Fill, Line tool and Reshape tools are now icon buttons instead of text buttons: shapes, Bezier handles, Shift / Smoothen / Distort, New / Add / Erase, Stroke-aware, Auto fill, Draw inside the selection only, All visible layers, Auto gap closing and Invert selection. Hold the S Pen or mouse over a button to see its name.",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             107, "2026-11-28", "Interpolation drag: Sharp turns slider",
             listOf(
                 "The Smooth slider could turn a rounded peak into a sharp tip. The Smooth row now has a second slider, Sharp turns: it sets the turn angle from which a bend counts as a corner and stays sharp. Lower keeps more corners, higher smooths more, and all the way to the right nothing stays sharp. Reset puts it back.",

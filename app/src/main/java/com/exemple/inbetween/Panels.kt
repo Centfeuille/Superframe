@@ -44,6 +44,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.InvertColors
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -732,6 +735,29 @@ private fun BrushDetail(ed: Editor, forE: Boolean, back: () -> Unit, modifier: M
 private fun PicRow(content: @Composable RowScope.() -> Unit) =
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
 
+/** An icon-only sub-option button of a tool's options panel: filled when on, the name is the hover tip and the accessibility label. */
+@Composable
+private fun OptBox(on: Boolean, tip: String, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Tip(tip) {
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
+                .background(if (on) MaterialTheme.colorScheme.primary else Color(0x33FFFFFF)).clickable(onClick = onClick)
+                .semantics { contentDescription = tip },
+            contentAlignment = Alignment.Center
+        ) { content() }
+    }
+}
+
+@Composable
+private fun optFg(on: Boolean): Color = if (on) MaterialTheme.colorScheme.onPrimary else LightGrey
+
+@Composable
+private fun OptIcon(icon: ImageVector, on: Boolean, tip: String, onClick: () -> Unit) =
+    OptBox(on, tip, onClick) { Icon(icon, null, Modifier.size(26.dp), tint = optFg(on)) }
+
+@Composable
+private fun OptRow(content: @Composable RowScope.() -> Unit) = Row(horizontalArrangement = Arrangement.spacedBy(6.dp), content = content)
+
 /** Options of the selected tool. Brush / eraser: preset list (previews), then the chosen preset's detail page. */
 @Composable
 fun OptionsPanel(ed: Editor, detail: Boolean, setDetail: (Boolean) -> Unit) {
@@ -745,49 +771,57 @@ fun OptionsPanel(ed: Editor, detail: Boolean, setDetail: (Boolean) -> Unit) {
         when (ed.tool) {
             2 -> {
                 Text("Selection", fontSize = 14.sp)
-                listOf("Rectangle", "Lasso", "Point-based").forEachIndexed { i, n ->
-                    FilterChip(ed.selMode == i, { ed.selMode = i }, { Text(n) }, Modifier.fillMaxWidth(), leadingIcon = { SelGlyph(i) })
-                }
-                FilterChip(ed.selWand, { ed.selWand = !ed.selWand }, { Text("Magic wand") }, Modifier.fillMaxWidth(), leadingIcon = { SelGlyph(3) })
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("New", "Add (Shift)", "Erase (Alt)").forEachIndexed { i, n ->
-                        FilterChip(ed.selOp == i, { ed.selOp = i }, { Text(n, fontSize = 11.sp) }, Modifier.weight(1f))
+                OptRow {
+                    listOf("Rectangle", "Lasso", "Point-based").forEachIndexed { i, n ->
+                        OptBox(ed.selMode == i, n, { ed.selMode = i }) { SelGlyph(i, 26.dp, optFg(ed.selMode == i)) }
                     }
+                    OptBox(ed.selWand, "Magic wand", { ed.selWand = !ed.selWand }) { SelGlyph(3, 26.dp, optFg(ed.selWand)) }
                 }
-                FilterChip(ed.selSmart, { ed.selSmart = !ed.selSmart }, { Text("Stroke-aware selection") }, Modifier.fillMaxWidth())
-                FilterChip(ed.selAutoFill, { ed.selAutoFill = !ed.selAutoFill }, { Text("Auto fill the selection") }, Modifier.fillMaxWidth())
-                FilterChip(ed.paintInSel, { ed.paintInSel = !ed.paintInSel }, { Text("Draw and paint inside the selection only") }, Modifier.fillMaxWidth())
-                if (ed.sel != null) OutlinedButton({ ed.open?.let { invertSelection(ed, it) } }, Modifier.fillMaxWidth()) { Text("Invert selection") }
+                OptRow {
+                    OptIcon(OptSelNewIcon, ed.selOp == 0, "New selection") { ed.selOp = 0 }
+                    OptIcon(OptSelAddIcon, ed.selOp == 1, "Add to the selection (Shift)") { ed.selOp = 1 }
+                    OptIcon(OptSelEraseIcon, ed.selOp == 2, "Erase from the selection (Alt)") { ed.selOp = 2 }
+                }
+                OptRow {
+                    OptIcon(OptStrokeAwareIcon, ed.selSmart, "Stroke-aware selection") { ed.selSmart = !ed.selSmart }
+                    OptIcon(OptAutoFillIcon, ed.selAutoFill, "Auto fill the selection") { ed.selAutoFill = !ed.selAutoFill }
+                    OptIcon(OptPaintInSelIcon, ed.paintInSel, "Draw and paint inside the selection only") { ed.paintInSel = !ed.paintInSel }
+                    if (ed.sel != null) OptIcon(Icons.Filled.InvertColors, false, "Invert selection") { ed.open?.let { invertSelection(ed, it) } }
+                }
                 Text("Stroke-aware: rectangle, lasso and point selections hug the drawn strokes; a stroke that pokes a few pixels out of the outline is selected with it, the rest of the drawing outside stays untouched. Add / Erase can also be held on a keyboard (Shift / Alt or Ctrl).", fontSize = 12.sp)
-                FilterChip(ed.refAll, { ed.refAll = !ed.refAll }, { Text("All visible drawing layers") }, Modifier.fillMaxWidth())
+                OptRow { OptIcon(Icons.Filled.Layers, ed.refAll, "All visible drawing layers") { ed.refAll = !ed.refAll } }
                 Text("When enabled, visible drawing layers are combined for boundary detection; when disabled, only the selected drawing layer is sampled. Hidden layers are ignored. Colour tolerance is fixed. The blue preview shows the exact selection; while holding, drag sideways to adjust the gap fill (px) and up or down to expand / reduce. Point-based: tap the first point to close.", fontSize = 12.sp)
             }
             3 -> {
                 Text("Fill", fontSize = 14.sp)
                 NumSlider("Grow (px)", ed.fillGrow, 0, 6) { ed.fillGrow = it }
-                FilterChip(ed.fillAuto, { ed.fillAuto = !ed.fillAuto }, { Text("Auto gap closing") }, Modifier.fillMaxWidth())
+                OptRow { OptIcon(OptGapCloseIcon, ed.fillAuto, "Auto gap closing") { ed.fillAuto = !ed.fillAuto } }
                 Text("Auto gap closing: when the fill would escape through a gap in the outline, the smallest gap that keeps it inside is closed for you (up to 24 px). Dragging sideways sets the gap by hand instead. A tap on or beside a line fills the open area next to it.", fontSize = 12.sp)
-                FilterChip(ed.refAll, { ed.refAll = !ed.refAll }, { Text("All visible drawing layers") }, Modifier.fillMaxWidth())
+                OptRow { OptIcon(Icons.Filled.Layers, ed.refAll, "All visible drawing layers") { ed.refAll = !ed.refAll } }
                 Text("When enabled, visible drawing layers are combined for boundary detection; when disabled, only the selected drawing layer is sampled. Hidden layers are ignored. Colour tolerance is fixed. The blue preview shows the exact fill; drag sideways while holding to adjust the gap fill (px), or up / down to grow / shrink.", fontSize = 12.sp)
             }
             4 -> {
                 Text("Line tool", fontSize = 14.sp)
-                listOf("Line", "Rectangle", "Circle", "Ellipse", "Bezier curve").forEachIndexed { i, n ->
-                    FilterChip(ed.lineShape == i, { ed.lineShape = i }, { Text(n) }, Modifier.fillMaxWidth())
+                OptRow {
+                    listOf("Line" to OptLineIcon, "Rectangle" to OptRectIcon, "Circle" to OptCircleIcon, "Ellipse" to OptEllipseIcon, "Bezier curve" to (if (ed.bezHandles == 1) OptBezierOneIcon else OptBezierTwoIcon))
+                        .forEachIndexed { i, (n, ic) -> OptIcon(ic, ed.lineShape == i, n) { ed.lineShape = i } }
                 }
-                Text("Uses the selected brush and its pressure curves. Circle: drag a corner to the opposite corner. Ellipse: drag the major axis, lift, move the pen to set the minor axis, tap to apply. Bezier curve: drag the end points, lift, move the pen to place the first handle and tap, then place the second handle and tap to apply.", fontSize = 12.sp)
+                if (ed.lineShape == 4) OptRow { // Bezier curve: how many curve handles
+                    OptIcon(OptBezierOneIcon, ed.bezHandles == 1, "One curve handle") { ed.bezHandles = 1 }
+                    OptIcon(OptBezierTwoIcon, ed.bezHandles == 2, "Two curve handles") { ed.bezHandles = 2 }
+                }
+                Text("Uses the selected brush and its pressure curves. Circle: drag a corner to the opposite corner. Ellipse: drag the major axis, lift, move the pen to set the minor axis, tap to apply. Bezier curve: drag the end points, lift, move the pen to place the first handle and tap; with two handles, place the second handle and tap to apply (with one handle the first tap applies it).", fontSize = 12.sp)
             }
             6 -> {
                 Text("Reshape", fontSize = 14.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("Shift", "Smoothen", "Distort").forEachIndexed { i, n ->
-                        FilterChip(ed.reshapeMode == i, { ed.reshapeMode = i }, { Text(n, fontSize = 11.sp, maxLines = 1) }, Modifier.weight(1f))
-                    }
+                OptRow {
+                    listOf("Shift" to OptShiftIcon, "Smoothen" to OptSmoothenIcon, "Distort" to OptDistortIcon)
+                        .forEachIndexed { i, (n, ic) -> OptIcon(ic, ed.reshapeMode == i, n) { ed.reshapeMode = i } }
                 }
                 NumSlider("Size (radius, px)", ed.vecBrushRadius.roundToInt(), 4, 250) { ed.vecBrushRadius = it.toFloat() }
                 NumSlider("Strength (%)", (ed.vecBrushStrength * 100f).roundToInt(), 2, 100) { ed.vecBrushStrength = it / 100f }
                 Text("Shift pushes the points under the pen along with it, Smoothen relaxes a wobbly line, Distort bends it with a small wobble. The effect fades out smoothly toward the edge of the circle. Works on vector lines (the visible unlocked vector layers when \"All visible drawing layers\" is on, otherwise the active layer).", fontSize = 12.sp, color = Color.LightGray)
-                FilterChip(ed.refAll, { ed.refAll = !ed.refAll }, { Text("All visible drawing layers") }, Modifier.fillMaxWidth())
+                OptRow { OptIcon(Icons.Filled.Layers, ed.refAll, "All visible drawing layers") { ed.refAll = !ed.refAll } }
             }
             else -> if (!detail) BrushList(ed, ed.tool == 1) { setDetail(true) } else BrushDetail(ed, ed.tool == 1, { setDetail(false) }, Modifier.weight(1f, fill = false))
         }

@@ -848,3 +848,8 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 ## 2026-11-28 (5) — Interpolation drag Sharp turns slider (see CHANGELOG)
 - `relaxStroke(s, amount, cornerRad = SMOOTH_CORNER_RAD)`: `cornerRad` (radians, 0.35..pi) is the turn above which a sample is pinned as a corner; pi means no corners. It travels as `InbetweenPlace.cornerRad` (set from `Editor.vecSmoothCorner` in `Editor.inbetweenPlace()`). Any new code that rebuilds an `InbetweenPlace` from another one (as the two copies in `Canvas.kt` do) must pass `cornerRad` on, or the preview silently falls back to the default. The value is session state, reset by `resetPlace()`, shared by all lines of the preview, and part of `vecPreviewKeys`. Not compiled or run.
+
+## 2026-11-28 (6) — Bezier handle count, icon-only tool sub-options (see CHANGELOG)
+- Line tool Bezier curve: `Editor.bezHandles` (2 default, 1) sets `Bez.one`; `Bez.points()` is the one place that turns a `Bez` into points (cubic, or the quadratic with control point c1). Use it instead of calling `bezierPts` with c1 / c2 directly. Session state.
+- Sub-options of the tool panels (`OptionsPanel`) are icon-only: add new ones with `OptIcon(icon, on, tip) { }` / `OptBox` inside an `OptRow` (`Panels.kt`); put new icons in `AppIcons.kt` (`Opt...Icon`, same style as `ReshapeIcon`). The name goes in `tip` (hover tip and accessibility label); there is no visible text label. Not compiled or run.
+

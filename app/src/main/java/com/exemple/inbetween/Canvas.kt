@@ -284,7 +284,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(ed.tool, ed.selMode, ed.selWand, ed.lineShape) { preSel = emptyList(); preShape = emptyList(); poly.clear(); pend = null; bez = null; liveOn = false; thr = -1 }
+    LaunchedEffect(ed.tool, ed.selMode, ed.selWand, ed.lineShape, ed.bezHandles) { preSel = emptyList(); preShape = emptyList(); poly.clear(); pend = null; bez = null; liveOn = false; thr = -1 }
 
     /** "Relative position": a pinned reference layer lives in HOME-view coordinates (view reset, no flips), i.e. it is anchored to the screen. */
     fun homeScr(p: Offset): Offset = (p - Offset(dw / 2, dh / 2)) * fit + Offset(cx, cy)
@@ -1942,12 +1942,12 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (len > 6f) { pend = Ell(Offset((a.x + d.x) / 2, (a.y + d.y) / 2), len / 2, len / 4, atan2(d.y - a.y, d.x - a.x)); pendP = avg }
                 } else if (ed.lineShape == 4) {
                     val pts = lineShapePoints(d); val a = pts.firstOrNull(); val b = pts.lastOrNull()
-                    if (a != null && b != null && (b - a).getDistance() > 6f) { bez = Bez(a, b, a + (b - a) / 3f, b, 1); pendP = avg }
+                    if (a != null && b != null && (b - a).getDistance() > 6f) { bez = Bez(a, b, if (ed.bezHandles == 1) (a + b) / 2f else a + (b - a) / 3f, b, 1, ed.bezHandles == 1); pendP = avg }
                 } else commitShape(lineShapePoints(d), avg)
                 preShape = emptyList(); shapePerspective = null; shapeMagnetState = null; shapeMagnetAnchor = null; shapeHoverDirection = null
             }
             6 -> { pend?.let { e -> commitShape(ellPts(e.c, e.rx, e.ry, e.a), pendP) }; pend = null }
-            23 -> bez?.let { z -> if (z.stage == 1) { bez = z.copy(stage = 2, c2 = z.b) } else { commitShape(bezierPts(z.a, z.b, z.c1, z.c2), pendP); bez = null } }
+            23 -> bez?.let { z -> if (z.stage == 1 && !z.one) { bez = z.copy(stage = 2, c2 = z.b) } else { commitShape(z.points(), pendP); bez = null } }
             9 -> st.snap?.let { cut.pushStruct(it) }
             11 -> {
                 val tapOut = st.refOutside && !st.farScr
@@ -2547,10 +2547,10 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
             val pe = pend
             val bzNow = bez
-            val sp: List<Offset> = if (preShape.isNotEmpty()) preShape else if (pe != null) ellPts(pe.c, pe.rx, pe.ry, pe.a) else if (bzNow != null) bezierPts(bzNow.a, bzNow.b, bzNow.c1, bzNow.c2) else emptyList()
+            val sp: List<Offset> = if (preShape.isNotEmpty()) preShape else if (pe != null) ellPts(pe.c, pe.rx, pe.ry, pe.a) else if (bzNow != null) bzNow.points() else emptyList()
             if (sp.size > 1) drawPoly(sp, false, ed.color.copy(alpha = 0.85f), max(1f, ed.brushes[ed.brushIdx].size))
             if (bzNow != null) { // Bezier handles: the active one is orange
-                drawPoly(listOf(bzNow.a, bzNow.c1), false, Color.White.copy(alpha = 0.9f), 1.5f * px1); if (bzNow.stage == 2) drawPoly(listOf(bzNow.b, bzNow.c2), false, Color.White.copy(alpha = 0.9f), 1.5f * px1)
+                drawPoly(listOf(bzNow.a, bzNow.c1), false, Color.White.copy(alpha = 0.9f), 1.5f * px1); if (bzNow.one) drawPoly(listOf(bzNow.b, bzNow.c1), false, Color.White.copy(alpha = 0.9f), 1.5f * px1) else if (bzNow.stage == 2) drawPoly(listOf(bzNow.b, bzNow.c2), false, Color.White.copy(alpha = 0.9f), 1.5f * px1)
                 for (o in listOf(bzNow.a, bzNow.b)) drawCircle(Color(0xFF3B82F6), 4f * px1, o)
                 listOf(bzNow.c1, bzNow.c2).forEachIndexed { i, o ->
                     if (i == 1 && bzNow.stage < 2) return@forEachIndexed // the second handle only exists once the first one is set

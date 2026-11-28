@@ -53,8 +53,13 @@ fun invertSelection(ed: Editor, cut: Cut) {
 data class Ell(val c: Offset, val rx: Float, val ry: Float, val a: Float)
 
 /** Line tool, Bezier curve: end points a and b, handles c1 / c2; [stage] 1 = the first handle follows the pen, 2 = the second one.
- *  While stage is 1, c2 rests on b (no second handle shown, nothing warping the curve); it only appears and follows the pen from stage 2. */
-data class Bez(val a: Offset, val b: Offset, val c1: Offset, val c2: Offset, val stage: Int)
+ *  While stage is 1, c2 rests on b (no second handle shown, nothing warping the curve); it only appears and follows the pen from stage 2.
+ *  [one] = the "one curve handle" option: c1 is the single control point of a quadratic curve (both ends are pulled toward it), c2 is unused and the tap that places c1 applies the curve. */
+data class Bez(val a: Offset, val b: Offset, val c1: Offset, val c2: Offset, val stage: Int, val one: Boolean = false) {
+    /** The curve as points: a cubic through c1 / c2, or in [one] mode the quadratic with control point c1 (as the equivalent cubic). */
+    fun points(): List<Offset> =
+        if (one) bezierPts(a, b, a + (c1 - a) * (2f / 3f), b + (c1 - b) * (2f / 3f)) else bezierPts(a, b, c1, c2)
+}
 
 fun bezSet(z: Bez, d: Offset): Bez = if (z.stage == 1) z.copy(c1 = d) else z.copy(c2 = d)
 
