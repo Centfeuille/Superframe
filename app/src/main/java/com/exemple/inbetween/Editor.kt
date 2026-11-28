@@ -1052,7 +1052,7 @@ class Editor : ViewModel() {
     var vecXfCancel: () -> Unit = {}
     var vecXf by mutableStateOf<VecXform?>(null)        // Selection tool on a vector layer: the live Transform / Warp / Puppet Warp session (real lines or the interpolation preview)
     var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the preview lines picked with the Selection tool (ids); empty = the whole preview
-    var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (points are not added, see relaxStroke); session only
+    var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (the line is densified, relaxed and fitted back, see relaxStroke); session only
     var vecSmoothLines by mutableStateOf<Map<String, Float>>(emptyMap()) // smoothness of single preview lines (key = line id), overriding vecSmoothAll
     var vecDragTLines by mutableStateOf<Map<String, Float>>(emptyMap()) // interpolation position of single picked preview lines (key = line id); the others follow vecDragT
     /** The position the drag shows: the first picked line's own, else the whole preview's. */

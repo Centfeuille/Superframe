@@ -1701,31 +1701,63 @@ fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: 
 
 /** Apply local, smooth arc offsets to the generated stroke. Guide positions are normalized arc-length coordinates. */
 /**
- * Smoothness of a line WITHOUT adding or removing points: the points are relaxed toward the middle of their neighbours and back out again (Taubin smoothing, so the
- * line does not shrink), which evens out the bends between the points the way the drawn curve then runs through them. [amount] 0..1 sets how many passes. The ends,
- * numbered anchors, structural ends and hidden points never move; pressure and everything else stay as they are. Fills and lines of fewer than 3 points are left alone.
+ * Smoothness of an in-between line. The line is first densified ALONG THE CURVE IT IS DRAWN ON (so 0 % and a tiny amount look the same), the dense points are relaxed
+ * (a local blur) with a reach that grows with [amount] (0..1), and the result is fitted back with the curve-aware fitter the Brush
+ * uses (`VectorSimplify.fitIndices`, tolerance [WARP_FIT_EPS]), so points are added where the line now bends and nowhere else. Relaxing only the sparse control
+ * points (the former behaviour) straightened the stretches between them and left every corner as sharp as before or sharper.
+ * The two ends of an open line, hidden points, structural ends / aliases and junction points never move. Numbered anchors keep their number and stay points of the
+ * line, but they do move with it (a rounded tip is no longer where the sharp tip was). Pressure is interpolated; everything else stays as it is.
+ * Fills and lines of fewer than 3 points are left alone. Closed lines are fitted as a ring (the seam point and its two neighbours are kept).
  */
 fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
     val n = s.points.size
     val a = amount.coerceIn(0f, 1f)
     if (a <= 0.001f || n < 3 || s.fill != 0) return s
     val closed = s.isClosed && n > 2
-    val xs = FloatArray(n) { s.points[it].x }; val ys = FloatArray(n) { s.points[it].y }
-    val fixed = BooleanArray(n) { i -> val p = s.points[i]; (!closed && (i == 0 || i == n - 1)) || p.anchor > 0 || p.endpoint || p.endpointAliases.isNotEmpty() || p.junction > 0 || p.hidden }
-    val nx = FloatArray(n); val ny = FloatArray(n)
-    repeat(1 + (a * 14f).toInt()) {
-        for (k in 0..1) {
-            val f = if (k == 0) 0.5f else -0.53f
-            for (i in 0 until n) {
-                if (fixed[i]) { nx[i] = xs[i]; ny[i] = ys[i]; continue }
-                val p = if (i == 0) (if (closed) n - 1 else 0) else i - 1
-                val q = if (i == n - 1) (if (closed) 0 else n - 1) else i + 1
-                nx[i] = xs[i] + f * ((xs[p] + xs[q]) / 2f - xs[i]); ny[i] = ys[i] + f * ((ys[p] + ys[q]) / 2f - ys[i])
-            }
-            for (i in 0 until n) { xs[i] = nx[i]; ys[i] = ny[i] }
+    val src = s.points
+    val spans = if (closed) n else n - 1
+    var total = 0f
+    for (i in 0 until spans) { val p = src[i]; val q = src[(i + 1) % n]; total += hypot(q.x - p.x, q.y - p.y) }
+    if (total < 1e-3f) return s
+    // 1. densify along the drawn curve (the source points stay in the list, so their flags are kept)
+    val maxGap = max(total / 200f, 0.5f)
+    val dense = ArrayList<VectorPoint>(n + 220)
+    val tmp = FloatArray(2)
+    for (i in 0 until spans) {
+        val p = src[i]; val q = src[(i + 1) % n]
+        dense.add(p)
+        val extra = (hypot(q.x - p.x, q.y - p.y) / maxGap).toInt().coerceAtMost(60)
+        for (k in 1..extra) {
+            val u = k.toFloat() / (extra + 1)
+            VectorTessellator.curveAt(src, closed, i, u, tmp)
+            dense.add(VectorPoint(tmp[0], tmp[1], p.pressure + (q.pressure - p.pressure) * u, p.elevationOffset + (q.elevationOffset - p.elevationOffset) * u))
         }
     }
-    return s.copy(points = s.points.mapIndexed { i, p -> if (fixed[i]) p else p.copy(x = xs[i], y = ys[i]) })
+    if (!closed) dense.add(src.last())
+    val m = dense.size
+    val fixed = BooleanArray(m) { i -> val p = dense[i]; (!closed && (i == 0 || i == m - 1)) || p.endpoint || p.endpointAliases.isNotEmpty() || p.junction > 0 || p.hidden }
+    // 2. relax the dense points toward the middle of their neighbours: each pass blurs the line over about 0.7 point spacings more, so the reach grows with the
+    //    square root of the passes; the count is chosen so the reach is about 4 % of the line's length at 100 % (a Taubin pair was tried: its pass band is flat,
+    //    so beyond the first few passes the amount had no effect). Only bends within the reach change, a large arc hardly shrinks.
+    val xs = FloatArray(m) { dense[it].x }; val ys = FloatArray(m) { dense[it].y }
+    val nx = FloatArray(m); val ny = FloatArray(m)
+    repeat((a * a * 128f).roundToInt().coerceAtLeast(1)) {
+        for (i in 0 until m) {
+            if (fixed[i]) { nx[i] = xs[i]; ny[i] = ys[i]; continue }
+            val p = if (i == 0) (if (closed) m - 1 else 0) else i - 1
+            val q = if (i == m - 1) (if (closed) 0 else m - 1) else i + 1
+            nx[i] = xs[i] + 0.5f * ((xs[p] + xs[q]) / 2f - xs[i]); ny[i] = ys[i] + 0.5f * ((ys[p] + ys[q]) / 2f - ys[i])
+        }
+        for (i in 0 until m) { xs[i] = nx[i]; ys[i] = ny[i] }
+    }
+    val pts = dense.mapIndexed { i, p -> if (fixed[i]) p else p.copy(x = xs[i], y = ys[i]) }
+    // 3. fit back: points only where the line bends; anchors, ends and the like are never dropped
+    val protect = HashSet<Int>()
+    for (i in 0 until m) if (fixed[i] || pts[i].anchor > 0) protect.add(i)
+    if (!closed) return s.copy(points = VectorSimplify.fitIndices(pts, WARP_FIT_EPS, s.baseWidth, protect).map { pts[it] })
+    protect.add(0); protect.add(1); protect.add(m - 1); protect.add(m) // the seam point and its two neighbours; m = the closing copy of point 0
+    val ring = pts + pts[0]
+    return s.copy(points = VectorSimplify.fitIndices(ring, WARP_FIT_EPS, s.baseWidth, protect).filter { it < m }.map { pts[it] })
 }
 
 /** A warped line, with for every one of its points the arc position (0..1) that point has on the line BEFORE the joints moved it (null when the line was not warped). */

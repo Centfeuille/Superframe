@@ -421,7 +421,7 @@ private fun InterpSmoothRow(ed: Editor) {
                 if (pickedNow.isEmpty()) { ed.vecSmoothAll = v; ed.vecSmoothLines = emptyMap() }
                 else ed.vecSmoothLines = ed.vecSmoothLines + pickedNow.associateWith { v }
             }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
-            Text("${(shownValue * 100).roundToInt()}%  ·  no points added", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            Text("${(shownValue * 100).roundToInt()}%  ·  points follow the bends", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
     }
 }
 

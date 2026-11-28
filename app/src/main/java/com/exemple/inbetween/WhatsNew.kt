@@ -38,6 +38,13 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            105, "2026-11-28", "Interpolation drag: Smooth now really smooths",
+            listOf(
+                "The Smooth slider of the Interpolation drag bar now rounds the corners and evens out the bends of the in-between lines, and the further you pull it the more it does. Before, it only moved the few control points and could make a line look straighter and its tips sharper.",
+                "Points are added where the smoothed line bends and nowhere else (the line is fitted back with the same fitter as the Brush), so the lines stay smooth curves through as few points as they need. The two ends of a line, hidden points and junction points stay where they are; a numbered anchor keeps its number but moves with its rounded tip."
+            )
+        ),
+        ReleaseNote(
             104, "2026-11-28", "Bar switch fix, new Reshape and Ghost icons, bigger Settings window",
             listOf(
                 "Tapping the dimmed Interpolation drag bar next to the Selection bar now makes it the active function again. Before, it dropped back to the Brush tool and its bar.",
