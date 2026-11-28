@@ -2052,7 +2052,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     }
 
     // line order onion skin: the next untraced line of the previous / next keyframe shimmers, with its anchors; a new line drawn over it takes those anchors
-    val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 2 || ed.tool == 4) }
+    val ghostLayer = cut.layer?.takeIf { it.vector && it.visible && !it.locked && ed.vecGhost && !cut.playing && ed.vecMode != 3 && ed.vecMode != 4 && ((ed.tool == 0 && ed.vecMode == 0) || ed.tool == 2 || ed.tool == 4) }
     val ghostPhase = if (ghostLayer != null) rememberInfiniteTransition(label = "ghost").animateFloat(0f, 1f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "ghostPhase") else null
     val ghostStep by remember(ghostPhase) { derivedStateOf { ((ghostPhase?.value ?: 0f) * 8f).toInt() } } // 8 steps a cycle: the shimmer redraws a few times a second, not every frame
     // the current keyframe's cel object, its revision and line count are keys: a merge / delete made with the selection tool swaps the cel without bumping `tick`
@@ -2652,11 +2652,27 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                 if (shown == null) return@let
                 val gc = shown.points.maxOfOrNull { it.anchor } ?: 0
                 val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f * px1; typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
-                for (vp in shown.points) if (vp.anchor > 0) {
+                // the way the line should be drawn: arrows along the shown ghost line
+                val gArrows = LineGhost.arrowMarks(VectorTessellator.centerline(shown.points, shown.isClosed), shown.isClosed, LineGhost.runsForward(shown), 90f * px1)
+                val aS = 7f * px1
+                var ai = 0
+                while (ai + 3 < gArrows.size) {
+                    val ax = gArrows[ai]; val ay = gArrows[ai + 1]; val dx = gArrows[ai + 2]; val dy = gArrows[ai + 3]
+                    val tri = Path().apply {
+                        moveTo(ax + dx * aS, ay + dy * aS)
+                        lineTo(ax - dx * aS * 0.7f - dy * aS * 0.8f, ay - dy * aS * 0.7f + dx * aS * 0.8f)
+                        lineTo(ax - dx * aS * 0.7f + dy * aS * 0.8f, ay - dy * aS * 0.7f - dx * aS * 0.8f)
+                        close()
+                    }
+                    drawPath(tri, Color(0xFF0B1220).copy(alpha = 0.85f), style = Stroke(2.2f * px1, join = StrokeJoin.Round))
+                    drawPath(tri, Color.White.copy(alpha = 0.7f + 0.3f * pulse))
+                    ai += 4
+                }
+                shown.points.forEachIndexed { vi, vp -> if (vp.anchor > 0 && LineGhost.showsAnchor(shown, vi)) { // only the end points of the ghost line are marked
                     drawCircle(Color.White.copy(alpha = 0.9f), 6f * px1, Offset(vp.x, vp.y))
                     drawCircle(Color(anchorColor(vp.anchor, gc)).copy(alpha = 0.55f + 0.45f * pulse), 4.5f * px1, Offset(vp.x, vp.y))
                     drawIntoCanvas { cv -> cv.nativeCanvas.drawText(vp.anchor.toString(), vp.x + 7f * px1, vp.y - 7f * px1, np) }
-                }
+                } }
             }
             val sel = cut.layer
             // The camera's animation is seen across all layers while playing; on the camera layer itself the frame is also the canvas frame (only the outside is shaded).
@@ -2885,8 +2901,27 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
                     if (ghostLine.isClosed) path.close()
                     drawPath(path, Color(0xFF22D3EE), style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
                     val np = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 10.dp.toPx(); typeface = android.graphics.Typeface.DEFAULT_BOLD; color = android.graphics.Color.WHITE }
+                    // arrows: the way the line should be drawn (the drawn curve, mapped like the points)
+                    val cl = VectorTessellator.centerline(ghostLine.points, ghostLine.isClosed)
+                    val clScr = FloatArray(cl.size)
+                    for (ci in 0 until cl.size / 2) { val q = m(toScr(Offset(cl[ci * 2], cl[ci * 2 + 1]))); clScr[ci * 2] = q.x; clScr[ci * 2 + 1] = q.y }
+                    val insetArrows = LineGhost.arrowMarks(clScr, ghostLine.isClosed, LineGhost.runsForward(ghostLine), 44.dp.toPx())
+                    val aS = 5.dp.toPx()
+                    var ai = 0
+                    while (ai + 3 < insetArrows.size) {
+                        val ax = insetArrows[ai]; val ay = insetArrows[ai + 1]; val dx = insetArrows[ai + 2]; val dy = insetArrows[ai + 3]
+                        val tri = Path().apply {
+                            moveTo(ax + dx * aS, ay + dy * aS)
+                            lineTo(ax - dx * aS * 0.7f - dy * aS * 0.8f, ay - dy * aS * 0.7f + dx * aS * 0.8f)
+                            lineTo(ax - dx * aS * 0.7f + dy * aS * 0.8f, ay - dy * aS * 0.7f - dx * aS * 0.8f)
+                            close()
+                        }
+                        drawPath(tri, Color(0xFF0B1220), style = Stroke(1.6.dp.toPx(), join = StrokeJoin.Round))
+                        drawPath(tri, Color.White)
+                        ai += 4
+                    }
                     ghostLine.points.forEachIndexed { i, vp ->
-                        if (vp.anchor > 0) {
+                        if (vp.anchor > 0 && LineGhost.showsAnchor(ghostLine, i)) { // only the end points of the ghost line are marked
                             val mp = m(gScr[i])
                             drawCircle(Color.White, 5.dp.toPx(), mp)
                             drawCircle(Color(anchorColor(vp.anchor, anchorMax)), 3.5.dp.toPx(), mp)

@@ -38,6 +38,16 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            110, "2026-11-28", "Ghost line: anchors by relative position, direction arrows, end points only",
+            listOf(
+                "Tracing a ghost line: the ghost's in-between anchors now keep their place relative to each other and to the two end points. Each one becomes a new anchor point on your line at the same share of its length (or, when you trace only a piece, where it lies over the ghost). Curve apexes are no longer searched for on a traced line.",
+                "The ghost line is hidden while Interpolation drag is on.",
+                "The shimmering ghost line now has arrows showing the way to draw it (also in the upper left window).",
+                "The ghost line shows only its two end points (a closed ghost line still shows all its points).",
+                "Not compiled or tested on a device yet."
+            )
+        ),
+        ReleaseNote(
             109, "2026-11-28", "Line filtering: wobble and line weight in one window, End variation, texture",
             listOf(
                 "The Wobble and Line weight windows are now one window, Line filtering (the pencil button on the vector timeline bar). Wobble has its own sliders in it, and Preview now shows the wobble too. New look gives a new random wobble.",

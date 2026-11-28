@@ -406,7 +406,7 @@ object AutoAnchors {
     // ---------------------------------------------------------------------------------------------------------------------------------------------
 
     /** [turn]: signed bend (degrees) of the ghost at this anchor, in the direction the NEW line runs; 0 = no clear bend or unknown (then only the position is compared). */
-    private class PlanTip(val num: Int, val u: Float, val turn: Float = 0f)
+    private class PlanTip(val num: Int, val u: Float, val turn: Float = 0f, val x: Float = 0f, val y: Float = 0f)
 
     /**
      * [start] / [end]: numbers for the first / last point of an open line (0 = none). [tips]: numbered progress positions, ascending. [fresh]: detected apexes with no
@@ -418,7 +418,15 @@ object AutoAnchors {
         /** Pair apexes with the tips by position AND bend ([matchDescs]); a ghost tip with no acceptable apex is dropped (no number, the interpolation falls back to geometry). */
         val smart: Boolean = false,
         /** Apexes that no ghost tip took get new numbers (ends do not: only [fresh] numbers ends). The ghost's own numbers are never reused for them. */
-        val freshTips: Boolean = false
+        val freshTips: Boolean = false,
+        /**
+         * Place the plan's tips by their RELATIVE position instead of pairing them with detected apexes (open line over open ghost): every tip becomes a new anchor on the drawn
+         * curve, at the same share of the line's length as on the ghost (so its place relative to the other anchors and to the end points is kept), and no apex is looked for.
+         * A tip that falls outside a piece of the ghost (see [over]) is dropped.
+         */
+        val place: Boolean = false,
+        /** With [place]: the line lies over the ghost (a whole trace or a piece), so each tip goes where the ghost tip's own position projects onto the line; null result = outside the piece. */
+        val over: Boolean = false
     )
 
     private class Ins(val t: Float, val p: VectorPoint)
@@ -452,7 +460,7 @@ object AutoAnchors {
         val tipU = ArrayList<Float>()
         val tipX = ArrayList<Float>()
         val tipY = ArrayList<Float>()
-        if (d != null && n >= 3) {
+        if (d != null && n >= 3 && !(plan.place && !ring)) {
             val tmp = FloatArray(2)
             val spacing = max(5f, d.total * 0.025f)
             for (u in features(d, ring, sens)) {
@@ -466,11 +474,37 @@ object AutoAnchors {
                 for (u in floatArrayOf(0f, 0.5f)) { pointAt(d, u, tmp); tipU.add(u); tipX.add(tmp[0]); tipY.add(tmp[1]) }
             }
         }
+        // Place mode: the ghost's in-between anchors keep their relative position (no apex search); each one gets a new anchor point on the drawn curve
+        val placeNum = ArrayList<Int>()
+        val placed = plan.place && !ring && d != null
+        if (placed && d != null) {
+            val tmp = FloatArray(2)
+            val spacing = max(5f, d.total * 0.025f)
+            val tol = 0.05f * bboxDiag(base) + 6f
+            val first = base.first(); val last = base.last()
+            for (t in plan.tips) {
+                var v = t.u
+                if (plan.over) {
+                    project(d, t.x, t.y, tmp)
+                    if (tmp[1] > tol) continue // the ghost tip lies beyond this piece of the trace
+                    v = tmp[0]
+                }
+                if (v < 0.02f || v > 0.98f) continue
+                pointAt(d, v, tmp)
+                if (hypot(first.x - tmp[0], first.y - tmp[1]) < spacing || hypot(last.x - tmp[0], last.y - tmp[1]) < spacing) continue
+                var nearManual = false
+                for (p in base) if (p.anchor > 0 && hypot(p.x - tmp[0], p.y - tmp[1]) < spacing) { nearManual = true; break }
+                if (nearManual) continue
+                tipU.add(v); tipX.add(tmp[0]); tipY.add(tmp[1]); placeNum.add(t.num)
+            }
+        }
         val tk = tipU.size
 
         // pair them with the plan's tips, in order
         val tipNum = IntArray(tk)
-        if (tk > 0 && plan.tips.isNotEmpty()) {
+        if (placed) {
+            for (q in 0 until tk) tipNum[q] = placeNum[q]
+        } else if (tk > 0 && plan.tips.isNotEmpty()) {
             fun space(i: Int): Float = plan.toPlanU?.invoke(tipX[i], tipY[i], tipU[i]) ?: tipU[i]
             val order = (0 until tk).sortedBy { space(it) }
             val mt: IntArray
@@ -756,7 +790,7 @@ object AutoAnchors {
                 if (p.anchor !in 1..ANCHOR_MAX || p.anchor in blocked) continue
                 project(gd, p.x, p.y, tmp)
                 val bend = bendAt(gd, tmp[0]) // reading the ghost the other way round flips the side of a bend
-                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0], if (fwd) bend else -bend))
+                tips.add(PlanTip(p.anchor, if (fwd) tmp[0] else 1f - tmp[0], if (fwd) bend else -bend, p.x, p.y))
             }
         } else {
             fun area(p: List<VectorPoint>): Float { var a = 0f; for (i in p.indices) { val q = p[(i + 1) % p.size]; a += p[i].x * q.y - q.x * p[i].y }; return a }
@@ -771,11 +805,13 @@ object AutoAnchors {
         tips.sortBy { it.u }
         // When the line lies over the ghost (a whole trace or a piece of one) its apexes are paired by where they lie ON the ghost, so a piece pairs with the right part.
         var toPlanU: ((Float, Float, Float) -> Float)? = null
+        var over = false
         if (!gRing && tips.isNotEmpty()) {
             val tol = 0.05f * bboxDiag(g.points) + 6f
             var near = 0
             for (p in s.points) { project(gd, p.x, p.y, tmp); if (tmp[1] <= tol) near++ }
             if (near >= 0.85f * sn) {
+                over = true
                 toPlanU = { x, y, _ ->
                     val q = FloatArray(2)
                     project(gd, x, y, q)
@@ -783,7 +819,8 @@ object AutoAnchors {
                 }
             }
         }
-        return Plan(start, end, tips, false, toPlanU, smart = !gRing, freshTips = !gRing)
+        // Open over open: the ghost's in-between anchors are placed by their relative position (new anchor points), not paired with detected apexes
+        return Plan(start, end, tips, false, toPlanU, smart = false, freshTips = false, place = !gRing, over = over)
     }
 
     // ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -1127,6 +1164,51 @@ object LineGhost {
     }
 
     fun key(layer: Layer, idx: Int): Long = layer.id.toLong() * 1_000_000L + idx
+
+    /** The ghost shows only the anchors of its end points (an open line, or a closed line that kept its two ends); a closed line has no ends, so its anchors all show. */
+    fun showsAnchor(g: VectorStroke, i: Int): Boolean = (g.isClosed && !AutoAnchors.seamEnds(g)) || i == 0 || i == g.points.lastIndex
+
+    /**
+     * True when the ghost line is to be drawn along its point order (the end with the lower number is its first point, which is how a trace reads it, see `AutoAnchors.inherit`);
+     * false = against it. A closed line and a line whose ends are not both numbered read along the point order.
+     */
+    fun runsForward(g: VectorStroke): Boolean {
+        if (g.points.size < 2 || (g.isClosed && !AutoAnchors.seamEnds(g))) return true
+        val a = g.points.first().anchor; val b = g.points.last().anchor
+        return a <= 0 || b <= 0 || a <= b
+    }
+
+    /**
+     * Arrow marks along [poly] (x, y pairs; the drawn curve of the ghost line) pointing the way the line should be drawn: x, y, unit direction x, y per arrow, one every [spacing]
+     * (units of [poly]) starting half a spacing in, at least one in the middle of a short line. [forward] false = against the order of [poly]; [closed] = the last point joins the first.
+     */
+    fun arrowMarks(poly: FloatArray, closed: Boolean, forward: Boolean, spacing: Float): FloatArray {
+        var n = poly.size / 2
+        if (n < 2 || spacing <= 0f) return FloatArray(0)
+        val xs = ArrayList<Float>(n + 1); val ys = ArrayList<Float>(n + 1)
+        for (i in 0 until n) { xs.add(poly[i * 2]); ys.add(poly[i * 2 + 1]) }
+        if (closed && (xs.first() != xs.last() || ys.first() != ys.last())) { xs.add(xs.first()); ys.add(ys.first()) }
+        if (!forward) { xs.reverse(); ys.reverse() }
+        n = xs.size
+        val cum = FloatArray(n)
+        for (i in 1 until n) cum[i] = cum[i - 1] + hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1])
+        val total = cum[n - 1]
+        if (total < 1e-3f) return FloatArray(0)
+        val at = ArrayList<Float>()
+        if (total < spacing) at.add(total / 2f) else { var t = spacing / 2f; while (t < total) { at.add(t); t += spacing } }
+        val out = FloatArray(at.size * 4)
+        var seg = 1
+        for ((k, t) in at.withIndex()) {
+            while (seg < n - 1 && cum[seg] < t) seg++
+            val dx = xs[seg] - xs[seg - 1]; val dy = ys[seg] - ys[seg - 1]
+            val l = hypot(dx, dy)
+            if (l < 1e-6f) continue
+            val f = ((t - cum[seg - 1]) / l).coerceIn(0f, 1f)
+            out[k * 4] = xs[seg - 1] + dx * f; out[k * 4 + 1] = ys[seg - 1] + dy * f
+            out[k * 4 + 2] = dx / l; out[k * 4 + 3] = dy / l
+        }
+        return out
+    }
 
     /**
      * The line shown now: the pinned one while it exists on this keyframe (even after it has been traced, so a line can be drawn in several strokes), otherwise the first
