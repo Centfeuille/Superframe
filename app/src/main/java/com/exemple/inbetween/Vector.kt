@@ -1705,7 +1705,7 @@ fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: 
  * (a local blur) with a reach that grows with [amount] (0..1), and the result is fitted back with the curve-aware fitter the Brush
  * uses (`VectorSimplify.fitIndices`, tolerance [WARP_FIT_EPS]), so points are added where the line now bends and nowhere else. Relaxing only the sparse control
  * points (the former behaviour) straightened the stretches between them and left every corner as sharp as before or sharper.
- * The two ends of an open line, hidden points, structural ends / aliases and junction points never move. Numbered anchors keep their number and stay points of the
+ * Sharp turns (a turn of more than [SMOOTH_CORNER_RAD] within a short stretch) are kept as corners and only the curves are smoothed. The two ends of an open line, hidden points, structural ends / aliases and junction points never move. Numbered anchors keep their number and stay points of the
  * line, but they do move with it (a rounded tip is no longer where the sharp tip was). Pressure is interpolated; everything else stays as it is.
  * Fills and lines of fewer than 3 points are left alone. Closed lines are fitted as a ring (the seam point and its two neighbours are kept).
  */
@@ -1736,6 +1736,27 @@ fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
     if (!closed) dense.add(src.last())
     val m = dense.size
     val fixed = BooleanArray(m) { i -> val p = dense[i]; (!closed && (i == 0 || i == m - 1)) || p.endpoint || p.endpointAliases.isNotEmpty() || p.junction > 0 || p.hidden }
+    // Sharp turns are not curves: a turn that happens within a short stretch (more than SMOOTH_CORNER_RAD between the directions k samples before and k samples
+    // after, k = about 1.5 % of the line) is a corner and stays where it is, the sharpest sample of each such turn; a bend spread over a longer stretch is a
+    // curve and gets smoothed. The sides of a corner are still smoothed.
+    val k = (m * 0.015f).roundToInt().coerceIn(2, 6)
+    val turn = FloatArray(m)
+    for (i in 0 until m) {
+        if (!closed && (i < k || i >= m - k)) continue
+        val a = dense[((i - k) % m + m) % m]; val b = dense[i]; val c = dense[(i + k) % m]
+        val v1x = b.x - a.x; val v1y = b.y - a.y; val v2x = c.x - b.x; val v2y = c.y - b.y
+        val l = hypot(v1x, v1y) * hypot(v2x, v2y)
+        if (l > 1e-9f) turn[i] = kotlin.math.acos(((v1x * v2x + v1y * v2y) / l).coerceIn(-1f, 1f))
+    }
+    for (i in 0 until m) {
+        if (turn[i] <= SMOOTH_CORNER_RAD) continue
+        var top = true
+        for (j in 1..k) {
+            if (turn[((i - j) % m + m) % m] > turn[i]) top = false // ties: the later sample wins
+            if (turn[(i + j) % m] >= turn[i]) top = false
+        }
+        if (top) fixed[i] = true
+    }
     // 2. relax the dense points toward the middle of their neighbours: each pass blurs the line over about 0.7 point spacings more, so the reach grows with the
     //    square root of the passes; the count is chosen so the reach is about 4 % of the line's length at 100 % (a Taubin pair was tried: its pass band is flat,
     //    so beyond the first few passes the amount had no effect). Only bends within the reach change, a large arc hardly shrinks.
@@ -1765,6 +1786,9 @@ class Warped(val stroke: VectorStroke, val arcs: FloatArray?)
 
 /** Fit tolerance (document px) used to thin a line after joints densified it. */
 const val WARP_FIT_EPS = 0.5f
+
+/** Interpolation Smooth: a turn of more than this (radians, about 52 degrees) within a short stretch of the line is a corner and stays sharp (see [relaxStroke]). */
+const val SMOOTH_CORNER_RAD = 0.9f
 
 fun VectorInterpolation.applyGuideJoints(strokes: List<VectorStroke>, guides: List<VectorGuideJoint>): List<VectorStroke> {
     if (guides.isEmpty()) return strokes

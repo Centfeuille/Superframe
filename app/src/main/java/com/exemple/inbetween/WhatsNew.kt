@@ -38,6 +38,12 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            106, "2026-11-28", "Interpolation drag Smooth keeps sharp turns sharp",
+            listOf(
+                "The Smooth slider now tells corners from curves: a sharp turn (the line changes direction within a short stretch) stays a corner, and only the curves and gentle bends are smoothed. The sides of a corner are still smoothed."
+            )
+        ),
+        ReleaseNote(
             105, "2026-11-28", "Interpolation drag: Smooth now really smooths",
             listOf(
                 "The Smooth slider of the Interpolation drag bar now rounds the corners and evens out the bends of the in-between lines, and the further you pull it the more it does. Before, it only moved the few control points and could make a line look straighter and its tips sharper.",

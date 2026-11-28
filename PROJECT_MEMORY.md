@@ -844,4 +844,5 @@ The GL external-OES quad uses canonical UVs `(0,0) (1,0) (0,1) (1,1)` and applie
 
 ## 2026-11-28 (3) — Interpolation drag Smooth (see CHANGELOG)
 - `relaxStroke` (`Vector.kt`) = densify along the drawn curve (`VectorTessellator.curveAt`), relax (`round(128 * amount^2)` neighbour-average passes, ends / hidden / endpoint / alias / junction points fixed, numbered anchors free but protected from dropping), fit back with `VectorSimplify.fitIndices` (`WARP_FIT_EPS`). This SUPERSEDES the 2026-11-23 note that calls it "point-preserving Taubin smoothing" and the older "points are not added" text: points ARE added where the smoothed line bends. Closed lines are fitted as a ring. Not compiled or run.
+- 2026-11-28 (4): `relaxStroke` pins sharp turns (turn above `SMOOTH_CORNER_RAD` within +-k dense samples, k = 1.5 % of the points) so only curves are smoothed; see CHANGELOG. Not compiled or run.
 

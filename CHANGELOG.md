@@ -1,3 +1,13 @@
+## 2026-11-28 (4) — Interpolation drag Smooth keeps sharp turns sharp
+- AI model: Claude
+- Category: Changed (no `.inb` format change)
+- Request: Smooth works now, but it should make the distinction between sharp turns and curves.
+- `Vector.kt` `relaxStroke`: after densifying, the turning angle at every dense point is measured between the directions k samples before and k samples after it (k = 1.5 % of the dense points, 2..6, so it is a distance on the line, not on the screen). A turn above `SMOOTH_CORNER_RAD` (0.9 rad, about 52 degrees) that is the maximum within +-k samples is a corner: that sample is pinned like the ends and does not move, so the tip stays where and as sharp as it was. A bend spread over a longer stretch has a small angle over that window and is a curve, smoothed as before; the sides of a corner are smoothed too. Python check of the detector on a zigzag (5 of 5 tips found, 141 degrees at most), a circle (none, 5 degrees), a tight spiral (none, 19 degrees) and a steep sine (its tight peaks count as corners, 76 degrees). Nothing else in the function changed: densify, passes, fit back, anchors, ends, closed rings and preview = Apply are as in entry (3).
+- Vector line rules (AI_WORKING_AGREEMENT section 4): as in entry (3); the pinned corner samples are also protected from the fit, so the corner stays a point of the line.
+- Files: `Vector.kt`, `WhatsNew.kt` (note 106), `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected infrastructure untouched.
+- Validation: source review and the Python detector check above. NOT compiled, NOT run.
+- Follow-up on the tablet: the zigzag at 100 %: tips stay sharp, the sides between them become smooth; a gently curving line is smoothed all along; a hairpin curve (tight peak) counts as a corner, tune `SMOOTH_CORNER_RAD` (larger = fewer corners) and the window (`0.015f`) if the split is not where you expect.
+
 ## 2026-11-28 (3) — Interpolation drag Smooth: densify, relax, fit back
 - AI model: Claude
 - Category: Fixed (no `.inb` format change; the smoothness is session state)
