@@ -1,3 +1,14 @@
+## 2026-11-28 (5) — Interpolation drag: Sharp turns threshold slider
+- AI model: Claude
+- Category: Changed (no `.inb` format change; the value is session state like the smoothness)
+- Request: Smooth sharpens curves too much; add a dedicated sharp-turn detection threshold slider.
+- Cause (reading `relaxStroke`, `Vector.kt`): the corner detector used a fixed 0.9 rad (about 52 degrees) threshold. A rounded peak or a tight curve turns more than that within the short detection window, was classed as a corner and pinned, and the neighbours were relaxed toward the pinned point, so the curve came out as a sharp tip.
+- Change: new "Sharp turns" slider under "Smoothness" in the Interpolation drag Smooth row (`InterpSmoothRow`, `VectorUi.kt`), 20 to 180 degrees. The value is the turn angle from which a turn is kept as a corner; lower keeps more corners, higher smooths more, and the right end (180 degrees) keeps none, so every bend is smoothed. Default is unchanged (`SMOOTH_CORNER_RAD`, about 52 degrees). `relaxStroke` takes `cornerRad` (default `SMOOTH_CORNER_RAD`); `InbetweenPlace.cornerRad` carries it to `VectorInterpolation.finish`; `Editor.vecSmoothCorner` holds it (reset by `resetPlace`, so the Refresh and Reset-with-nothing-picked buttons also restore it). It is one value for the whole preview (not per picked line). The two `InbetweenPlace` copies in `Canvas.kt` pass it on, and it is part of `vecPreviewKeys`, so the preview recomputes while dragging. Preview and Apply use the same path (`finish`), so what the bar shows is what is kept.
+- Vector line rules (AI_WORKING_AGREEMENT section 4): unchanged from entry (3) and (4): densified points are fitted back with `VectorSimplify.fitIndices` (no second simplifier); anchors, ends, hidden points and pinned corners are protected from the fit; preview = Apply; one undo step; no `.inb` change.
+- Files: `Vector.kt`, `Editor.kt`, `Canvas.kt`, `VectorUi.kt`, `WhatsNew.kt` (note 107), `PROJECT_MEMORY.md`, `CHANGELOG.md`. Protected infrastructure untouched.
+- Validation: source review of every call site (`InbetweenPlace(` constructors, `relaxStroke(` callers, preview keys). NOT compiled, NOT run (no Android SDK here).
+- Follow-up on the tablet: (a) the zigzag at Smoothness 90 %: Sharp turns at 180 degrees should round every tip; at about 50 degrees the tips stay sharp; in between should separate tight peaks from gentle curves, tune the slider range or default if the useful band is narrow; (b) move the slider while previewing: the preview should update live and Apply should match; (c) the bar is now two rows high: check it does not cover the canvas bottom or the timeline on the tablet; (d) Reset / Refresh put the slider back to about 52 degrees.
+
 ## 2026-11-28 (4) — Interpolation drag Smooth keeps sharp turns sharp
 - AI model: Claude
 - Category: Changed (no `.inb` format change)

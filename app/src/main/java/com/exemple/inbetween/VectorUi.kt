@@ -409,19 +409,29 @@ private fun InterpDragContent(cut: Cut, ed: Editor, layer: Layer, idx: Int, cel:
     }
 }
 
-/** The smoothness slider of the interpolation drag bar. */
+/** The smoothness and sharp-turn sliders of the interpolation drag bar. */
 @Composable
 private fun InterpSmoothRow(ed: Editor) {
+    Column {
     Row(verticalAlignment = Alignment.CenterVertically) {
-            // Smoothness of the picked preview lines (every line when none is picked): evens out the curves between the points without adding any
+            // Smoothness of the picked preview lines (every line when none is picked): evens out the curves between the points; points are added where the line bends
             val pickedNow = ed.vecPreSel
             val shownValue = if (pickedNow.isEmpty()) ed.vecSmoothAll else (pickedNow.firstOrNull()?.let { ed.vecSmoothLines[it] } ?: ed.vecSmoothAll)
-            Text(if (pickedNow.isEmpty()) "Smoothness · all lines" else "Smoothness · ${pickedNow.size} picked line${if (pickedNow.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+            Text(if (pickedNow.isEmpty()) "Smoothness · all lines" else "Smoothness · ${pickedNow.size} picked line${if (pickedNow.size == 1) "" else "s"}", fontSize = 12.sp, color = Color.White, modifier = Modifier.widthIn(min = 150.dp).padding(horizontal = 8.dp))
             Slider(value = shownValue, onValueChange = { v ->
                 if (pickedNow.isEmpty()) { ed.vecSmoothAll = v; ed.vecSmoothLines = emptyMap() }
                 else ed.vecSmoothLines = ed.vecSmoothLines + pickedNow.associateWith { v }
             }, valueRange = 0f..1f, modifier = Modifier.width(200.dp).height(30.dp))
             Text("${(shownValue * 100).roundToInt()}%  ·  points follow the bends", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+            // Sharp turns: the turn angle from which Smooth keeps a corner (shared by every line of the preview); the right end (180 degrees) keeps none
+            val deg = (ed.vecSmoothCorner * 180f / Math.PI.toFloat()).coerceIn(20f, 180f)
+            Text("Sharp turns", fontSize = 12.sp, color = Color.White, modifier = Modifier.widthIn(min = 150.dp).padding(horizontal = 8.dp))
+            Slider(value = deg, onValueChange = { d -> ed.vecSmoothCorner = if (d >= 179.5f) Math.PI.toFloat() else d * Math.PI.toFloat() / 180f },
+                valueRange = 20f..180f, modifier = Modifier.width(200.dp).height(30.dp))
+            Text(if (deg >= 179.5f) "none  ·  every bend is smoothed" else "from ${deg.roundToInt()}°  ·  gentler turns are smoothed", fontSize = 12.sp, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+    }
     }
 }
 

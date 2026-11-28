@@ -1230,7 +1230,9 @@ data class InbetweenPlace(val fixed: Boolean, val all: Aff = Aff.ID, val lines: 
                           /** Transform / Warp / Puppet Warp steps made with the Selection tool on the preview, applied in order after [all] and [lines]. */
                           val steps: List<PreviewWarp> = emptyList(),
                           /** Where Fixed pins the preview: the centre the lines had when Fixed was switched on (one for the lines dragged on their own, one for the rest). */
-                          val fixedAt: FixedAt? = null, val fixedAtLines: FixedAt? = null) {
+                          val fixedAt: FixedAt? = null, val fixedAtLines: FixedAt? = null,
+                          /** Smooth: a turn of more than this (radians) within a short stretch stays a corner (see [relaxStroke]); pi = no corners. */
+                          val cornerRad: Float = SMOOTH_CORNER_RAD) {
     /** The interpolation position of line [id]: its own (dragged with the line picked), else the whole preview's [t]. */
     fun tOf(id: String, t: Float): Float = tLines[id] ?: t
     /** Smoothness 0..1 of line [id] (see [relaxStroke]): its own value, else the whole preview's. */
@@ -1266,7 +1268,7 @@ object VectorInterpolation {
     private fun finish(s: VectorStroke, fx: Float, fy: Float, guides: List<VectorGuideJoint>, place: InbetweenPlace?): VectorStroke {
         var r = movedBy(s, fx, fy)
         val sm = place?.smoothOf(s.id) ?: 0f
-        if (sm > 0.001f) r = relaxStroke(r, sm) // before the joints, so a joint still lands exactly where it was put
+        if (sm > 0.001f) r = relaxStroke(r, sm, place?.cornerRad ?: SMOOTH_CORNER_RAD) // before the joints, so a joint still lands exactly where it was put
         if (guides.isNotEmpty()) r = applyGuideJoints(listOf(r), guides).first()
         return place?.applyTo(r) ?: r
     }
@@ -1705,11 +1707,11 @@ fun displaceSelection(strokes: List<VectorStroke>, selected: Set<Long>, joints: 
  * (a local blur) with a reach that grows with [amount] (0..1), and the result is fitted back with the curve-aware fitter the Brush
  * uses (`VectorSimplify.fitIndices`, tolerance [WARP_FIT_EPS]), so points are added where the line now bends and nowhere else. Relaxing only the sparse control
  * points (the former behaviour) straightened the stretches between them and left every corner as sharp as before or sharper.
- * Sharp turns (a turn of more than [SMOOTH_CORNER_RAD] within a short stretch) are kept as corners and only the curves are smoothed. The two ends of an open line, hidden points, structural ends / aliases and junction points never move. Numbered anchors keep their number and stay points of the
+ * Sharp turns (a turn of more than [cornerRad], default [SMOOTH_CORNER_RAD], within a short stretch; pi = none) are kept as corners and only the curves are smoothed. The two ends of an open line, hidden points, structural ends / aliases and junction points never move. Numbered anchors keep their number and stay points of the
  * line, but they do move with it (a rounded tip is no longer where the sharp tip was). Pressure is interpolated; everything else stays as it is.
  * Fills and lines of fewer than 3 points are left alone. Closed lines are fitted as a ring (the seam point and its two neighbours are kept).
  */
-fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
+fun relaxStroke(s: VectorStroke, amount: Float, cornerRad: Float = SMOOTH_CORNER_RAD): VectorStroke {
     val n = s.points.size
     val a = amount.coerceIn(0f, 1f)
     if (a <= 0.001f || n < 3 || s.fill != 0) return s
@@ -1749,7 +1751,7 @@ fun relaxStroke(s: VectorStroke, amount: Float): VectorStroke {
         if (l > 1e-9f) turn[i] = kotlin.math.acos(((v1x * v2x + v1y * v2y) / l).coerceIn(-1f, 1f))
     }
     for (i in 0 until m) {
-        if (turn[i] <= SMOOTH_CORNER_RAD) continue
+        if (turn[i] <= cornerRad) continue
         var top = true
         for (j in 1..k) {
             if (turn[((i - j) % m + m) % m] > turn[i]) top = false // ties: the later sample wins

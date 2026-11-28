@@ -1053,6 +1053,7 @@ class Editor : ViewModel() {
     var vecXf by mutableStateOf<VecXform?>(null)        // Selection tool on a vector layer: the live Transform / Warp / Puppet Warp session (real lines or the interpolation preview)
     var vecPreSel by mutableStateOf<Set<String>>(emptySet()) // the preview lines picked with the Selection tool (ids); empty = the whole preview
     var vecSmoothAll by mutableFloatStateOf(0f)         // interpolation drag "Smooth": smoothness 0..1 of the whole preview (the line is densified, relaxed and fitted back, see relaxStroke); session only
+    var vecSmoothCorner by mutableFloatStateOf(SMOOTH_CORNER_RAD)  // interpolation drag "Sharp turns": turn (radians) above which Smooth keeps a corner; pi = none; whole preview; session only
     var vecSmoothLines by mutableStateOf<Map<String, Float>>(emptyMap()) // smoothness of single preview lines (key = line id), overriding vecSmoothAll
     var vecDragTLines by mutableStateOf<Map<String, Float>>(emptyMap()) // interpolation position of single picked preview lines (key = line id); the others follow vecDragT
     /** The position the drag shows: the first picked line's own, else the whole preview's. */
@@ -1064,9 +1065,9 @@ class Editor : ViewModel() {
     }
     val vecFixedAll = FixedAt()                         // where Fixed pins the preview (see FixedAt): the lines dragged on their own / the rest
     val vecFixedLines = FixedAt()
-    fun resetPlace() { vecFixedAll.clear(); vecFixedLines.clear(); vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
+    fun resetPlace() { vecFixedAll.clear(); vecFixedLines.clear(); vecPlaceAll = Aff.ID; vecPlaceLines = emptyMap(); vecPlaceSteps = emptyList(); vecSmoothAll = 0f; vecSmoothCorner = SMOOTH_CORNER_RAD; vecSmoothLines = emptyMap(); vecDragTLines = emptyMap() }
     fun inbetweenPlace(): InbetweenPlace? = if (vecDragFixed || !vecPlaceAll.isIdentity || vecPlaceLines.isNotEmpty() || vecPlaceSteps.isNotEmpty() || vecSmoothAll > 0.001f || vecSmoothLines.isNotEmpty() || vecDragTLines.isNotEmpty())
-        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps, vecFixedAll, vecFixedLines) else null
+        InbetweenPlace(vecDragFixed, vecPlaceAll, vecPlaceLines, vecLockWeight, vecSmoothAll, vecSmoothLines, vecDragTLines, vecPlaceSteps, vecFixedAll, vecFixedLines, vecSmoothCorner) else null
     var vecGhostPick by mutableStateOf(false)           // "Select ghost line": the next pen tap on a vector layer picks the ghost line nearest to it (it is pinned as the shown one)
     var vecSelCut by mutableStateOf(false)              // selection tool "Cut": a stroke across lines slices them (new end anchors where cut)
     var vecDisplace by mutableStateOf(false)            // selection tool "Displace": joints warp the selection like guide joints warp an in-between

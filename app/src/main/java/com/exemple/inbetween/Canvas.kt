@@ -1381,7 +1381,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
     /** The interpolation as it is before any guide joint moves it (Fixed offset, smoothness and per-line positions applied, no manual transform): what a relative joint is measured from. */
     fun vecJointBaseStrokes(source: Cel, target: Cel, cfg: InterpolationConfig, mode: InterpolationMode, chosen: Set<Int>?): List<VectorStroke> {
         val p = ed.inbetweenPlace()
-        val basePlace = p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines) }
+        val basePlace = p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines, cornerRad = it.cornerRad) }
         return VectorInterpolation.interpolateConfigured(source.vectorStrokes(), target.vectorStrokes(), cfg.copy(mode = mode, guideJoints = emptyList()), ed.vecDragT, chosen, false, basePlace)
     }
 
@@ -2007,7 +2007,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
             }
         }
     }
-    val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecPlaceSteps, vecJointsOn, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
+    val vecPreviewKeys = arrayOf<Any?>(vecPrevLayer, cut.time, ed.vecDragT, ed.vecDragFixed, ed.vecPlaceAll, ed.vecPlaceLines, ed.vecPlaceSteps, vecJointsOn, ed.vecLockWeight, ed.vecSmoothAll, ed.vecSmoothLines, ed.vecSmoothCorner, ed.vecDragTLines, vecPrevLayer?.cels?.size, vecPreviewCfg, tick, ed.vecSel, ed.vecSelCels, ed.selCels.toList())
     val vecPreview = remember(*vecPreviewKeys) {
         val pl = vecPrevLayer
         val fixedCtx = Pair(cut.time, pl)
@@ -2019,7 +2019,7 @@ fun DrawingCanvas(ed: Editor, cut: Cut, modifier: Modifier = Modifier) {
         val pl = vecPrevLayer
         if (pl == null || !vecJointsOn || vecPreviewCfg?.guideJoints?.any { it.rel } != true) emptyList<VectorStroke>() else {
             val p = ed.inbetweenPlace()
-            previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines) })
+            previewStrokes(pl, false, p?.let { InbetweenPlace(it.fixed, Aff.ID, emptyMap(), it.lockWeight, it.smoothAll, it.smoothLines, it.tLines, fixedAt = it.fixedAt, fixedAtLines = it.fixedAtLines, cornerRad = it.cornerRad) })
         }
     }
 
