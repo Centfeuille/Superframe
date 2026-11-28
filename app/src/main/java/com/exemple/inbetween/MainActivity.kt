@@ -729,7 +729,7 @@ private fun BoxScope.FullscreenRadialTools(ed: Editor, setPanel: (Int) -> Unit) 
                     if (ed.tool == item.first) setPanel(1) else { ed.tool = item.first; setPanel(0) }
                 }, contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Text(listOf("✎", "⌫", "▧", "◉", "／", "⌕", "✋")[i], fontSize = 18.sp, color = Color.White)
+                    if (i == 6) androidx.compose.material3.Icon(ReshapeIcon, null, Modifier.size(20.dp), tint = Color.White) else Text(listOf("✎", "⌫", "▧", "◉", "／", "⌕")[i], fontSize = 18.sp, color = Color.White)
                     Text(item.second, fontSize = 8.sp, color = Color.White)
                 }
             }

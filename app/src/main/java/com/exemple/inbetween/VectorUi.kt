@@ -253,7 +253,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
             if (drawBar || lineBar) {
                 VIconBtn(Icons.Filled.MergeType, on = ed.vecMerge, tip = if (ed.vecMerge) "Merge: on. Lines you draw join other lines within the Merge radius (tap to turn off)" else "Merge: off. Tap to join lines you draw to other lines within the Merge radius") { ed.vecMerge = !ed.vecMerge }
                 VIconBtn(Icons.Filled.Anchor, on = ed.vecAutoAnchor, tip = if (ed.vecAutoAnchor) "Auto anchors: on. A new line gets numbered anchors at its ends and curve tips, and keeps them up to date when lines merge (tap to turn off)" else "Auto anchors: off. Tap to give new lines anchors at their ends and curve tips") { ed.vecAutoAnchor = !ed.vecAutoAnchor }
-                VIconBtn(Icons.Filled.AutoAwesome, on = ed.vecGhost, tip = if (ed.vecGhost) "Ghost: on. The next line of the ${if (ed.vecGhostNext) "next" else "previous"} keyframe shimmers; draw over it and your line takes its anchors, so the two match (tap to turn off)" else "Ghost: off. Tap to show the next line to trace from the previous or next keyframe") { ed.vecGhost = !ed.vecGhost; ed.vecGhostPin = null }
+                VIconBtn(GhostFadeIcon, on = ed.vecGhost, tip = if (ed.vecGhost) "Ghost: on. The next line of the ${if (ed.vecGhostNext) "next" else "previous"} keyframe shimmers; draw over it and your line takes its anchors, so the two match (tap to turn off)" else "Ghost: off. Tap to show the next line to trace from the previous or next keyframe") { ed.vecGhost = !ed.vecGhost; ed.vecGhostPin = null }
                 if (ed.vecGhost) {
                     VIconBtn(if (ed.vecGhostNext) Icons.Filled.SkipNext else Icons.Filled.SkipPrevious, tip = if (ed.vecGhostNext) "Ghost from the NEXT keyframe (tap for the previous one)" else "Ghost from the PREVIOUS keyframe (tap for the next one)") { ed.vecGhostNext = !ed.vecGhostNext; ed.vecGhostPin = null }
                     VIconBtn(Icons.Filled.NavigateBefore, tip = "Previous ghost line, traced ones included (they are yellow-orange) so you can go back and extend one (shortcut in Settings > Keyboard shortcuts)") { cut.layer?.let { l -> LineGhost.skip(ed, l, l.indexAt(cut.time), -1) } }
@@ -341,7 +341,7 @@ fun VectorWidgetBar(cut: Cut, ed: Editor, modifier: Modifier = Modifier) {
         }
     }
     }
-    if (prevBar && !sess) BarSwitch(bothBars, !selActive, { ed.vecXfCancel(); ed.tool = 0 }) { // the drag controls stay next to the selection bar; a tap on the dimmed drag bar makes Interpolation drag the active function
+    if (prevBar && !sess) BarSwitch(bothBars, !selActive, { ed.vecXfCancel(); ed.tool = 0; ed.vecMode = 3 }) { // `tool = 0` from another tool ends the vector modes (Editor.tool setter), so Interpolation drag (vecMode 3) is set again afterwards; the drag controls stay next to the selection bar; a tap on the dimmed drag bar makes Interpolation drag the active function
     Column(Modifier.clip(RoundedCornerShape(14.dp)).background(Color(0xEE34343C)).padding(4.dp)) {
         if (smoothBarOpen) InterpSmoothRow(ed)
         Row(verticalAlignment = Alignment.CenterVertically) { InterpDragContent(cut, ed, layer, idx, cel, ctx, smoothBarOpen) { smoothBarOpen = !smoothBarOpen } }

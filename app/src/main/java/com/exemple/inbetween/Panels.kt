@@ -295,7 +295,7 @@ fun ToolPanel(ed: Editor, cut: Cut, panel: Int, setPanel: (Int) -> Unit) {
             ToolBtn(ed.tool == 3, "Fill (tap again for options)", { tap(3) }) { Icon(Icons.Filled.FormatColorFill, null, tint = fg(3)) }
             ToolBtn(ed.tool == 4, "Line / shapes (tap again for options)", { tap(4) }) { Icon(Icons.Filled.HorizontalRule, null, tint = fg(4)) }
             ToolBtn(ed.tool == 5, "Eyedropper / color picker", { tap(5) }) { Text("◉", color = fg(5), fontSize = 22.sp) }
-            ToolBtn(ed.tool == 6, "Reshape: shift, smoothen or distort lines (tap again for the sub-tools, size and strength)", { tap(6) }) { Text("✋", color = fg(6), fontSize = 22.sp) }
+            ToolBtn(ed.tool == 6, "Reshape: shift, smoothen or distort lines (tap again for the sub-tools, size and strength)", { tap(6) }) { Icon(ReshapeIcon, null, tint = fg(6)) }
             Tip("Brush size and stabilization") {
                 Column(Modifier.clip(RoundedCornerShape(10.dp)).clickable { setPanel(if (panel == 2) 0 else 2) }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size((ed.brush.size.coerceIn(4f, 30f)).dp).clip(CircleShape).background(LightGrey))

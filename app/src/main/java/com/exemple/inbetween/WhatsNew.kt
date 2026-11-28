@@ -38,6 +38,15 @@ object WhatsNew {
     /** Newest first. */
     val notes: List<ReleaseNote> = listOf(
         ReleaseNote(
+            104, "2026-11-28", "Bar switch fix, new Reshape and Ghost icons, bigger Settings window",
+            listOf(
+                "Tapping the dimmed Interpolation drag bar next to the Selection bar now makes it the active function again. Before, it dropped back to the Brush tool and its bar.",
+                "The Reshape tool has a new icon in the same flat style as the other tools: a line pulled into a bump by a round handle.",
+                "The Ghost line button is now a ghost that fades out towards the bottom.",
+                "Settings opens as a large window (80% of the screen): the categories are listed on the left and the options of the picked category are on the right."
+            )
+        ),
+        ReleaseNote(
             103, "2026-11-28", "Shape flip bar, switchable selection / drag bars, finer vector eraser",
             listOf(
                 "New bar at the top right of the canvas: select one or more vector lines that have anchors (Selection tool) and flip through the shapes the lines with the same end anchors have in the other keyframes. The group is not moved or scaled as a whole, only the lines' shapes and their positions to each other change. Apply keeps what is shown (one undo step), Reset goes back.",
